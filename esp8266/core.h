@@ -1,66 +1,47 @@
 #include <ESP8266WiFi.h>
-
+#include <ESP8266WebServer.h>
+#include <LittleFS.h>
+#include <ArduinoOTA.h>
 
 #define LOG(...) Core::Log(String("") + __VA_ARGS__)
 
 
 class Core {
 public:
-    /** Simple RAII class to manage scanned networks
-     */
-    class Networks {
-        friend class Core;
-    public:
-        Networks(Networks && from):
-            n_{from.n_} {
-            from.n_ = -1;
-        }
-        
-        ~Networks() {
-            if (n_ >= 0)
-                WiFi.scanDelete();
-        }
-        
-        int size() const {
-            return n_;
-        }
-
-        String const & ssid(int i) const {
-            return WiFi.SSID(i);
-        }
-
-        int rssi(int i) const {
-            return WiFi.RSSI(i);
-        }
-
-    private:
-
-        Networks(int n):
-            n_{n} {
-        }
-        
-        int n_;
-    }; // Core::Networks
 
     /** Initializes the chip. 
      */
-    static void Initialize() {
+    static void Setup(bool disableWiFi = false) {
         Serial.begin(115200);
         delay(50);
         LOG("Initializing ESP8266...");
         // disable caching the SSID and password in memory, which wears it down excessively
         // https://github.com/esp8266/Arduino/issues/1054
         WiFi.persistent(false);
-        
+        if (disableWiFi)
+            DisableWiFi();
+        LOG("mac address: " + WiFi.macAddress());
+        LOG("Initializing LittleFS");
+        LittleFS.begin();
         FSInfo fs_info;
-        SPIFFS.info(fs_info); 
-        LOG("SPIFFS Stats:");
+        LittleFS.info(fs_info); 
+        LOG("LittleFS Stats:");
         LOG("  Total bytes:      " +fs_info.totalBytes);
         LOG("  Used bytes:       " +fs_info.usedBytes);
         LOG("  Block size:       " +fs_info.blockSize);
         LOG("  Page size:        " +fs_info.pageSize);
         LOG("  Max open files:   " +fs_info.maxOpenFiles);
-        LOG("  Max path lenghth: " +fs_info.maxPathLength);        
+        LOG("  Max path lenghth: " +fs_info.maxPathLength);
+        LOG("Initializing OTA");
+        ArduinoOTA.onStart(OTAStart);
+        ArduinoOTA.onEnd(OTAEnd);
+        ArduinoOTA.onProgress(OTAProgress);
+        ArduinoOTA.onError(OTAError);
+        ArduinoOTA.begin();
+        LOG("Setting up web server");
+        Server.onNotFound(http404);
+        Server.serveStatic("/", LittleFS, "/index.html");
+        Server.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
     }
     
     static void Log(String const & str) {
@@ -78,29 +59,83 @@ public:
         LOG("WiFi disabled");
     }
 
-    /** Initiates network scan and returns the number of networks found.  
-     */
-    static Networks ScanNetworks() {
+    
+    static void Connect(std::initializer_list<char const *> networks) {
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
-        Networks result{WiFi.scanNetworks()};
-        for (int i = 0, e = result.size(); i < e; ++i)
-            LOG(result.ssid(i) + ", rssi: " + result.rssi(i));
-        return result;
+        WiFi.scanNetworksAsync([=](int n) {
+            LOG("WiFi scan done." + n + " networks found");
+            for (int i = 0; i < n; ++i) {
+                for (auto ni = networks.begin(), ne = networks.end(); ni < ne; ni += 2) {
+                    if (WiFi.SSID(i) == *ni) {
+                        LOG("Connecting to " + *ni);
+                        WiFi.begin(*ni, *(ni + 1));
+                        WiFi.scanDelete();
+                        return;
+                    }
+                }
+            }
+            LOG("No valid network, available:");
+            for (int i = 0; i < n; ++i)
+                LOG("    " + WiFi.SSID(i) + ", rssi: " + WiFi.RSSI(i));
+            LOG("Known:");
+            for (auto ni = networks.begin(), ne = networks.end(); ni < ne; ni += 2)
+                LOG("    " + *ni);
+            WiFi.scanDelete();
+        });
     }
 
-    /*
-    static void EnableWiFi(char const * ssid, char const * password) {
-        WiFi.begin(ssid, password);
+    static void Loop() {
+        ArduinoOTA.handle();
+        Server.handleClient();
     }
-    */
 
-    
+    static ESP8266WebServer Server;
 
 
-    
+private:
 
+    static void http404() {
+        Server.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + Server.uri() + "\" }");
+    }
+
+    static void OTAStart() {
+        LOG("OTA update of " + (ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "spiffs") + " started.");
+    }
+
+    static void OTAEnd() {
+        LOG("OTA update done");
+    }
+
+    static void OTAProgress(unsigned progress, unsigned total) {
+        LOG("OTA progress " + progress + " of " + total);  
+    }
+
+    static void OTAError(ota_error_t error) {
+        LOG("OTA error: " + error);
+        switch (error) {
+        case OTA_AUTH_ERROR:
+            LOG("Auth failed");
+            break;
+        case OTA_BEGIN_ERROR:
+            LOG("Begin Failed");
+            break;
+        case OTA_CONNECT_ERROR:
+            LOG("Connect Failed");
+            break;
+        case OTA_RECEIVE_ERROR:
+            LOG("Receive Failed");
+            break;
+        case OTA_END_ERROR:
+            LOG("End Failed");
+            break;
+        default:
+            break;
+        }
+    }    
     
 }; // Core
+
+ESP8266WebServer Core::Server{80};
 
 
