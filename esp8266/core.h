@@ -2,8 +2,13 @@
 #include <ESP8266WebServer.h>
 #include <LittleFS.h>
 #include <ArduinoOTA.h>
+#include <SPI.h>
+#include <SD.h>
+
 
 #define LOG(...) Core::Log(String("") + __VA_ARGS__)
+
+
 
 
 class Core {
@@ -137,5 +142,3 @@ private:
 }; // Core
 
 ESP8266WebServer Core::Server{80};
-
-
