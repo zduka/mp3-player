@@ -3,6 +3,11 @@
 #include "AudioOutputI2SNoDAC.h"
 #include <Adafruit_NeoPixel.h>
 
+
+#include <Wire.h>
+#include <radio.h>
+#include <RDA5807M.h>
+
 #include "core.h"
 #include "wifi_setup.h"
 
@@ -67,15 +72,44 @@ void printDirectory(File dir, int numTabs) {
         }
     }
 }
+
+#define FIX_BAND     RADIO_BAND_FM    //Radio Band -FM
+#define FIX_STATION  9370            //Station Tuned = 93.7 MHz.
+#define FIX_VOLUME   5               //Audio Volume Level 5.
+
+RDA5807M radio;    
+
 void setup() {
     Core::Setup();
-    Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
+    //Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
     //Server.on("/authenticate", server::authenticate);
     //Server.on("/command", server::command);
-    Core::Server.begin();
+    //Core::Server.begin();
 
     pinMode(4, OUTPUT);
     LOG("Setup done.");
+
+
+  delay(200);
+  radio.init();
+  radio.debugEnable();
+  radio.setBandFrequency(FIX_BAND, FIX_STATION);
+  radio.setVolume(FIX_VOLUME);
+  radio.setMono(false);
+  radio.setMute(false);
+  delay(500);
+  char s[12];
+  radio.formatFrequency(s, sizeof(s));
+  Serial.print("Station:"); 
+  Serial.println(s);
+  
+  Serial.print("Radio:"); 
+  radio.debugRadioInfo();
+  
+  Serial.print("Audio:"); 
+  radio.debugAudioInfo();
+
+
 
     // test neopixel
     pixels.begin();
