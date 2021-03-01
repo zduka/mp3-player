@@ -24,14 +24,14 @@ AudioOutputI2S *out;
 
 /* ESP8266 PINOUT
 
-         RST        up   1 (TXD0)
-         ADC        up   3 (RXD0) (I2S SD)
-       CH_PC             5
-   (WAKE) 16 up          4
-   (SCLK) 14        up   0
-   (MISO) 12        up   2 (I2S WS)
-   (MOSI) 13      down  15 (I2S SCK)
-         VCC           GND
+         -- RST        up   1 -- TXD0
+         -- ADC        up   3 -- I2S_DATA (RXD0)
+         -- CH_PC           5 -- SDA
+      CS -- 16 up           4 -- SCL
+    SCLK -- 14         up   0 --
+    MISO -- 12         up   2 -- I2S_WS
+    MOSI -- 13       down  15 -- I2S_SCK
+         -- VCC           GND --
  
  */
 
