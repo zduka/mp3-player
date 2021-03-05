@@ -75,7 +75,7 @@ void printDirectory(File dir, int numTabs) {
 
 #define FIX_BAND     RADIO_BAND_FM    //Radio Band -FM
 #define FIX_STATION  9370            //Station Tuned = 93.7 MHz.
-#define FIX_VOLUME   5               //Audio Volume Level 5.
+#define FIX_VOLUME   15               //Audio Volume Level 5.
 
 RDA5807M radio;    
 
@@ -136,21 +136,22 @@ uint8_t i = 0;
 void loop() {
   //Core::Loop();
   // put your main code here, to run repeatedly:
-  digitalWrite(4, HIGH);
+  //digitalWrite(4, HIGH);
   if (mp3->isRunning()) {
     if (!mp3->loop()) {
       mp3->stop(); 
       LOG("MP3 done");
     }
   }
-  digitalWrite(4, LOW);
+  //digitalWrite(4, LOW);
+  /*
   unsigned long t = millis();
   if (t - lastMillis > 1000 / 30) {
     lastMillis = t;
     i += 1;
     pixels.setPixelColor(0, pixels.Color(i,i,i));
     pixels.show();
-  }
+  }*/
   
   //delay(5);
   //printSD();
