@@ -1,5 +1,7 @@
 #pragma once
 
+#define AVR_I2C_ADDRESS 42
+
 /** The first status register
  */
 struct Status {

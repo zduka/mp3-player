@@ -29,21 +29,20 @@ To turn on: press ctrl or volume knob and hold for
 
 ## TODO
 
-- determine how control woudl work
+- the 3v3 rail drops a lot when in boost mode, see why 
 
 On avr:
 
+- add I2C slave
 - make attiny sleep and use RTC one second wakeup
 - integrate power, strip and buttons into the player as well
 - add ADC and start reading voltage
 - add reading the audio out and showing this on the neopixel strip
-- add I2C slave
 
 
 On esp:
 
-- disable wifi by default
-- can esp8266 be i2c slave?
+- read from avr
 
 ## AVR
 

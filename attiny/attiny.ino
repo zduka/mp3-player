@@ -1,6 +1,3 @@
-#include "Wire.h"
-
-
 /** Library for working with neopixels. Comes with the megatinycore and does not require any additional arduino setup. 
  */
 #include <tinyNeoPixel_Static.h>
@@ -65,24 +62,8 @@ private:
 
 NeopixelStrip neopixelStrip;
 
-void vol_changed() {
-    vol.poll();
-}
-
-void vol_btn_changed() {
-    volBtn.poll();
-}
-
-void ctrl_changed() {
-    ctrl.poll();
-}
-
-void ctrl_btn_changed() {
-    ctrlBtn.poll();
-}
-
-
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
+extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 
 
 /** The MP3 Player Device Controller
@@ -101,7 +82,12 @@ public:
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         // enable real-time clock
-        rtcEnable();
+        RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
+        RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
+        RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; // enable PTI and set the tick to 1/32th of second
+        // enable I2C slave
+        TWI0.SADDR = AVR_I2C_ADDRESS; // set address
+        TWI0.SCTRLA = TWI_DIEN_bm + TWI_APIEN_bm + TWI_PIEN_bm + TWI_ENABLE_bm; // enable address, data and stop interrupts and enable the i2c slave
     }
 
     /** Returns true if there was an RTC tick since the last call to the function. 
@@ -144,9 +130,14 @@ public:
     }
 
     void setVolume(uint8_t value) {
-        audio_.volume = value;
-        setIrq();
+        if (value != audio_.volume) {
+            audio_.volume = value;
+            setIrq();
+        }
     }
+
+    
+private:
 
     /** Sets the IRQ to ping the esp8266. 
      */
@@ -170,14 +161,7 @@ public:
             return false;
         }
     }
-    
-private:
 
-    void rtcEnable() {
-        RTC.CLKSEL = RTC_CLKSEL_INT32K_gc;
-        RTC.PITINTCTRL |= RTC_PI_bm;
-        RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
-    }
 
     void rtcDisable() {
         RTC.PITCTRLA &= ~ RTC_PITEN_bm;
@@ -283,14 +267,80 @@ private:
     volatile uint8_t powerRequests_ = 0;
 
     friend void ::RTC_PIT_vect();
+    friend void ::TWI0_TWIS_vect();
 
 }; // Player
 
 Player player; // the player singleton
 
+/** Real-time clock tick interrupt. 
+    
+    When running, happens every 1/32th of a second. When sleeping, should happen every second only. 
+ */
 ISR(RTC_PIT_vect) {
    RTC.PITINTFLAGS = RTC_PI_bm;
    player.doRtcTick();
+}
+
+/** I2C slave interrupt vector. 
+    
+ */
+ISR(TWI0_TWIS_vect) {
+    switch (TWI0.SSTATUS & 0b11000011) {
+        /* Master read start. 
+         */
+        case 0b01000011: {
+            player.clearIrq();
+
+            break;
+        }
+        /* Master write start.
+         */
+        case 0b01000001: {
+            player.clearIrq();
+
+            break;
+        }
+        /* Stop condition has been received. 
+         */
+        case 0b01000010:
+        case 0b01000000: {
+            break;
+        }
+        /* Byte was read by master. 
+         */
+        case 0b10000010: {
+            break;
+        }
+        /* Byte was written by master. 
+         */
+        case 0b10000000: {
+            break;
+        }
+        /* We really don't care about the restof the states in this simple implementation.
+         */
+        default:
+            break;
+    }
+}
+
+
+
+void vol_changed() {
+    vol.poll();
+    player.setVolume(vol.value());
+}
+
+void vol_btn_changed() {
+    volBtn.poll();
+}
+
+void ctrl_changed() {
+    ctrl.poll();
+}
+
+void ctrl_btn_changed() {
+    ctrlBtn.poll();
 }
 
 
@@ -334,14 +384,10 @@ void setup() {
  */
 void loop() {
     static bool x = false;
-    if (volBtn.changed() && volBtn.pressed()) {
+    if (volBtn.changed() && volBtn.pressed()) 
         vol.setValue(0);
-        player.clearIrq();
-    }
-    if (ctrlBtn.changed() && ctrlBtn.pressed()) {
+    if (ctrlBtn.changed() && ctrlBtn.pressed()) 
         ctrl.setValue(0);
-        player.setIrq();
-    }
     if (vol.changed() || ctrl.changed()) 
         neopixelStrip.setAll(vol.value() * 16, ctrl.value(), 0);
     if (player.rtcTickSecond()) {
