@@ -1,13 +1,17 @@
+#include "Wire.h"
+
+
 /** Library for working with neopixels. Comes with the megatinycore and does not require any additional arduino setup. 
  */
 #include <tinyNeoPixel_Static.h>
 
+#include "state.h"
 #include "inputs.h"
 
 /** Chip Pinout
 
                -- VDD   GND --
-     VCC_SENSE -- (00) PA4   PA3 (16) --
+     VCC_SENSE -- (00) PA4   PA3 (16) -- AVR_IRQ
     HEADPHONES -- (01) PA5   PA2 (15) -- MIC
       DCDC_PWR -- (02) PA6   PA1 (14) -- 
      AUDIO_SRC -- (03) PA7   PA0 (17) -- UPDI
@@ -29,50 +33,14 @@
 #define VOL_A 6
 #define VOL_B 5
 #define VOL_BTN 7
+#define AVR_IRQ 16
+
 /** The control (top) and volume (down) knobs (rotary encoders and buttons). 
  */
 RotaryEncoder ctrl{CTRL_A, CTRL_B, 255};
 Button        ctrlBtn{CTRL_BTN};
 RotaryEncoder vol{VOL_A, VOL_B, 15};
 Button        volBtn{VOL_BTN};
-
-/** Manages the 3v3 and 5v rails and DCDC converters. 
- */
-class DCDCPower {
-public:
-    /** Starts the manager and makes sure to turn the dc rails. 
-     */
-    DCDCPower() {
-        pinMode(DCDC_PWR, OUTPUT);
-        digitalWrite(DCDC_PWR, LOW);
-    }
-
-    /** Requests the power to be enabled. 
-     */
-    void request() {
-        if (++clients_ == 1) {
-            digitalWrite(DCDC_PWR, HIGH);
-            delay(50);            
-        }
-    }
-
-    void release() {
-        if (clients_ > 0) {
-            if (--clients_ == 0)
-                digitalWrite(DCDC_PWR, LOW);
-        }
-    }
-
-    bool state() const {
-        return  clients_ > 0;
-    }
-
-private:
-    volatile uint8_t clients_;
-};
-
-DCDCPower power;
-
 
 /** The neopixel strip and its features. 
  */
@@ -83,16 +51,6 @@ public:
         pinMode(NEOPIXEL,OUTPUT);
     }
 
-    void enable() {
-        power.request();
-        setAll(0,0,0);
-    }
-
-    void disable() {
-        power.release();
-    }
-
-    
     void setAll(uint8_t r, uint8_t g, uint8_t b) {
         for (int i = 0; i < 8; ++i) {
             leds_.setPixelColor(i, r, g, b);
@@ -137,7 +95,13 @@ class Player {
 public:
 
     Player() {
-      rtcEnable();
+        // enable the AVR_IRQ as input
+        pinMode(AVR_IRQ, INPUT);
+        // disable 3v and 5v rails
+        pinMode(DCDC_PWR, OUTPUT);
+        digitalWrite(DCDC_PWR, LOW);
+        // enable real-time clock
+        rtcEnable();
     }
 
     /** Returns true if there was an RTC tick since the last call to the function. 
@@ -145,24 +109,68 @@ public:
         An RTC tick occurs every 1/32th of a second. 
      */
     bool rtcTick() const {
-      if (status_.rtcTick) {
-        status_.rtcTick = 0;
-        return true;
-      } else {
-        return false;
-      }
+        if (rtcTick_.tick) {
+            rtcTick_.tick = 0;
+            return true;
+        } else {
+            return false;
+        }
     }
 
     /** Returns true if there was a second tick since the last call to the function. 
      */
     bool rtcTickSecond() const {
-      if (status_.rtcTickSecond) {
-        status_.rtcTickSecond = 0;
-        return true;
-      } else {
-        return false;
-      }
+        if (rtcTick_.tickSecond) {
+            rtcTick_.tickSecond = 0;
+            return true;
+        } else {
+            return false;
+        }
     }
+
+    void requestPowerOn() {
+        if (++powerRequests_ == 1) {
+            digitalWrite(DCDC_PWR, HIGH);
+            delay(50);
+        }
+    }
+
+    void releasePowerOn() {
+        if (powerRequests_ > 0) {
+            if (--powerRequests_ == 0) {
+                digitalWrite(DCDC_PWR, LOW);
+            }
+        }
+    }
+
+    void setVolume(uint8_t value) {
+        audio_.volume = value;
+        setIrq();
+    }
+
+    /** Sets the IRQ to ping the esp8266. 
+     */
+    bool setIrq() {
+        if (status_.irq == 0) {
+            status_.irq = 1;
+            pinMode(AVR_IRQ,OUTPUT);
+            digitalWrite(AVR_IRQ, LOW);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    bool clearIrq() {
+        if (status_.irq == 1) {
+            status_.irq = 0;
+            pinMode(AVR_IRQ, INPUT);
+            return true;
+        } else {
+            return false;
+        }
+    }
+    
 private:
 
     void rtcEnable() {
@@ -176,35 +184,33 @@ private:
     }
 
     void doRtcTick() {
-      status_.rtcTick = 1;
-      if (++rtcTick_ == 32) {
-          rtcTick_ = 0;
-          doRtcTickSecond();
-      }
+        rtcTick_.tick = 1;
+        if (++rtcTick_.counter == 0)
+            doRtcTickSecond();
     }
 
     void doRtcTickSecond() {
-      status_.rtcTickSecond = 1;
-      if (++s_ < 60)
-          return;
-      s_ = 0;
-      if (++m_ < 60)
-          return;
-      m_ = 0;
-      if (++h_ < 24) 
-          return;
-      h_ = 0;
-      if (++day_ <= daysInMonth())
-          return;
-      day_ = 1;
-      if (++month_ <= 12)
-          return;
-      month_ = 1;
-      ++year_;
+        rtcTick_.tickSecond = 1;
+        if (++clock_.s < 60)
+            return;
+        clock_.s = 0;
+        if (++clock_.m < 60)
+            return;
+        clock_.m = 0;
+        if (++clock_.h < 24) 
+            return;
+        clock_.h = 0;
+        if (++clock_.day <= daysInMonth())
+            return;
+        clock_.day = 1;
+        if (++clock_.month <= 12)
+            return;
+        clock_.month = 1;
+        ++clock_.year;
     }
 
     uint8_t daysInMonth() {
-      switch (month_) {
+      switch (clock_.month) {
         case 1: // Jan
         case 3: // Mar
         case 5: // May
@@ -215,7 +221,7 @@ private:
             return 31;
         case 2 : // Feb
             // I'm ignoring the every 100 years leap year skip as the code will hopefully not be around for that long:)
-            return (year_ % 4 == 0) ? 29 : 28;
+            return (clock_.year % 4 == 0) ? 29 : 28;
         case 4:
         case 6:
         case 9:
@@ -225,60 +231,28 @@ private:
       }
     }
 
+    /** The device control registers:
+
+        size kind
+        1    power
+        1    audio
+        1    year
+        1    month
+        1    day
+
+   
+
+     */
+    
     /** \name Device status. 
 
         Contains the device status information, such as power levels, etc. Readonly from the I2C.
      
      */
-    /** Power information. 
-     */
-    struct {
-        unsigned charging : 1;
-        /** Shows the current input voltage. 
-
-            Is constructed by reading the input voltage in scale 0..255 corresponding to 0..5v and then discarding the most signifficant byte as under normal conditions, this will always be 1. 
-
-            127 == 5v from external source (and likely charging)
-            86  == 4.2v, a fully charged li-ion battery
-            60  == 3.7v, nominal value for 
-            40  == 3.3v, value at which the low battery warning is given
-            25  == 3v, value at which attiny goes immediately to deepsleep again
-         */
-        unsigned voltage : 7;
-    } power_;
-    /** \name Audo Settings
-     */
-    struct {
-        /** Current volume setting. 
-         */
-        unsigned volume : 4;
-        /** Determines the audio source. 
-
-            0 = esp8266 mp3 player
-            1 = RDA5807 FM radio
-         */
-        unsigned source : 1;
-        /** If 1, headphones are inserted, if 0, speaker will be used instead. Can only be read, and writes will be masked.
-         */
-        unsigned headphones : 1;
-        
-        
-       
-    } audio_;
-    /** \name Real time clock and alarms. 
-
-        Can be set via I2C. Contains the current clock maintained by the chip as well as the alarm settings. The alarm day can be number from 1 to 7 for days of the week, starting from Sunday. If the alarmDay is set to 0, the alarm is not active. 
-     */
-    //@{
-    volatile uint8_t year_ = 0;
-    volatile uint8_t month_ = 0;
-    volatile uint8_t day_ = 0;
-    volatile uint8_t h_ = 0;
-    volatile uint8_t m_ = 0;
-    volatile uint8_t s_ = 0;
-    volatile uint8_t alarmDay_ = 0; 
-    volatile uint8_t alarmH_ = 0;
-    volatile uint8_t alarmM_ = 0;
+    Status status_;
+    Power power_;
+    Audio audio_;
+    Clock clock_;
     //@}
     /** \name Accent Color
 
@@ -299,14 +273,14 @@ private:
 
     /** RTC ticks counter, there are 32 ticks in one second. 
      */
-    volatile uint8_t rtcTick_ = 0;
-
     mutable volatile struct {
-        unsigned irq : 1;
-        unsigned dcdcPower : 1;
-        unsigned rtcTick : 1;
-        unsigned rtcTickSecond : 1;
-    } status_;
+        unsigned tick : 1;
+        unsigned tickSecond : 1;
+        unsigned counter : 5; // 0..31
+    } rtcTick_;
+    
+
+    volatile uint8_t powerRequests_ = 0;
 
     friend void ::RTC_PIT_vect();
 
@@ -325,18 +299,22 @@ ISR(RTC_PIT_vect) {
 
 
 void setup() {
+    /*
     Serial.swap();
     Serial.begin(9600);
     Serial.println("Hello world");
+    */
 
     
     vol.setInterrupt(vol_changed);
     ctrl.setInterrupt(ctrl_changed);
     volBtn.setInterrupt(vol_btn_changed);
     ctrlBtn.setInterrupt(ctrl_btn_changed);
+
+    player.requestPowerOn();
     
     // quick blink of the strip
-    neopixelStrip.enable();
+    //    neopixelStrip.enable();
     neopixelStrip.setAll(0, 128, 0);
     delay(100);
     neopixelStrip.setAll(0, 0, 0);
@@ -356,17 +334,21 @@ void setup() {
  */
 void loop() {
     static bool x = false;
-    if (volBtn.changed() && volBtn.pressed())
-      vol.setValue(0);
-    if (ctrlBtn.changed() && ctrlBtn.pressed()) 
-      ctrl.setValue(0);
+    if (volBtn.changed() && volBtn.pressed()) {
+        vol.setValue(0);
+        player.clearIrq();
+    }
+    if (ctrlBtn.changed() && ctrlBtn.pressed()) {
+        ctrl.setValue(0);
+        player.setIrq();
+    }
     if (vol.changed() || ctrl.changed()) 
-      neopixelStrip.setAll(vol.value() * 16, ctrl.value(), 0);
+        neopixelStrip.setAll(vol.value() * 16, ctrl.value(), 0);
     if (player.rtcTickSecond()) {
-      if (x)
-          neopixelStrip.setAll(64,0,0);
-      else
-          neopixelStrip.setAll(0,0,64);
-      x = !x;  
+        if (x)
+            neopixelStrip.setAll(16,0,0);
+        else
+            neopixelStrip.setAll(0,0,16);
+        x = !x;  
     }
 }

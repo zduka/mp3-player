@@ -64,6 +64,14 @@ public:
         LOG("WiFi disabled");
     }
 
+    /** Enters deep sleep mode. 
+
+        During the deep sleep cpu is off and can only wake up by applying a pulse to the RST pin. 
+     */
+    static void DeepSleep() {
+        LOG("Entering deep sleep");
+        ESP.deepSleep(0);
+    }
     
     static void Connect(std::initializer_list<char const *> networks) {
         WiFi.mode(WIFI_STA);
