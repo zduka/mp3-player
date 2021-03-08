@@ -8,9 +8,6 @@
 
 #define LOG(...) Core::Log(String("") + __VA_ARGS__)
 
-
-
-
 class Core {
 public:
 

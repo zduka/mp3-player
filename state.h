@@ -2,12 +2,34 @@
 
 #define AVR_I2C_ADDRESS 42
 
+/** \name Pointer-to-pointer cast
+ 
+    Since any pointer to pointer cast can be done by two static_casts to and from `void *`, this simple template provides a shorthand for that functionality.
+ */
+//@{
+template<typename T, typename W>
+inline T pointer_cast(W const * from) {
+    return static_cast<T>(static_cast<void const *>(from));
+}
+
+template<typename T, typename W>
+inline T pointer_cast(W * from) {
+    return static_cast<T>(static_cast<void *>(from));
+}
+//@}
+
+
 /** The first status register
  */
 struct Status {
     unsigned irq : 1;
     unsigned dcdcPower : 1;
-};
+
+    Status():
+        irq{0},
+        dcdcPower{0} {
+    }
+} __attribute__((packed));
 
 struct Power {
     unsigned charging : 1;
@@ -22,7 +44,12 @@ struct Power {
         25  == 3v, value at which attiny goes immediately to deepsleep again
     */
     unsigned voltage : 7;
-};
+
+    Power():
+        charging{0},
+        voltage{0} {
+    }
+} __attribute__((packed));
 
 struct Audio {
     /** Current volume setting. 
@@ -44,7 +71,7 @@ struct Audio {
         source(0),
         headphones(0) {
     }
-};
+} __attribute__((packed));
 
 /** Real-time clock and alarms. 
  */
@@ -58,5 +85,4 @@ struct Clock {
     unsigned alarmDay : 3; // 0..7
     unsigned alarmH : 6; // 0..59
     unsigned alarmM : 6; // 0..59
-};
-
+} __attribute__((packed));

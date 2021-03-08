@@ -34,25 +34,49 @@ struct RadioStation {
 class Player {
 public:
     void initialize() {
+        Wire.begin();
         delay(200);
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
     }
     
     void enterRadioMode() {
-        Serial.println("-- entering radio mode");
+        LOG("-- entering radio mode");
         radio_.init();
         radio_.setVolume(15);
-        Serial.println("RADIO MODE ENABLED");
+        LOG("RADIO MODE ENABLED");
     }
 
     void setRadioFrequency(uint16_t frequency) {
         radio_.setBandFrequency(RADIO_BAND_FM, frequency);
     }
 
+    void tick() {
+        if (status_.irq)
+            getStatus();
+    }
+
     
 private:
 
+    void getStatus() {
+        uint8_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(Status) + sizeof(Power) + sizeof(Audio));
+        if (n == sizeof(Status) + sizeof(Power) + sizeof(Audio)) {
+            uint8_t * x = pointer_cast<uint8_t*>(& status_);
+            while (Wire.available()) {
+                *x = Wire.read();
+                LOG(*x);
+                ++x;
+            }
+            LOG("Volume:" + audio_.volume);
+            radio_.setVolume(audio_.volume);
+        } else {
+            LOG("I2C status corruption: " + n);
+        }
+    }
+
+    
+    Status status_;
     Power power_;
     Audio audio_;
     Clock clock_;
@@ -85,7 +109,8 @@ Player player;
 /** Handler for the avr irq. 
  */
 ICACHE_RAM_ATTR void Player::AvrIRQ() {
-    Serial.println("IRQ"); 
+    // Serial.println("IRQ");
+    player.status_.irq = 1;
 }
 
 
@@ -172,6 +197,7 @@ void setup() {
 }
 
 void loop() {
+    player.tick();
   //Core::Loop();
   // put your main code here, to run repeatedly:
   //digitalWrite(4, HIGH);

@@ -1,3 +1,5 @@
+#include "Wire.h"
+
 /** Library for working with neopixels. Comes with the megatinycore and does not require any additional arduino setup. 
  */
 #include <tinyNeoPixel_Static.h>
@@ -21,6 +23,9 @@
     - monitor input voltage
     
  */
+
+volatile uint8_t g = 5;
+
 
 #define DCDC_PWR 2
 #define NEOPIXEL 11
@@ -63,8 +68,6 @@ private:
 NeopixelStrip neopixelStrip;
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
-extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
-
 
 /** The MP3 Player Device Controller
 
@@ -86,8 +89,9 @@ public:
         RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
         RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; // enable PTI and set the tick to 1/32th of second
         // enable I2C slave
-        TWI0.SADDR = AVR_I2C_ADDRESS; // set address
-        TWI0.SCTRLA = TWI_DIEN_bm + TWI_APIEN_bm + TWI_PIEN_bm + TWI_ENABLE_bm; // enable address, data and stop interrupts and enable the i2c slave
+        Wire.begin(AVR_I2C_ADDRESS);
+        Wire.onRequest(I2CSendEvent);
+        Wire.onReceive(I2CReceiveEvent);
     }
 
     /** Returns true if there was an RTC tick since the last call to the function. 
@@ -265,11 +269,15 @@ private:
     
 
     volatile uint8_t powerRequests_ = 0;
+    volatile uint8_t * i2cPtr_ = nullptr;
 
     friend void ::RTC_PIT_vect();
-    friend void ::TWI0_TWIS_vect();
+
+    static void I2CSendEvent();
+    static void I2CReceiveEvent(int numBytes);
 
 }; // Player
+
 
 Player player; // the player singleton
 
@@ -282,49 +290,15 @@ ISR(RTC_PIT_vect) {
    player.doRtcTick();
 }
 
-/** I2C slave interrupt vector. 
-    
- */
-ISR(TWI0_TWIS_vect) {
-    switch (TWI0.SSTATUS & 0b11000011) {
-        /* Master read start. 
-         */
-        case 0b01000011: {
-            player.clearIrq();
 
-            break;
-        }
-        /* Master write start.
-         */
-        case 0b01000001: {
-            player.clearIrq();
-
-            break;
-        }
-        /* Stop condition has been received. 
-         */
-        case 0b01000010:
-        case 0b01000000: {
-            break;
-        }
-        /* Byte was read by master. 
-         */
-        case 0b10000010: {
-            break;
-        }
-        /* Byte was written by master. 
-         */
-        case 0b10000000: {
-            break;
-        }
-        /* We really don't care about the restof the states in this simple implementation.
-         */
-        default:
-            break;
-    }
+void Player::I2CSendEvent() {
+    player.clearIrq();
+    Wire.write(pointer_cast<uint8_t*>(& player.status_), sizeof (Status) + sizeof (Power) + sizeof (Audio));
 }
-
-
+void Player::I2CReceiveEvent(int numBytes) {
+    player.clearIrq();
+    
+}
 
 void vol_changed() {
     vol.poll();
@@ -342,11 +316,6 @@ void ctrl_changed() {
 void ctrl_btn_changed() {
     ctrlBtn.poll();
 }
-
-
-
-
-
 
 void setup() {
     /*
@@ -392,9 +361,9 @@ void loop() {
         neopixelStrip.setAll(vol.value() * 16, ctrl.value(), 0);
     if (player.rtcTickSecond()) {
         if (x)
-            neopixelStrip.setAll(16,0,0);
+            neopixelStrip.setAll(vol.value() * 16,g,0);
         else
-            neopixelStrip.setAll(0,0,16);
+            neopixelStrip.setAll(0,g,vol.value()*16);
         x = !x;  
     }
 }
