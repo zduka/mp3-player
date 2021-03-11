@@ -36,6 +36,7 @@ volatile uint8_t g = 5;
 #define VOL_B 5
 #define VOL_BTN 7
 #define AVR_IRQ 16
+#define AUDIO_SRC 3
 
 /** The control (top) and volume (down) knobs (rotary encoders and buttons). 
  */
@@ -75,10 +76,10 @@ extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 
     The internal RTC in the attiny is used to keep a semi-precise track of time. When the chip is on, a tick is generated every 1/32th of second so that it can be used to drive neopixels, etc. When the device sleeps, a one second tick is used to save battery and only the time is updated and alarm checked. 
  */
-class Player {
+class AVRPlayer {
 public:
 
-    Player() {
+    AVRPlayer() {
         // enable the AVR_IRQ as input
         pinMode(AVR_IRQ, INPUT);
         // disable 3v and 5v rails
@@ -92,6 +93,9 @@ public:
         Wire.begin(AVR_I2C_ADDRESS);
         Wire.onRequest(I2CSendEvent);
         Wire.onReceive(I2CReceiveEvent);
+        // set audio source to esp8266
+        pinMode(AUDIO_SRC, OUTPUT);
+        digitalWrite(AUDIO_SRC, LOW);
     }
 
     /** Returns true if there was an RTC tick since the last call to the function. 
@@ -121,6 +125,7 @@ public:
     void requestPowerOn() {
         if (++powerRequests_ == 1) {
             digitalWrite(DCDC_PWR, HIGH);
+            state_.state_ |= State::STATE_DCDC_POWER; 
             delay(50);
         }
     }
@@ -129,25 +134,46 @@ public:
         if (powerRequests_ > 0) {
             if (--powerRequests_ == 0) {
                 digitalWrite(DCDC_PWR, LOW);
+                state_.state_ &= ~State::STATE_DCDC_POWER;
             }
         }
     }
 
     void setVolume(uint8_t value) {
-        if (value != audio_.volume) {
-            audio_.volume = value;
+        if (value != state_.volume()) {
+            state_.setVolume(value);
             setIrq();
         }
     }
 
-    
+    void setControl(uint16_t value) {
+        if (value != state_.control()) {
+            state_.setControl(value);
+            setIrq();
+        }
+    }
+
+    void enterMP3Mode() {
+        
+    }
+
+    /** Enters the radio mode. 
+     */
+    void enterRadioMode(uint16_t controlValue, uint16_t controlMax) {
+        ctrl.setMaxValue(controlMax);
+        ctrl.setValue(controlValue);
+        digitalWrite(AUDIO_SRC, HIGH);
+        state_.setAudioSrc(State::AudioSrc::Radio);
+        state_.setMode(State::Mode::Radio);
+    }
+
 private:
 
     /** Sets the IRQ to ping the esp8266. 
      */
     bool setIrq() {
-        if (status_.irq == 0) {
-            status_.irq = 1;
+        if (!state_.irq()) {
+            state_.events_ |= State::EVENT_IRQ;
             pinMode(AVR_IRQ,OUTPUT);
             digitalWrite(AVR_IRQ, LOW);
             return true;
@@ -156,16 +182,12 @@ private:
         }
     }
 
-    bool clearIrq() {
-        if (status_.irq == 1) {
-            status_.irq = 0;
+    void clearIrq() {
+        if (state_.events_ & State::EVENT_IRQ) {
+            state_.events_ = 0;
             pinMode(AVR_IRQ, INPUT);
-            return true;
-        } else {
-            return false;
         }
     }
-
 
     void rtcDisable() {
         RTC.PITCTRLA &= ~ RTC_PITEN_bm;
@@ -173,74 +195,18 @@ private:
 
     void doRtcTick() {
         rtcTick_.tick = 1;
-        if (++rtcTick_.counter == 0)
-            doRtcTickSecond();
+        if (++rtcTick_.counter == 0) {
+            rtcTick_.tickSecond = 1;
+            clock_.secondTick();
+        }
     }
 
-    void doRtcTickSecond() {
-        rtcTick_.tickSecond = 1;
-        if (++clock_.s < 60)
-            return;
-        clock_.s = 0;
-        if (++clock_.m < 60)
-            return;
-        clock_.m = 0;
-        if (++clock_.h < 24) 
-            return;
-        clock_.h = 0;
-        if (++clock_.day <= daysInMonth())
-            return;
-        clock_.day = 1;
-        if (++clock_.month <= 12)
-            return;
-        clock_.month = 1;
-        ++clock_.year;
-    }
-
-    uint8_t daysInMonth() {
-      switch (clock_.month) {
-        case 1: // Jan
-        case 3: // Mar
-        case 5: // May
-        case 7: // Jul
-        case 8: // Aug
-        case 10: // Oct
-        case 12: // Dec
-            return 31;
-        case 2 : // Feb
-            // I'm ignoring the every 100 years leap year skip as the code will hopefully not be around for that long:)
-            return (clock_.year % 4 == 0) ? 29 : 28;
-        case 4:
-        case 6:
-        case 9:
-        case 11:
-        default: // whatever
-            return 30;
-      }
-    }
-
-    /** The device control registers:
-
-        size kind
-        1    power
-        1    audio
-        1    year
-        1    month
-        1    day
-
-   
-
+    /** Device state. 
      */
+    volatile State state_;
+    volatile Clock clock_;
     
-    /** \name Device status. 
-
-        Contains the device status information, such as power levels, etc. Readonly from the I2C.
-     
-     */
-    Status status_;
-    Power power_;
-    Audio audio_;
-    Clock clock_;
+    
     //@}
     /** \name Accent Color
 
@@ -276,10 +242,12 @@ private:
     static void I2CSendEvent();
     static void I2CReceiveEvent(int numBytes);
 
+    uint8_t cmdBuffer_[32];
+
 }; // Player
 
 
-Player player; // the player singleton
+AVRPlayer player; // the player singleton
 
 /** Real-time clock tick interrupt. 
     
@@ -291,13 +259,39 @@ ISR(RTC_PIT_vect) {
 }
 
 
-void Player::I2CSendEvent() {
+void AVRPlayer::I2CSendEvent() {
+    // casting away the volatile-ness is ok here 
+    Wire.write(pointer_cast<uint8_t*>(const_cast<State*>(& player.state_)), sizeof (State));
+    // clear the irq and events once we have given them to master
     player.clearIrq();
-    Wire.write(pointer_cast<uint8_t*>(& player.status_), sizeof (Status) + sizeof (Power) + sizeof (Audio));
+    player.state_.events_ = 0;
 }
-void Player::I2CReceiveEvent(int numBytes) {
-    player.clearIrq();
-    
+
+void AVRPlayer::I2CReceiveEvent(int numBytes) {
+    Wire.readBytes(player.cmdBuffer_, numBytes);
+    switch (player.cmdBuffer_[0]) {
+    case Command::EnterMP3Mode::Id: {
+        player.enterMP3Mode();
+        break;
+    }
+    case Command::EnterRadioMode::Id: {
+        Command::EnterRadioMode * cmd = pointer_cast<Command::EnterRadioMode*>(& player.cmdBuffer_ + 1);
+        player.enterRadioMode(cmd->controlValue, cmd->controlMaxValue);
+        break;
+    }
+    case Command::SetVolume::Id: {
+        Command::SetVolume * cmd = pointer_cast<Command::SetVolume*>(& player.cmdBuffer_ + 1);
+        player.state_.setVolume(cmd->value, /* recordChange */ false);
+        vol.setValue(cmd->value);
+        break;
+    }
+    case Command::SetControl::Id: {
+        Command::SetControl * cmd = pointer_cast<Command::SetControl*>(& player.cmdBuffer_ + 1);
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 void vol_changed() {
@@ -311,6 +305,7 @@ void vol_btn_changed() {
 
 void ctrl_changed() {
     ctrl.poll();
+    player.setControl(ctrl.value());
 }
 
 void ctrl_btn_changed() {

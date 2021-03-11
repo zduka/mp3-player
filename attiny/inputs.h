@@ -99,22 +99,28 @@ public:
         return state_.changed;
     }
 
-    uint8_t value() const {
+    uint16_t value() const {
         state_.changed = 0;
         return value_;
     }
 
-    void setValue(uint8_t value) {
+    void setValue(uint16_t value) {
         value_ = value;
         state_.changed = 1;
+    }
+
+    void setMaxValue(uint16_t value) {
+        maxValue_ = value;
+        if (value_ != 0 && value_ >= maxValue_)
+            value_ = maxValue_ - 1;
     }
 
 private:
 
     uint8_t a_;
     uint8_t b_;
-    uint8_t maxValue_;
-    volatile uint8_t value_ = 0;
+    uint16_t maxValue_;
+    volatile uint16_t value_ = 0;
 
     mutable volatile struct {
         uint8_t changed : 1;

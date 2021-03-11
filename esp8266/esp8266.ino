@@ -26,6 +26,9 @@
 #define CS 16
 #define AVR_IRQ 0
 
+/** Radio station. 
+
+ */
 struct RadioStation {
     uint16_t frequency;
     String name;
@@ -38,57 +41,129 @@ public:
         delay(200);
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
+        // TODO replace this with actual stations
+        radioStations_[0].frequency = 937; // city
+        radioStations_[1].frequency = 1050; // vltava
+        radioStations_[2].frequency = 1025; // frekvence 1
+        radioStations_[3].frequency = 1007; // CRO
+        radioStations_[4].frequency = 997; // Bonton 
+        radioStations_[5].frequency = 987; // Classic
+        radioStations_[6].frequency = 972; // Fajn 
+        radioStations_[7].frequency = 966; // Impuls
+        radioFrequency_ = radioStations_[0].frequency;
     }
-    
+
+    /** Sets the volume. 
+     */
+    void updateVolume() {
+        LOG("volume: " + state_.volume()); 
+        switch (state_.mode()) {
+            case State::Mode::Radio:
+                radio_.setVolume(state_.volume());
+                break;
+            case State::Mode::MP3:
+                break;
+        }
+    }
+
+    void updateControl() {
+        
+    }
+
+    /** Enters the radio mode. 
+     */
     void enterRadioMode() {
-        LOG("-- entering radio mode");
+        LOG("entering radio mode");
         radio_.init();
-        radio_.setVolume(15);
-        LOG("RADIO MODE ENABLED");
+        radio_.setVolume(state_.volume());
+        setRadioFrequency(radioFrequency_);
+        // TODO tell the avr to switch to radio mode
     }
 
     void setRadioFrequency(uint16_t frequency) {
-        radio_.setBandFrequency(RADIO_BAND_FM, frequency);
+        LOG("frequency: " + frequency);
+        radio_.setBandFrequency(RADIO_BAND_FM, frequency * 10);
+    }
+
+    void enableManualTuning(bool value) {
+        manualTuning_ = true;
+        // tell AVR to update control dial value
     }
 
     void tick() {
-        if (status_.irq)
+        if (state_.irq())
             getStatus();
     }
 
     
 private:
 
-    void getStatus() {
-        uint8_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(Status) + sizeof(Power) + sizeof(Audio));
-        if (n == sizeof(Status) + sizeof(Power) + sizeof(Audio)) {
-            uint8_t * x = pointer_cast<uint8_t*>(& status_);
-            while (Wire.available()) {
-                *x = Wire.read();
-                LOG(*x);
-                ++x;
-            }
-            LOG("Volume:" + audio_.volume);
-            radio_.setVolume(audio_.volume);
-        } else {
-            LOG("I2C status corruption: " + n);
-        }
+    void getStatus();
+
+    void updateStatus() {
+        if (state_.volumeChange())
+            updateVolume();
+            
+        if (state_.controlChange())
+            updateControl();
+
+        state_.clearEvents();
     }
 
+    State state_;
     
-    Status status_;
-    Power power_;
-    Audio audio_;
-    Clock clock_;
-
+    /** \name Radio & settings. 
+     */
+    //@{
     RDA5807M radio_;
-    uint16_t radioFrequency_ = 9370;
+    uint16_t radioFrequency_ = 0;
     RadioStation radioStations_[8];
+    uint8_t currentStation_ = 0;
+    bool manualTuning_ = false;
+    //@}
 
     static ICACHE_RAM_ATTR void AvrIRQ();
 
     
 }; // Player
+
+
+
+Player player;
+
+void Player::getStatus() {
+    size_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(State));
+    if (n == sizeof(State)) {
+        LOG("state received");
+        Wire.readBytes(pointer_cast<uint8_t*>(& player.state_), n);
+        updateStatus();
+    } else {
+        /*            
+                      player.state_.clearIrq();
+                      irq_ = false;
+                      uint8_t * x = pointer_cast<uint8_t*>(& player.state_);
+                      while (Wire.available()) {
+                      *x = Wire.read();
+                      ++x;
+                      }
+                      if (state.volumeChange())
+                      setVolume(state.volume());
+                      } else { */
+        LOG("I2C status corruption: " + n);
+    }
+}
+
+/** Handler for the avr irq. 
+ */
+ICACHE_RAM_ATTR void Player::AvrIRQ() {
+    // Serial.println("IRQ");
+    player.state_.setIrq();
+}
+
+
+
+
+
 
 void printSD() {
     if (!SD.begin(CS, SPI_HALF_SPEED)) {
@@ -102,17 +177,6 @@ void printSD() {
     root.close();
     Serial.println("\r\nOPEN FILE example completed");  
 }
-
-
-Player player;
-
-/** Handler for the avr irq. 
- */
-ICACHE_RAM_ATTR void Player::AvrIRQ() {
-    // Serial.println("IRQ");
-    player.status_.irq = 1;
-}
-
 
 
 void printDirectory(File dir, int numTabs) {
@@ -150,7 +214,6 @@ void setup() {
     Core::Setup(/* disableWifi */ true);
     player.initialize();
     player.enterRadioMode();
-    player.setRadioFrequency(9370);
     
     //Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
     //Server.on("/authenticate", server::authenticate);
