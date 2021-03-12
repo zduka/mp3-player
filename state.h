@@ -22,24 +22,36 @@ struct Command {
 
     struct EnterMP3Mode {
         static constexpr uint8_t Id = 0;
-    };
+        uint16_t controlValue;
+        uint16_t controlMaxValue;
+
+        EnterMP3Mode(uint16_t controlValue, uint16_t controlMaxValue):
+            controlValue{controlValue},
+            controlMaxValue{controlMaxValue} {
+        }
+    } __attribute__((packed));
 
     struct EnterRadioMode {
         static constexpr uint8_t Id = 1;
         uint16_t controlValue;
         uint16_t controlMaxValue;
-    };
+
+        EnterRadioMode(uint16_t controlValue, uint16_t controlMaxValue):
+            controlValue{controlValue},
+            controlMaxValue{controlMaxValue} {
+        }
+    } __attribute__((packed));
 
     struct SetVolume {
         static constexpr uint8_t Id = 2;
         uint8_t value;
-    };
+    } __attribute__((packed));
 
     struct SetControl {
         static constexpr uint8_t Id = 3;
         uint16_t value;
         uint16_t maxValue;
-    };
+    } __attribute__((packed));
 
 };
 
@@ -64,6 +76,14 @@ public:
     
     void setMode(Mode mode) {
         state_ = (state_ & ~STATE_MODE) + static_cast<uint8_t>(mode);
+    }
+
+    bool volumeButtonDown() const {
+        return state_ & STATE_VOL_BTN;
+    }
+
+    bool controlButtonDown() const {
+        return state_ & STATE_CTRL_BTN;
     }
     
 

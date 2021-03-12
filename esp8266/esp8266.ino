@@ -67,7 +67,14 @@ public:
     }
 
     void updateControl() {
-        
+        LOG("control: " + state_.control());
+        switch (state_.mode()) {
+            case State::Mode::Radio:
+                setRadioStation(state_.control());
+                break;
+            case State::Mode::MP3:
+                break;
+        }
     }
 
     /** Enters the radio mode. 
@@ -77,12 +84,23 @@ public:
         radio_.init();
         radio_.setVolume(state_.volume());
         setRadioFrequency(radioFrequency_);
-        // TODO tell the avr to switch to radio mode
+        send(Command::EnterRadioMode(0, 8));
     }
 
     void setRadioFrequency(uint16_t frequency) {
         LOG("frequency: " + frequency);
+        radioFrequency_ = frequency;
         radio_.setBandFrequency(RADIO_BAND_FM, frequency * 10);
+    }
+
+    void setRadioStation(uint16_t i) {
+        if (i < 8) {
+            LOG("station: " + i);
+            currentStation_ = i;
+            setRadioFrequency(radioStations_[i].frequency);
+        } else {
+            LOG("! Invalid station index " + i);
+        }
     }
 
     void enableManualTuning(bool value) {
@@ -108,6 +126,14 @@ private:
             updateControl();
 
         state_.clearEvents();
+    }
+
+    template<typename T>
+    void send(T msg) {
+        Wire.beginTransmission(AVR_I2C_ADDRESS);
+        Wire.write(T::Id);
+        Wire.write(pointer_cast<char *>(& msg), sizeof(T));
+        Wire.endTransmission();
     }
 
     State state_;

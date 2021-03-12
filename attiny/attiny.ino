@@ -24,7 +24,7 @@
     
  */
 
-volatile uint8_t g = 5;
+#define BUTTON_LONG_PRESS_TICKS 64
 
 
 #define DCDC_PWR 2
@@ -37,13 +37,6 @@ volatile uint8_t g = 5;
 #define VOL_BTN 7
 #define AVR_IRQ 16
 #define AUDIO_SRC 3
-
-/** The control (top) and volume (down) knobs (rotary encoders and buttons). 
- */
-RotaryEncoder ctrl{CTRL_A, CTRL_B, 255};
-Button        ctrlBtn{CTRL_BTN};
-RotaryEncoder vol{VOL_A, VOL_B, 15};
-Button        volBtn{VOL_BTN};
 
 /** The neopixel strip and its features. 
  */
@@ -80,6 +73,12 @@ class AVRPlayer {
 public:
 
     AVRPlayer() {
+        // enable control interrupts
+        volume_.setInterrupt(VolumeChangedTrampoline);
+        control_.setInterrupt(ControlChangedTrampoline);
+        volumeButton_.setInterrupt(VolumeButtonChangedTrampoline);
+        controlButton_.setInterrupt(ControlButtonChangedTrampoline);
+        
         // enable the AVR_IRQ as input
         pinMode(AVR_IRQ, INPUT);
         // disable 3v and 5v rails
@@ -91,8 +90,8 @@ public:
         RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; // enable PTI and set the tick to 1/32th of second
         // enable I2C slave
         Wire.begin(AVR_I2C_ADDRESS);
-        Wire.onRequest(I2CSendEvent);
-        Wire.onReceive(I2CReceiveEvent);
+        Wire.onRequest(I2CSendEventTrampoline);
+        Wire.onReceive(I2CReceiveEventTrampoline);
         // set audio source to esp8266
         pinMode(AUDIO_SRC, OUTPUT);
         digitalWrite(AUDIO_SRC, LOW);
@@ -153,18 +152,28 @@ public:
         }
     }
 
-    void enterMP3Mode() {
-        
+    void enterMP3Mode(uint16_t controlValue, uint16_t controlMax) {
+        control_.setMaxValue(controlMax);
+        control_.setValue(controlValue);
+        digitalWrite(AUDIO_SRC, LOW);
+        state_.setAudioSrc(State::AudioSrc::ESP);
+        state_.setMode(State::Mode::MP3);
+        state_.setControl(control_.value());
+        // make sure we have IRQ set
+        setIrq();
     }
 
     /** Enters the radio mode. 
      */
     void enterRadioMode(uint16_t controlValue, uint16_t controlMax) {
-        ctrl.setMaxValue(controlMax);
-        ctrl.setValue(controlValue);
+        control_.setMaxValue(controlMax);
+        control_.setValue(controlValue);
         digitalWrite(AUDIO_SRC, HIGH);
         state_.setAudioSrc(State::AudioSrc::Radio);
         state_.setMode(State::Mode::Radio);
+        state_.setControl(control_.value());
+        // make sure we have IRQ set
+        setIrq();
     }
 
 private:
@@ -201,6 +210,100 @@ private:
         }
     }
 
+    /** \name Controls
+     */
+    //@{
+
+    /** The control (top) and volume (down) knobs (rotary encoders and buttons). 
+     */
+    RotaryEncoder control_{CTRL_A, CTRL_B, 256};
+    RotaryEncoder volume_{VOL_A, VOL_B, 16};
+    Button controlButton_{CTRL_BTN};
+    Button volumeButton_{VOL_BTN};
+    uint8_t volBtnDownTicks_ = 0;
+    uint8_t ctrlBtnDownTicks_ = 0;
+
+    void volumeChanged() {
+        volume_.poll();
+        setVolume(volume_.value());
+    }
+
+    void controlChanged() {
+        control_.poll();
+        setControl(control_.value());
+    }
+
+    void volumeButtonChanged() {
+        volBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
+        volumeButton_.poll();
+        if (volumeButton_.pressed()) {
+            state_.state_ &= State::STATE_VOL_BTN;
+        } else {
+            state_.state_ |= ~State::STATE_VOL_BTN;
+            state_.events_ |= (volBtnDownTicks_ == 0) ? State::EVENT_VOL_LONG_PRESS : State::EVENT_VOL_PRESS;
+            setIrq();
+        }
+    }
+
+    void controlButtonChanged() {
+        ctrlBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
+        controlButton_.poll();
+        if (controlButton_.pressed()) {
+            state_.state_ &= State::STATE_CTRL_BTN;
+        } else {
+            state_.state_ |= ~State::STATE_CTRL_BTN;
+            state_.events_ |= (ctrlBtnDownTicks_ == 0) ? State::EVENT_CTRL_LONG_PRESS : State::EVENT_CTRL_PRESS;
+            setIrq();
+        }
+    }
+    //@}
+
+    /** \name I2C 
+     */
+    //@{
+
+    uint8_t cmdBuffer_[32];
+    
+    void i2cSendEvent() {
+        // casting away the volatile-ness is ok here 
+        Wire.write(pointer_cast<uint8_t*>(const_cast<State*>(& state_)), sizeof (State));
+        // clear the irq and events once we have given them to master
+        clearIrq();
+        state_.events_ = 0;
+    }
+
+    void i2cReceiveEvent(int numBytes) {
+        Wire.readBytes(pointer_cast<uint8_t*>(& cmdBuffer_), numBytes);
+        switch (cmdBuffer_[0]) {
+            case Command::EnterMP3Mode::Id: {
+                Command::EnterRadioMode * cmd = pointer_cast<Command::EnterRadioMode*>(& cmdBuffer_[1]);
+                enterMP3Mode(cmd->controlValue, cmd->controlMaxValue);
+                break;
+            }
+            case Command::EnterRadioMode::Id: {
+                Command::EnterRadioMode * cmd = pointer_cast<Command::EnterRadioMode*>(& cmdBuffer_[1]);
+                enterRadioMode(cmd->controlValue, cmd->controlMaxValue);
+                break;
+            }
+            case Command::SetVolume::Id: {
+                Command::SetVolume * cmd = pointer_cast<Command::SetVolume*>(& cmdBuffer_[1]);
+                volume_.setValue(cmd->value);
+                state_.setVolume(volume_.value(), /* recordChange */ false);
+                break;
+            }
+            case Command::SetControl::Id: {
+                Command::SetControl * cmd = pointer_cast<Command::SetControl*>(& cmdBuffer_[1]);
+                control_.setMaxValue(cmd->maxValue);
+                control_.setValue(cmd->value);
+                state_.setControl(control_.value(), /* recordChange */ false);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    //@}
+
     /** Device state. 
      */
     volatile State state_;
@@ -235,14 +338,17 @@ private:
     
 
     volatile uint8_t powerRequests_ = 0;
-    volatile uint8_t * i2cPtr_ = nullptr;
+
+    
+    static void I2CSendEventTrampoline();
+    static void I2CReceiveEventTrampoline(int numBytes);
+
+    static void VolumeChangedTrampoline(); 
+    static void VolumeButtonChangedTrampoline();
+    static void ControlChangedTrampoline();
+    static void ControlButtonChangedTrampoline();
 
     friend void ::RTC_PIT_vect();
-
-    static void I2CSendEvent();
-    static void I2CReceiveEvent(int numBytes);
-
-    uint8_t cmdBuffer_[32];
 
 }; // Player
 
@@ -259,57 +365,28 @@ ISR(RTC_PIT_vect) {
 }
 
 
-void AVRPlayer::I2CSendEvent() {
-    // casting away the volatile-ness is ok here 
-    Wire.write(pointer_cast<uint8_t*>(const_cast<State*>(& player.state_)), sizeof (State));
-    // clear the irq and events once we have given them to master
-    player.clearIrq();
-    player.state_.events_ = 0;
+void AVRPlayer::I2CSendEventTrampoline() {
+    player.i2cSendEvent();
 }
 
-void AVRPlayer::I2CReceiveEvent(int numBytes) {
-    Wire.readBytes(player.cmdBuffer_, numBytes);
-    switch (player.cmdBuffer_[0]) {
-    case Command::EnterMP3Mode::Id: {
-        player.enterMP3Mode();
-        break;
-    }
-    case Command::EnterRadioMode::Id: {
-        Command::EnterRadioMode * cmd = pointer_cast<Command::EnterRadioMode*>(& player.cmdBuffer_ + 1);
-        player.enterRadioMode(cmd->controlValue, cmd->controlMaxValue);
-        break;
-    }
-    case Command::SetVolume::Id: {
-        Command::SetVolume * cmd = pointer_cast<Command::SetVolume*>(& player.cmdBuffer_ + 1);
-        player.state_.setVolume(cmd->value, /* recordChange */ false);
-        vol.setValue(cmd->value);
-        break;
-    }
-    case Command::SetControl::Id: {
-        Command::SetControl * cmd = pointer_cast<Command::SetControl*>(& player.cmdBuffer_ + 1);
-        break;
-    }
-    default:
-        break;
-    }
+void AVRPlayer::I2CReceiveEventTrampoline(int numBytes) {
+    player.i2cReceiveEvent(numBytes);
 }
 
-void vol_changed() {
-    vol.poll();
-    player.setVolume(vol.value());
+void AVRPlayer::VolumeChangedTrampoline() {
+    player.volumeChanged();
 }
 
-void vol_btn_changed() {
-    volBtn.poll();
+void AVRPlayer::VolumeButtonChangedTrampoline() {
+    player.volumeButtonChanged();
 }
 
-void ctrl_changed() {
-    ctrl.poll();
-    player.setControl(ctrl.value());
+void AVRPlayer::ControlChangedTrampoline() {
+    player.controlChanged();
 }
 
-void ctrl_btn_changed() {
-    ctrlBtn.poll();
+void AVRPlayer::ControlButtonChangedTrampoline() {
+    player.controlButtonChanged();
 }
 
 void setup() {
@@ -320,10 +397,6 @@ void setup() {
     */
 
     
-    vol.setInterrupt(vol_changed);
-    ctrl.setInterrupt(ctrl_changed);
-    volBtn.setInterrupt(vol_btn_changed);
-    ctrlBtn.setInterrupt(ctrl_btn_changed);
 
     player.requestPowerOn();
     
@@ -347,13 +420,9 @@ void setup() {
     
  */
 void loop() {
+    // debug things
+    /*
     static bool x = false;
-    if (volBtn.changed() && volBtn.pressed()) 
-        vol.setValue(0);
-    if (ctrlBtn.changed() && ctrlBtn.pressed()) 
-        ctrl.setValue(0);
-    if (vol.changed() || ctrl.changed()) 
-        neopixelStrip.setAll(vol.value() * 16, ctrl.value(), 0);
     if (player.rtcTickSecond()) {
         if (x)
             neopixelStrip.setAll(vol.value() * 16,g,0);
@@ -361,4 +430,5 @@ void loop() {
             neopixelStrip.setAll(0,g,vol.value()*16);
         x = !x;  
     }
+    */
 }

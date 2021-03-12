@@ -76,7 +76,7 @@ public:
     }
 
     bool inc() {
-      if (value_ < maxValue_) {
+      if (value_ + 1 < maxValue_) {
           ++value_;
           state_.changed = 1;
           return true;

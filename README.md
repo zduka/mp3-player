@@ -38,7 +38,8 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 - make esp send commands to avr (enable mode)
 - manual and station tuning via control
 
-- rewrite schematics for AC coupled headphones, make sure the noise is breadboard
+- neopixel is on at all times a bit
+- rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
 - the 3v3 rail drops a lot when in boost mode, see why (breadboard?)
 
 
