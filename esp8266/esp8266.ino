@@ -1,9 +1,9 @@
-#include <Adafruit_NeoPixel.h>
-
-
 #include <Wire.h>
 #include <radio.h>
 #include <RDA5807M.h>
+#include <AudioFileSourceSD.h>
+#include <AudioGeneratorMP3.h>
+#include <AudioOutputI2SNoDAC.h>
 
 #include "core.h"
 #include "wifi_setup.h"
@@ -62,6 +62,7 @@ public:
                 radio_.setVolume(state_.volume());
                 break;
             case State::Mode::MP3:
+                i2s_.SetGain(state_.volume() * 0.25);
                 break;
         }
     }
@@ -84,7 +85,27 @@ public:
         radio_.init();
         radio_.setVolume(state_.volume());
         setRadioFrequency(radioFrequency_);
-        send(Command::EnterRadioMode(0, 8));
+        send(Command::EnterRadioMode(0, 7));
+    }
+
+    void leaveRadioMode() {
+        LOG("leaving radio mode");
+        radio_.term();
+    }
+
+    void enterMP3Mode() {
+        LOG("entering mp3 mode");
+        mp3File_.open("000/005.mp3");
+        i2s_.SetGain(state_.volume() * 0.25);
+        mp3_.begin(& mp3File_, & i2s_);
+        send(Command::EnterMP3Mode(0, 7));
+    }
+
+    void leaveMP3Mode() {
+        LOG("leaving mp3 mode");
+        mp3_.stop();
+        i2s_.stop();
+        mp3File_.close();
     }
 
     void setRadioFrequency(uint16_t frequency) {
@@ -108,7 +129,17 @@ public:
         // tell AVR to update control dial value
     }
 
-    void tick() {
+    void loop() {
+        switch (state_.mode()) {
+        case State::Mode::MP3:
+            if (mp3_.isRunning()) {
+                if (!mp3_.loop()) {
+                    mp3_.stop();
+                    LOG("MP3 done");
+                }
+            }
+            break;
+        }
         if (state_.irq())
             getStatus();
     }
@@ -121,11 +152,27 @@ private:
     void updateStatus() {
         if (state_.volumeChange())
             updateVolume();
-            
         if (state_.controlChange())
             updateControl();
+        if (state_.controlPress())
+            switchMode();
 
         state_.clearEvents();
+    }
+
+    void switchMode() {
+        switch (state_.mode()) {
+        case State::Mode::MP3:
+            leaveMP3Mode();
+            enterRadioMode();
+            break;
+        case State::Mode::Radio:
+            leaveRadioMode();
+            enterMP3Mode();
+            break;
+        default:
+            enterMP3Mode();
+        }
     }
 
     template<typename T>
@@ -148,7 +195,18 @@ private:
     bool manualTuning_ = false;
     //@}
 
+    /** \name MP3 & Settings
+     */
+    //@{
+    AudioGeneratorMP3 mp3_;
+    AudioOutputI2SNoDAC i2s_;
+    AudioFileSourceSD mp3File_;
+    
+    //@}
+
     static ICACHE_RAM_ATTR void AvrIRQ();
+
+    static double Gain_[16];
 
     
 }; // Player
@@ -160,8 +218,8 @@ Player player;
 void Player::getStatus() {
     size_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(State));
     if (n == sizeof(State)) {
-        LOG("state received");
-        Wire.readBytes(pointer_cast<uint8_t*>(& player.state_), n);
+        Wire.readBytes(pointer_cast<uint8_t*>(& state_), n);
+        LOG("state received: m" + (int)state_.mode() + " c" + state_.control() + " v" + state_.volume());
         updateStatus();
     } else {
         /*            
@@ -240,6 +298,7 @@ void setup() {
     Core::Setup(/* disableWifi */ true);
     player.initialize();
     player.enterRadioMode();
+    printSD();
     
     //Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
     //Server.on("/authenticate", server::authenticate);
@@ -286,7 +345,7 @@ void setup() {
 }
 
 void loop() {
-    player.tick();
+    player.loop();
   //Core::Loop();
   // put your main code here, to run repeatedly:
   //digitalWrite(4, HIGH);

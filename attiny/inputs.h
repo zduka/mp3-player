@@ -109,6 +109,10 @@ public:
         state_.changed = 1;
     }
 
+    uint16_t maxValue() const {
+        return maxValue_;
+    }
+    
     void setMaxValue(uint16_t value) {
         maxValue_ = value;
         if (value_ != 0 && value_ >= maxValue_)

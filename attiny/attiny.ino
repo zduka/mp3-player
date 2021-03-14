@@ -1,11 +1,10 @@
 #include "Wire.h"
 
-/** Library for working with neopixels. Comes with the megatinycore and does not require any additional arduino setup. 
- */
-#include <tinyNeoPixel_Static.h>
+//#include <tinyNeoPixel_Static.h>
 
 #include "state.h"
 #include "inputs.h"
+#include "neopixel.h"
 
 /** Chip Pinout
 
@@ -37,29 +36,9 @@
 #define VOL_BTN 7
 #define AVR_IRQ 16
 #define AUDIO_SRC 3
-
-/** The neopixel strip and its features. 
- */
-class NeopixelStrip {
-public:
-    NeopixelStrip():
-        leds_{8, NEOPIXEL, NEO_GRB + NEO_KHZ800, pixels_} {
-        pinMode(NEOPIXEL,OUTPUT);
-    }
-
-    void setAll(uint8_t r, uint8_t g, uint8_t b) {
-        for (int i = 0; i < 8; ++i) {
-            leds_.setPixelColor(i, r, g, b);
-        }
-        leds_.show();
-    }
-
-private:
-    byte pixels_[8 * 3];
-    tinyNeoPixel leds_;// = tinyNeoPixel(2, NEOPIXEL, NEO_GRB + NEO_KHZ800, pixels);
-};
-
-NeopixelStrip neopixelStrip;
+#define AUDIO_ADC 4
+#define VCC_SENSE 0
+#define MIC 15
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 
@@ -95,7 +74,14 @@ public:
         // set audio source to esp8266
         pinMode(AUDIO_SRC, OUTPUT);
         digitalWrite(AUDIO_SRC, LOW);
+        // enable the ADC inputs (audio, mic, voltage)
+        pinMode(AUDIO_ADC, INPUT);
+        pinMode(MIC, INPUT);
+        pinMode(VCC_SENSE, INPUT);
+
     }
+
+    
 
     /** Returns true if there was an RTC tick since the last call to the function. 
 
@@ -141,6 +127,7 @@ public:
     void setVolume(uint8_t value) {
         if (value != state_.volume()) {
             state_.setVolume(value);
+            neopixels_.showBar(state_.volume(), 15, Neopixel::Blue());
             setIrq();
         }
     }
@@ -148,6 +135,7 @@ public:
     void setControl(uint16_t value) {
         if (value != state_.control()) {
             state_.setControl(value);
+            neopixels_.showPoint(state_.control(), control_.maxValue(), Neopixel::Green());
             setIrq();
         }
     }
@@ -174,6 +162,21 @@ public:
         state_.setControl(control_.value());
         // make sure we have IRQ set
         setIrq();
+    }
+
+    void setup() {
+        neopixels_.setAll(Neopixel::Green());
+        neopixels_.update();
+        delay(100);
+        neopixels_.setAll(Neopixel::Black());
+        neopixels_.update();
+    }
+    
+    void loop() {
+        if (rtcTick()) {
+            neopixels_.tick();
+            //neopixels_.update();
+        }
     }
 
 private:
@@ -210,6 +213,8 @@ private:
         }
     }
 
+    NeopixelStrip<NEOPIXEL, 8> neopixels_;
+
     /** \name Controls
      */
     //@{
@@ -237,9 +242,9 @@ private:
         volBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
         volumeButton_.poll();
         if (volumeButton_.pressed()) {
-            state_.state_ &= State::STATE_VOL_BTN;
+            state_.state_ |= State::STATE_VOL_BTN;
         } else {
-            state_.state_ |= ~State::STATE_VOL_BTN;
+            state_.state_ &= ~State::STATE_VOL_BTN;
             state_.events_ |= (volBtnDownTicks_ == 0) ? State::EVENT_VOL_LONG_PRESS : State::EVENT_VOL_PRESS;
             setIrq();
         }
@@ -249,9 +254,9 @@ private:
         ctrlBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
         controlButton_.poll();
         if (controlButton_.pressed()) {
-            state_.state_ &= State::STATE_CTRL_BTN;
+            state_.state_ |= State::STATE_CTRL_BTN;
         } else {
-            state_.state_ |= ~State::STATE_CTRL_BTN;
+            state_.state_ &= ~State::STATE_CTRL_BTN;
             state_.events_ |= (ctrlBtnDownTicks_ == 0) ? State::EVENT_CTRL_LONG_PRESS : State::EVENT_CTRL_PRESS;
             setIrq();
         }
@@ -399,16 +404,8 @@ void setup() {
     
 
     player.requestPowerOn();
-    
-    // quick blink of the strip
-    //    neopixelStrip.enable();
-    neopixelStrip.setAll(0, 128, 0);
-    delay(100);
-    neopixelStrip.setAll(0, 0, 0);
-
-    
-    
-    
+    // quick blink at startup
+    player.setup();
 
 }
 
@@ -420,15 +417,5 @@ void setup() {
     
  */
 void loop() {
-    // debug things
-    /*
-    static bool x = false;
-    if (player.rtcTickSecond()) {
-        if (x)
-            neopixelStrip.setAll(vol.value() * 16,g,0);
-        else
-            neopixelStrip.setAll(0,g,vol.value()*16);
-        x = !x;  
-    }
-    */
+    player.loop();
 }
