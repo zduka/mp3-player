@@ -54,6 +54,7 @@ public:
     }
 
     static Neopixel Black() { return Neopixel{0,0,0}; }
+    static Neopixel White() { return Neopixel{255,255,255}; }
     static Neopixel Green() { return Neopixel{0,255, 0}; }
     static Neopixel Blue() { return Neopixel{0,0,255}; }
 
@@ -119,7 +120,7 @@ public:
     /** Shows bar from the beginning to the given value. 
      */
     void showBar(uint16_t value, uint16_t max, Neopixel const & color) {
-        uint32_t v = value * (SIZE * 255) / max;
+        uint32_t v = static_cast<uint32_t>(value) * (SIZE * 255) / max;
         for (uint8_t i = 0; i < SIZE; ++i) {
             uint8_t b = v > 255 ? 255 : (v & 0xff);
             v -= b;
@@ -146,6 +147,15 @@ public:
 
     void update() {
         leds_.show();
+    }
+
+    void sync() {
+        if (updated_) {
+            for (uint8_t i = 0; i < SIZE; ++i)
+                current_[i] = target_[i];
+            updated_ = false;
+            update();
+        }
     }
 
 private:

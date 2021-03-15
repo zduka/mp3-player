@@ -1,7 +1,5 @@
 #include "Wire.h"
 
-//#include <tinyNeoPixel_Static.h>
-
 #include "state.h"
 #include "inputs.h"
 #include "neopixel.h"
@@ -41,6 +39,7 @@
 #define MIC 15
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
+extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 
 /** The MP3 Player Device Controller
 
@@ -74,8 +73,15 @@ public:
         // set audio source to esp8266
         pinMode(AUDIO_SRC, OUTPUT);
         digitalWrite(AUDIO_SRC, LOW);
-        // enable the ADC inputs (audio, mic, voltage)
-        pinMode(AUDIO_ADC, INPUT);
+        // enable the ADC inputs (audio, mic, voltage), disable the digital input buffers and pull-up resistors
+        // NOTE this requires that the pins stay the same
+        static_assert(AUDIO_ADC == 4, "Must be PB5");
+        PORTB.PIN5CTRL &= ~PORT_ISC_gm;
+        PORTB.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTB.PIN5CTRL &= ~PORT_PULLUPEN_bm;
+
+        
+        //pinMode(AUDIO_ADC, INPUT);
         pinMode(MIC, INPUT);
         pinMode(VCC_SENSE, INPUT);
 
@@ -141,6 +147,7 @@ public:
     }
 
     void enterMP3Mode(uint16_t controlValue, uint16_t controlMax) {
+        enableAudioADC();
         control_.setMaxValue(controlMax);
         control_.setValue(controlValue);
         digitalWrite(AUDIO_SRC, LOW);
@@ -154,6 +161,7 @@ public:
     /** Enters the radio mode. 
      */
     void enterRadioMode(uint16_t controlValue, uint16_t controlMax) {
+        enableAudioADC();
         control_.setMaxValue(controlMax);
         control_.setValue(controlValue);
         digitalWrite(AUDIO_SRC, HIGH);
@@ -176,6 +184,7 @@ public:
         if (rtcTick()) {
             neopixels_.tick();
             //neopixels_.update();
+            updateAudioBar();
         }
     }
 
@@ -307,6 +316,7 @@ private:
                 break;
         }
     }
+    
     //@}
 
     /** Device state. 
@@ -340,6 +350,54 @@ private:
         unsigned tickSecond : 1;
         unsigned counter : 5; // 0..31
     } rtcTick_;
+
+
+    /** \name Audio output readouts. 
+     */
+    //@{
+
+
+    void enableAudioADC() {
+        audioMin_ = 255;
+        audioMax_ = 0;
+        audioSamples_ = 0;
+        // set ADC0 reference to 1.1V
+        VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
+        VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
+        // clkdiv by 4, internal voltage reference
+        ADC0.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc;
+        // enable and use 8bit resolution, freerun mode
+        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
+        // select ADC channel to AUDIO_ADC pin
+        ADC0.MUXPOS  = ADC_MUXPOS_AIN8_gc;
+        // enable the interrupt
+        ADC0.INTCTRL |= ADC_RESRDY_bm;
+        // and start the conversion
+        ADC0.COMMAND = ADC_STCONV_bm;        
+    }
+    
+    void addAudioReading(uint8_t value) {
+        ++audioSamples_;
+        if (value < audioMin_)
+            audioMin_ = value;
+        if (value > audioMax_)
+            audioMax_ = value;
+    }
+
+    void updateAudioBar() {
+        uint8_t v = audioMax_ - audioMin_;
+        v = v < 32 ? 0 : v - 32;
+        neopixels_.showBar(v, 128, Neopixel::White().withBrightness(32));
+        neopixels_.sync();
+        audioMin_ = 255;
+        audioMax_ = 0;
+        audioSamples_ = 0;
+    }
+    
+    uint8_t audioMin_;
+    uint8_t audioMax_;
+    uint16_t audioSamples_;
+    //@}
     
 
     volatile uint8_t powerRequests_ = 0;
@@ -354,6 +412,7 @@ private:
     static void ControlButtonChangedTrampoline();
 
     friend void ::RTC_PIT_vect();
+    friend void ::ADC0_RESRDY_vect();
 
 }; // Player
 
@@ -367,6 +426,10 @@ AVRPlayer player; // the player singleton
 ISR(RTC_PIT_vect) {
    RTC.PITINTFLAGS = RTC_PI_bm;
    player.doRtcTick();
+}
+
+ISR(ADC0_RESRDY_vect) {
+    player.addAudioReading(ADC0.RES); 
 }
 
 

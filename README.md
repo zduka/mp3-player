@@ -19,9 +19,7 @@ The volume controller always controls the audio volume and its press toggles pla
 
 The control has different meaning based on the current mode. In the radio mode, short press triggers station presets, or manual tuning (if allowed). Turns then either change frequency, or present station. In the mp3 mode, 
 
-
-
-
+- long volume press turns the lights on/off? adds color, and so on?
 
 Control: controls which mp3 track, or radion station will be played, switches between mp3 and radio modes.
 
@@ -35,8 +33,10 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 ## TODO
 
+- add ADC1 for voltage & charging & headphones
 - add long press together with indicator of how much more should be pressed
-- add ADC
+- add centered neopixel bar
+- determine better indicator for the audio strength (some annaeling?)
 - manual and station tuning via control
 
 - rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
