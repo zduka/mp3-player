@@ -21,9 +21,6 @@
     
  */
 
-#define BUTTON_LONG_PRESS_TICKS 64
-
-
 #define DCDC_PWR 2
 #define NEOPIXEL 11
 #define CTRL_A 13
@@ -133,7 +130,8 @@ public:
     void setVolume(uint8_t value) {
         if (value != state_.volume()) {
             state_.setVolume(value);
-            neopixels_.showBar(state_.volume(), 15, Neopixel::Blue());
+            neopixels_.showBar(state_.volume(), 15, VOLUME_COLOR.withBrightness(brightness_));
+            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
             setIrq();
         }
     }
@@ -141,7 +139,8 @@ public:
     void setControl(uint16_t value) {
         if (value != state_.control()) {
             state_.setControl(value);
-            neopixels_.showPoint(state_.control(), control_.maxValue(), Neopixel::Green());
+            neopixels_.showPoint(state_.control(), control_.maxValue(), CONTROL_COLOR.withBrightness(brightness_));
+            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
             setIrq();
         }
     }
@@ -182,9 +181,13 @@ public:
     
     void loop() {
         if (rtcTick()) {
-            neopixels_.tick();
-            //neopixels_.update();
-            updateAudioBar();
+            // if the buttons are pressed, decrement their down ticks so that long presses can be determined 
+            if (volBtnDownTicks_ > 0)
+                --volBtnDownTicks_;
+            if (ctrlBtnDownTicks_ > 0)
+                --ctrlBtnDownTicks_;
+            // update the lights
+            lightsTick();
         }
     }
 
@@ -222,7 +225,34 @@ private:
         }
     }
 
+    /** \name Lights
+
+     */
+    //@{
     NeopixelStrip<NEOPIXEL, 8> neopixels_;
+    uint8_t specialLights_ = 0;
+    Neopixel accentColor_ = Neopixel::White();
+    /** Maximum brightness of the strip. 
+     */
+    uint8_t brightness_ = 32;
+
+    void lightsTick() {
+        if (state_.volumeButtonDown() || state_.controlButtonDown()) {
+            uint8_t v = BUTTON_LONG_PRESS_TICKS - max(volBtnDownTicks_, ctrlBtnDownTicks_);
+            neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_COLOR.withBrightness(brightness_));
+            neopixels_.sync();
+        } else {
+            if (specialLights_ == 0 && state_.audioLights())
+                updateAudioBar();
+            else if (--specialLights_ == 0)
+                neopixels_.setAll(Neopixel::Black());
+            neopixels_.tick(max(brightness_ / 16, 1));
+        }
+        
+    }
+    //@}
+
+    
 
     /** \name Controls
      */
@@ -248,9 +278,9 @@ private:
     }
 
     void volumeButtonChanged() {
-        volBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
         volumeButton_.poll();
         if (volumeButton_.pressed()) {
+            volBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
             state_.state_ |= State::STATE_VOL_BTN;
         } else {
             state_.state_ &= ~State::STATE_VOL_BTN;
@@ -260,9 +290,9 @@ private:
     }
 
     void controlButtonChanged() {
-        ctrlBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
         controlButton_.poll();
         if (controlButton_.pressed()) {
+            ctrlBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
             state_.state_ |= State::STATE_CTRL_BTN;
         } else {
             state_.state_ &= ~State::STATE_CTRL_BTN;
@@ -312,6 +342,53 @@ private:
                 state_.setControl(control_.value(), /* recordChange */ false);
                 break;
             }
+            case Command::SetAudioLights::Id: {
+                Command::SetAudioLights * cmd = pointer_cast<Command::SetAudioLights*>(& cmdBuffer_[1]);
+                state_.setAudioLights(cmd->on);
+                neopixels_.setAll(Neopixel::Black());
+                setIrq();
+                break;
+            }
+            case Command::SetBrightness::Id: {
+                Command::SetBrightness * cmd = pointer_cast<Command::SetBrightness*>(& cmdBuffer_[1]);
+                brightness_ = cmd->brightness;
+                break;
+            }
+            case Command::SetAccentColor::Id: {
+                Command::SetAccentColor * cmd = pointer_cast<Command::SetAccentColor*>(& cmdBuffer_[1]);
+                accentColor_.r = cmd->red;
+                accentColor_.g = cmd->green;
+                accentColor_.b = cmd->blue;
+                break;
+            }
+            case Command::SpecialLights::Id: {
+                Command::SpecialLights * cmd = pointer_cast<Command::SpecialLights*>(& cmdBuffer_[1]);
+                Neopixel color{cmd->red, cmd->green, cmd->blue};
+                switch (cmd->mode) {
+                    case Command::SpecialLights::POINT:
+                        neopixels_.showPoint(cmd->value, cmd->maxValue, color);
+                        break;
+                    case Command::SpecialLights::BAR:
+                        neopixels_.showBar(cmd->value, cmd->maxValue, color);
+                        break;
+                    case Command::SpecialLights::CENTERED_BAR:
+                        neopixels_.showCenteredBar(cmd->value, cmd->maxValue, color);
+                        break;
+                }
+                specialLights_ = cmd->duration;
+                break;
+            }
+            case Command::Lights::Id: {
+                Command::Lights * cmd = pointer_cast<Command::Lights*>(& cmdBuffer_[1]);
+                for (uint8_t i = 0; i < 8; ++i) {
+                    Neopixel & p = neopixels_[i];
+                    p.r = cmd->colors[i * 3];
+                    p.g = cmd->colors[i * 3 + 1];
+                    p.b = cmd->colors[i * 3 + 2];
+                }
+                specialLights_ = cmd->duration;
+                break;
+            }
             default:
                 break;
         }
@@ -325,15 +402,6 @@ private:
     volatile Clock clock_;
     
     
-    //@}
-    /** \name Accent Color
-
-        Specifies the accent color of the device, which is used for the neopixel stripe in default settings. Can be set via I2C. 
-     */
-    //@{
-    volatile uint8_t accentRed_ = 255;
-    volatile uint8_t accentGreen_ = 255;
-    volatile uint8_t accentBlue_ = 255;
     //@}
 
 
@@ -387,8 +455,8 @@ private:
     void updateAudioBar() {
         uint8_t v = audioMax_ - audioMin_;
         v = v < 32 ? 0 : v - 32;
-        neopixels_.showBar(v, 128, Neopixel::White().withBrightness(32));
-        neopixels_.sync();
+        neopixels_.showCenteredBar(v, 128, AUDIO_COLOR.withBrightness(brightness_));
+        //neopixels_.sync();
         audioMin_ = 255;
         audioMax_ = 0;
         audioSamples_ = 0;

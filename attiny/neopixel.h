@@ -57,6 +57,8 @@ public:
     static Neopixel White() { return Neopixel{255,255,255}; }
     static Neopixel Green() { return Neopixel{0,255, 0}; }
     static Neopixel Blue() { return Neopixel{0,0,255}; }
+    static Neopixel Red() { return Neopixel{255,0,0}; }
+    static Neopixel Purple() { return Neopixel{255,0,255}; }
 
 private:
     static bool MoveChannelTowards(uint8_t & channel, uint8_t target, uint8_t step) {
@@ -86,10 +88,9 @@ public:
 
     void setAll(Neopixel const & color) {
         for (uint8_t i = 0; i < SIZE; ++i) {
-            current_[i] = color;
             target_[i] = color;
         }
-        updated_ = 0;
+        updated_ = true;
     }
 
     /** Shows point at given offset. 
@@ -131,15 +132,25 @@ public:
 
     /** Shows a bar at given value that grows symmetrically from the center. 
      */
-    void showCenteredBar(uint16_t, uint16_t max, Neopixel const & color) {
+    void showCenteredBar(uint16_t value, uint16_t max, Neopixel const & color) {
+        uint32_t v = static_cast<uint32_t>(value) * (SIZE * 255) / max;
+        uint32_t offset = (SIZE * 255 - v) / 2;
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            uint8_t b = (offset > 255) ? 0 : (255 - offset);
+            offset -= (255 - b);
+            if (v < b)
+                b = v;
+            v -= b;
+            target_[i] = color.withBrightness(b);
+        }
         updated_ = true;
     }
 
-    void tick() {
+    void tick(uint8_t step = 16) {
         if (updated_) {
             updated_ = false;
             for (uint8_t i = 0; i < SIZE; ++i)
-                updated_ = current_[i].moveTowards(target_[i]) || updated_;
+                updated_ = current_[i].moveTowards(target_[i], step) || updated_;
             if (updated_)
                 update();
         }
@@ -157,8 +168,14 @@ public:
             update();
         }
     }
+    
+    Neopixel & operator[](unsigned index) {
+        return target_[index];
+        updated_ = true;
+    }
 
 private:
+
     Neopixel current_[SIZE];
     Neopixel target_[SIZE];
     volatile bool updated_ = false;

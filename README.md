@@ -34,8 +34,6 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 ## TODO
 
 - add ADC1 for voltage & charging & headphones
-- add long press together with indicator of how much more should be pressed
-- add centered neopixel bar
 - determine better indicator for the audio strength (some annaeling?)
 - manual and station tuning via control
 

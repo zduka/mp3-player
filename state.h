@@ -2,6 +2,18 @@
 
 #define AVR_I2C_ADDRESS 42
 
+
+#define BUTTON_LONG_PRESS_TICKS 64
+#define SPECIAL_LIGHTS_TIMEOUT 32
+
+#define BUTTONS_COLOR Neopixel::Purple()
+#define VOLUME_COLOR Neopixel::Blue()
+#define CONTROL_COLOR Neopixel::Green()
+#define AUDIO_COLOR accentColor_
+
+
+
+
 /** \name Pointer-to-pointer cast
  
     Since any pointer to pointer cast can be done by two static_casts to and from `void *`, this simple template provides a shorthand for that functionality.
@@ -53,6 +65,43 @@ struct Command {
         uint16_t maxValue;
     } __attribute__((packed));
 
+    struct SetAudioLights {
+        static constexpr uint8_t Id = 4;
+        bool on;
+    } __attribute__((packed));
+
+    struct SetBrightness {
+        static constexpr uint8_t Id = 5;
+        uint8_t brightness;
+    } __attribute__((packed));
+
+    struct SetAccentColor {
+        static constexpr uint8_t Id = 6;
+        uint8_t red;
+        uint8_t green;
+        uint8_t blue;
+    } __attribute__((packed));
+
+    struct SpecialLights {
+        static constexpr uint8_t Id = 7;
+        static constexpr uint8_t POINT = 0;
+        static constexpr uint8_t BAR = 1;
+        static constexpr uint8_t CENTERED_BAR = 2;
+        uint8_t mode;
+        uint8_t red;
+        uint8_t green;
+        uint8_t blue;
+        uint16_t value;
+        uint16_t maxValue;
+        uint16_t duration;
+    } __attribute__((packed));
+
+    struct Lights {
+        static constexpr uint8_t Id = 8;
+        uint8_t colors[24];
+        uint16_t duration;
+    } __attribute__((packed));
+
 };
 
 /** We can't use bitfields as sadly, they are implementation specific. 
@@ -64,6 +113,7 @@ public:
         MP3 = 1,
         Radio = 2,
         WWW = 3,
+        NightLight = 4,
     };
     enum class AudioSrc : uint8_t {
         ESP = 0,
@@ -184,6 +234,17 @@ public:
             audio_ &= ~AUDIO_AUDIO_SRC;
     }
 
+    bool audioLights() const {
+        return audio_ & AUDIO_LIGHTS;
+    }
+
+    void setAudioLights(bool value) {
+        if (value)
+            audio_ |= AUDIO_LIGHTS;
+        else
+            audio_ &= ~AUDIO_LIGHTS;
+    }
+
     //@}
 
     uint16_t control() const {
@@ -227,6 +288,7 @@ private:
     static constexpr uint8_t AUDIO_AUDIO_VOLUME = 15;
     static constexpr uint8_t AUDIO_AUDIO_SRC = 1 << 4;
     static constexpr uint8_t HEADPHONES = 1 << 5;
+    static constexpr uint8_t AUDIO_LIGHTS = 1 << 6;
     uint8_t audio_ = 0;
 
     uint16_t control_ = 0;
