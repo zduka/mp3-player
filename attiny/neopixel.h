@@ -97,7 +97,7 @@ public:
      */
     void showPoint(uint16_t value, uint16_t max, Neopixel const & color) {
         uint8_t v = 255;
-        uint32_t offset = value * (SIZE - 1) * 255 / max;
+        uint32_t offset = static_cast<uint32_t>(value) * (SIZE - 1) * 255 / max;
         for (uint8_t i = 0; i < SIZE; ++i) {
             uint8_t b = 0;
             // if offset is larger than pixel, stay black and remove from offset

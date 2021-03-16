@@ -5,6 +5,7 @@
 
 #define BUTTON_LONG_PRESS_TICKS 64
 #define SPECIAL_LIGHTS_TIMEOUT 32
+#define IRQ_MAX_DELAY 32
 
 #define BUTTONS_COLOR Neopixel::Purple()
 #define VOLUME_COLOR Neopixel::Blue()

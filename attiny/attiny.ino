@@ -181,6 +181,10 @@ public:
     
     void loop() {
         if (rtcTick()) {
+            if (state_.irq() && --irqTimer_ == 0) {
+                resetEsp();
+                return;
+            }
             // if the buttons are pressed, decrement their down ticks so that long presses can be determined 
             if (volBtnDownTicks_ > 0)
                 --volBtnDownTicks_;
@@ -193,6 +197,21 @@ public:
 
 private:
 
+    /** Resets the ESP8266. 
+     */
+    void resetEsp() {
+        clearIrq();
+        neopixels_.setAll(Neopixel::Red());
+        neopixels_.sync();
+        delay(100);
+        neopixels_.setAll(Neopixel::Black());
+        neopixels_.sync();
+        digitalWrite(DCDC_PWR, LOW);
+        delay(500);
+        digitalWrite(DCDC_PWR, HIGH);
+        // TODO add wake signal
+    }
+
     /** Sets the IRQ to ping the esp8266. 
      */
     bool setIrq() {
@@ -200,6 +219,7 @@ private:
             state_.events_ |= State::EVENT_IRQ;
             pinMode(AVR_IRQ,OUTPUT);
             digitalWrite(AVR_IRQ, LOW);
+            irqTimer_ = IRQ_MAX_DELAY;
             return true;
         } else {
             return false;
@@ -242,10 +262,12 @@ private:
             neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_COLOR.withBrightness(brightness_));
             neopixels_.sync();
         } else {
-            if (specialLights_ == 0 && state_.audioLights())
-                updateAudioBar();
-            else if (--specialLights_ == 0)
+            if (specialLights_ == 0) {
+                if (state_.audioLights())
+                    updateAudioBar();
+            } else if (--specialLights_ == 0) {
                 neopixels_.setAll(Neopixel::Black());
+            }
             neopixels_.tick(max(brightness_ / 16, 1));
         }
         
@@ -285,6 +307,7 @@ private:
         } else {
             state_.state_ &= ~State::STATE_VOL_BTN;
             state_.events_ |= (volBtnDownTicks_ == 0) ? State::EVENT_VOL_LONG_PRESS : State::EVENT_VOL_PRESS;
+            neopixels_.setAll(Neopixel::Black());
             setIrq();
         }
     }
@@ -297,6 +320,7 @@ private:
         } else {
             state_.state_ &= ~State::STATE_CTRL_BTN;
             state_.events_ |= (ctrlBtnDownTicks_ == 0) ? State::EVENT_CTRL_LONG_PRESS : State::EVENT_CTRL_PRESS;
+            neopixels_.setAll(Neopixel::Black());
             setIrq();
         }
     }
@@ -419,6 +443,7 @@ private:
         unsigned counter : 5; // 0..31
     } rtcTick_;
 
+    uint8_t irqTimer_;
 
     /** \name Audio output readouts. 
      */

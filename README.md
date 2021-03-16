@@ -33,6 +33,8 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 ## TODO
 
+- add timeout info to state, and perhaps keep all other settings in avr state so that it can restart esp when it wants to w/o loosing that much of it?
+- maybe turnoff radio when pause
 - add ADC1 for voltage & charging & headphones
 - determine better indicator for the audio strength (some annaeling?)
 
