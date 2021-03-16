@@ -102,6 +102,11 @@ struct Command {
         uint16_t duration;
     } __attribute__((packed));
 
+    struct SetIdle {
+        static constexpr uint8_t Id = 9;
+        bool idle;
+    } __attribute__((packed));
+
 };
 
 /** We can't use bitfields as sadly, they are implementation specific. 
@@ -265,6 +270,7 @@ private:
     static constexpr uint8_t STATE_DCDC_POWER = 1 << 3;
     static constexpr uint8_t STATE_VOL_BTN = 1 << 4;
     static constexpr uint8_t STATE_CTRL_BTN = 1 << 5;
+    static constexpr uint8_t STATE_IDLE = 1 << 6;
     uint8_t state_ = 0;
 
     static constexpr uint8_t POWER_CHARGING = 1 << 7;

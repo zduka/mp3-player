@@ -71,7 +71,10 @@ public:
         LOG("control: " + state_.control());
         switch (state_.mode()) {
             case State::Mode::Radio:
-                setRadioStation(state_.control());
+                if (manualTuning_)
+                    setRadioFrequency(state_.control() + 760);
+                else
+                    setRadioStation(state_.control());
                 break;
             case State::Mode::MP3:
                 break;
@@ -85,7 +88,7 @@ public:
         radio_.init();
         radio_.setVolume(state_.volume());
         setRadioFrequency(radioFrequency_);
-        send(Command::EnterRadioMode(0, 7));
+        send(Command::EnterRadioMode{0, 7});
     }
 
     void leaveRadioMode() {
@@ -98,7 +101,7 @@ public:
         mp3File_.open("000/005.mp3");
         i2s_.SetGain(state_.volume() * 0.25);
         mp3_.begin(& mp3File_, & i2s_);
-        send(Command::EnterMP3Mode(0, 7));
+        send(Command::EnterMP3Mode{0, 7});
     }
 
     void leaveMP3Mode() {
@@ -129,6 +132,22 @@ public:
         // tell AVR to update control dial value
     }
 
+    void togglePlay() {
+        LOG("toggle play");
+        switch (state_.mode()) {
+            case State::Mode::MP3:
+                if (mp3_.isRunning()) { 
+                    mp3_.stop();
+                    send(Command::SetIdle{true});
+                }
+                break;
+            case State::Mode::Radio:
+                radio_.setMute(! radio_.getMute());
+                send(Command::SetIdle{radio_.getMute()});
+                break;
+        }
+    }
+
     void loop() {
         switch (state_.mode()) {
         case State::Mode::MP3:
@@ -152,9 +171,31 @@ private:
     void updateStatus() {
         if (state_.volumeChange())
             updateVolume();
+        if (state_.volumePress())
+            togglePlay();
+        if (state_.volumeLongPress()) {
+            LOG("toggle audio lights");
+            send(Command::SetAudioLights{! state_.audioLights()});
+        }
+        
         if (state_.controlChange())
             updateControl();
-        if (state_.controlPress())
+        if (state_.controlPress()) {
+            switch (state_.mode()) {
+                case State::Mode::Radio: {
+                    manualTuning_ = ! manualTuning_;
+                    LOG("manual tuning: " + manualTuning_);
+                    if (manualTuning_) {
+                        send(Command::SetControl{radioFrequency_ - 760, 320});
+                    } else {
+                        send(Command::SetControl{0, 7});
+                        setRadioStation(0);
+                    }
+                    break;
+                }
+            }
+        }
+        if (state_.controlLongPress())
             switchMode();
 
         state_.clearEvents();

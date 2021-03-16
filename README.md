@@ -35,7 +35,6 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 - add ADC1 for voltage & charging & headphones
 - determine better indicator for the audio strength (some annaeling?)
-- manual and station tuning via control
 
 - rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
 - the 3v3 rail drops a lot when in boost mode, see why (breadboard?)
