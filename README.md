@@ -33,27 +33,14 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 ## TODO
 
-- add timeout info to state, and perhaps keep all other settings in avr state so that it can restart esp when it wants to w/o loosing that much of it?
-- maybe turnoff radio when pause
+- add timeout info to state after powered up
+- make esp read state from avr after powerup
+- make avr work with the new esp code and test them together
 - add ADC1 for voltage & charging & headphones
 - determine better indicator for the audio strength (some annaeling?)
 
 - rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
 - the 3v3 rail drops a lot when in boost mode, see why (breadboard?)
-
-
-On avr:
-
-- add I2C slave
-- make attiny sleep and use RTC one second wakeup
-- integrate power, strip and buttons into the player as well
-- add ADC and start reading voltage
-- add reading the audio out and showing this on the neopixel strip
-
-
-On esp:
-
-- read from avr
 
 ## AVR
 

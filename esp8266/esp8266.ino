@@ -36,87 +36,72 @@ struct RadioStation {
 
 class Player {
 public:
+    /** Initializes the player. 
+
+        We can't use the constructor as this interferes with the WiFi. Initializes the peripherals (namely I2C to AVR and the IRQ pin and interrupt) and loads the extra configuration from the SD card. 
+     */
     void initialize() {
-        Wire.begin();
-        delay(200);
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
-        // TODO replace this with actual stations
-        radioStations_[0].frequency = 937; // city
-        radioStations_[1].frequency = 1050; // vltava
-        radioStations_[2].frequency = 1025; // frekvence 1
-        radioStations_[3].frequency = 1007; // CRO
-        radioStations_[4].frequency = 997; // Bonton 
-        radioStations_[5].frequency = 987; // Classic
-        radioStations_[6].frequency = 972; // Fajn 
-        radioStations_[7].frequency = 966; // Impuls
-        radioFrequency_ = radioStations_[0].frequency;
-    }
-
-    /** Sets the volume. 
-     */
-    void updateVolume() {
-        LOG("volume: " + state_.volume()); 
-        switch (state_.mode()) {
-            case State::Mode::Radio:
-                radio_.setVolume(state_.volume());
-                break;
-            case State::Mode::MP3:
-                i2s_.SetGain(state_.volume() * 0.25);
-                break;
-        }
-    }
-
-    void updateControl() {
-        LOG("control: " + state_.control());
-        switch (state_.mode()) {
-            case State::Mode::Radio:
-                if (manualTuning_)
-                    setRadioFrequency(state_.control() + 760);
-                else
-                    setRadioStation(state_.control());
-                break;
-            case State::Mode::MP3:
-                break;
-        }
+        Wire.begin();
+        // initialize the settings from SD card
+        initializeExtraSettings();
+        // and now, get the state from AVR and initialize the peripherals as kept in the AVR state
+        delay(200);
     }
 
     /** Enters the radio mode. 
      */
+    /*
     void enterRadioMode() {
         LOG("entering radio mode");
         radio_.init();
         radio_.setVolume(state_.volume());
-        setRadioFrequency(radioFrequency_);
-        send(Command::EnterRadioMode{0, 7});
+        // we can always simply set radio frequency here because in stations mode, it contains the current station's frequency
+        updateRadioFrequency();
+        //setRadioFrequency(state_.radioFrequency());
+        // update the control dial range depending on the mode used 
+        if (state_.radioManualTuning())
+            send(Command::EnterRadioMode{state_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX});
+        else
+            send(Command::EnterRadioMode{state_.radioStation(), 7});
     }
+    */
 
-    void leaveRadioMode() {
-        LOG("leaving radio mode");
-        radio_.term();
-    }
+    /*
+    void setRadioFrequency(uint16_t frequency) {
+        state_.setRadioFrequency(frequency);
+        updateRadioFrequency();
+        // TODO Send command that updates the frequency on AVR
+        }*/
 
+    /*
     void enterMP3Mode() {
         LOG("entering mp3 mode");
+        // TODO actually check the number of playlists and the files, the current playlist and file
         mp3File_.open("000/005.mp3");
         i2s_.SetGain(state_.volume() * 0.25);
         mp3_.begin(& mp3File_, & i2s_);
         send(Command::EnterMP3Mode{0, 7});
     }
+    */
 
+    /*
+    void leaveRadioMode() {
+        LOG("leaving radio mode");
+        radio_.term();
+        } */
+
+
+    /*
     void leaveMP3Mode() {
         LOG("leaving mp3 mode");
         mp3_.stop();
         i2s_.stop();
         mp3File_.close();
-    }
+        }*/
 
-    void setRadioFrequency(uint16_t frequency) {
-        LOG("frequency: " + frequency);
-        radioFrequency_ = frequency;
-        radio_.setBandFrequency(RADIO_BAND_FM, frequency * 10);
-    }
-
+    /*
     void setRadioStation(uint16_t i) {
         if (i < 8) {
             LOG("station: " + i);
@@ -126,12 +111,16 @@ public:
             LOG("! Invalid station index " + i);
         }
     }
+    */
 
+    /*
     void enableManualTuning(bool value) {
-        manualTuning_ = true;
+        state_->setManualTuning(true);
+        send(Command::UpdateRadioState{state_})
         // tell AVR to update control dial value
-    }
+        } */
 
+    /*
     void togglePlay() {
         LOG("toggle play");
         switch (state_.mode()) {
@@ -146,7 +135,7 @@ public:
                 send(Command::SetIdle{radio_.getMute()});
                 break;
         }
-    }
+        }*/
 
     void loop() {
         switch (state_.mode()) {
@@ -159,34 +148,335 @@ public:
             }
             break;
         }
-        if (state_.irq())
-            getStatus();
+        if (stateUpdate_)
+            getStateUpdate();
     }
 
-    
-private:
 
-    void getStatus();
+    void setMode(State::Mode mode) {
+        if (mode != state_.mode()) {
+            leaveMode();
+            send(Command::SetMode{mode});
+        }
+        state_.setMode(mode);
+        switch (mode) {
+            case State::Mode::MP3:
+                LOG("mode: mp3");
+                // TODO actually check the number of playlists and the files, the current playlist and file
+                mp3File_.open("000/005.mp3");
+                i2s_.SetGain(state_.audioVolume() * 0.25);
+                mp3_.begin(& mp3File_, & i2s_);
+                break;
+            case State::Mode::Radio:
+                LOG("mode: radio");
+                radio_.init();
+                radio_.setVolume(state_.audioVolume());
+                setRadioFrequency(state_.radioFrequency());
+                setRadioManualTuning(state_.radioManualTuning());
+                break;
+        }
+    }
 
-    void updateStatus() {
-        if (state_.volumeChange())
-            updateVolume();
-        if (state_.volumePress())
-            togglePlay();
-        if (state_.volumeLongPress()) {
-            LOG("toggle audio lights");
-            send(Command::SetAudioLights{! state_.audioLights()});
+    void play() {
+        LOG("play");
+        switch (state_.mode()) {
+            case State::Mode::MP3:
+                // TODO
+                break;
+            case State::Mode::Radio:
+                radio_.init();
+                radio_.setVolume(state_.audioVolume());
+                setRadioFrequency(state_.radioFrequency());
+                break;
+        }
+        if (state_.idle()) {
+            state_.setIdle(false);
+            send(Command::SetIdle{false});
+        }
+    }
+
+    void stop() {
+        LOG("stop");
+        switch (state_.mode()) {
+            case State::Mode::MP3:
+                // TODO
+                break;
+            case State::Mode::Radio:
+                // instead of mute, terminate the radio to conserve power
+                radio_.term();
+                break;
+        }
+        if (! state_.idle()) {
+            state_.setIdle(true);
+            send(Command::SetIdle{true});
         }
         
-        if (state_.controlChange())
-            updateControl();
+    }
+
+    /** Sets the volume. 
+
+        If the volume is different than current state also changes the state and informs AVR.
+     */
+    void setAudioVolume(uint16_t volume) {
+        volume = (volume > 15) ? 15 : volume;
+        LOG("volume: " + volume);
+        switch (state_.mode()) {
+            case State::Mode::MP3:
+                i2s_.SetGain(volume * 0.25);
+                break;
+            case State::Mode::Radio:
+                radio_.setVolume(volume);
+                break;
+        }
+        if (volume != state_.audioVolume()) {
+            state_.setAudioVolume(volume);
+            send(Command::SetVolume{volume});
+        }
+    }
+
+    void setAudioLights(bool value) {
+        if (state_.audioLights() != value) {
+            LOG("audio lights: " + value);
+            state_.setAudioLights(value);
+            send(Command::SetAudioLights{state_.audioLights()});
+        }
+    }
+
+    void setRadioFrequency(uint16_t frequency) {
+        LOG("radio frequency: " + frequency);
+        if (state_.mode() == State::Mode::Radio)
+            radio_.setBandFrequency(RADIO_BAND_FM, frequency * 10);
+        if (state_.radioFrequency() != frequency) {
+            state_.setRadioFrequency(frequency);
+            send(Command::SetRadioState{state_});
+        }
+    }
+
+    void setRadioStation(uint8_t id) {
+        id = (id > 7) ? 7 : id;
+        LOG("radio station: " + id);
+        setRadioFrequency(radioStations_[id].frequency);
+        if (state_.radioStation() != id) {
+            state_.setRadioStation(id);
+            send(Command::SetRadioState{state_});
+        }
+    }
+
+    void setRadioManualTuning(bool value) {
+        LOG("radio manual tuning: " + value);
+        if (state_.mode() == State::Mode::Radio) {
+            if (value) {
+                send(Command::SetControl{state_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX});
+            } else {
+                send(Command::SetControl{state_.radioStation(), 7});
+                setRadioStation(state_.radioStation());
+            }
+        }
+        if (state_.radioManualTuning() != value) {
+            state_.setRadioManualTuning(value);
+            send(Command::SetRadioState{state_});
+        }
+    }
+
+private:
+
+    void initializeExtraSettings() {
+        // TODO replace this with actual stations
+        radioStations_[0].frequency = 937; // city
+        radioStations_[1].frequency = 1050; // vltava
+        radioStations_[2].frequency = 1025; // frekvence 1
+        radioStations_[3].frequency = 1007; // CRO
+        radioStations_[4].frequency = 997; // Bonton 
+        radioStations_[5].frequency = 987; // Classic
+        radioStations_[6].frequency = 972; // Fajn 
+        radioStations_[7].frequency = 966; // Impuls
+    }
+
+    void getStateUpdate() {
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(State));
+        if (n == sizeof(State)) {
+            State old{state_};
+            Wire.readBytes(pointer_cast<uint8_t*>(& state_), n);
+            LOG("I2C state received");
+            updateState(old);
+        } else {
+            LOG("I2C status corruption: " + n);
+        }
+    }
+    
+
+    /** Updates the peripherals according to the state changes. 
+     */
+    void updateState(State & old) {
+        // first react to events, since these will be cleared at the end, there is no need to check them against the old state
+        // short press of volume button starts / stops the music 
+        if (state_.volumePress())
+            state_.idle() ? play() : stop();
+
+        if (state_.volumeLongPress())
+            setAudioLights(! state_.audioLights());
+
+        // control press changes playlist in mp3 mode and toggles manual and station tuning in radio
+        if (state_.controlPress()) {
+            switch (state_.mode()) {
+                case State::Mode::MP3:
+                    // TODO
+                    break;
+                case State::Mode::Radio:
+                    setRadioManualTuning(!state_.radioManualTuning());
+                    break;
+            }
+        }
+
+        // if volume has changed, update the volume
+        if (old.audioVolume() != state_.audioVolume())
+            setAudioVolume(state_.audioVolume());
+        
+        // if control has changed, determine what is the control's function and update accordingly
+        if (old.control() != state_.control()) {
+            switch (state_.mode()) {
+                case State::Mode::MP3:
+                    // update the track id
+                    break;
+                case State::Mode::Radio:
+                    if (state_.radioManualTuning())
+                        setRadioFrequency(state_.control() + RADIO_FREQUENCY_OFFSET);
+                    else
+                        setRadioStation(state_.control());
+                    break;
+            }
+        }
+
+        // clear the processed events and store the state as own
+        state_.clearEvents();
+    }
+
+    void leaveMode() {
+        switch (state_.mode()) {
+            case State::Mode::MP3:
+                LOG("leaving: mp3");
+                mp3_.stop();
+                i2s_.stop();
+                mp3File_.close();
+                break;
+            case State::Mode::Radio:
+                LOG("leaving: radio");
+                radio_.term();
+                break;
+        }
+    }
+
+    /** Updates the volume settings to reflect current state. 
+     */
+    /*
+    void updateVolume() {
+        LOG("volume: " + state_.volume()); 
+        switch (state_.mode()) {
+            case State::Mode::Radio:
+                radio_.setVolume(state_.volume());
+                break;
+            case State::Mode::MP3:
+                i2s_.SetGain(state_.volume() * 0.25);
+                break;
+        }
+        }*/
+
+
+    /** \name Radio mode
+     */
+    //@{
+
+    /** Updates the radio-specific state. 
+     */
+    /*
+    void radioModeUpdateState() {
+        // sets either the frequency directly in manual tuning mode, or radio station
+        if (state_.controlChange()) {
+            if (state_.radioManualTuning())
+                setRadioFrequency(state_.control() + RADIO_FREQUENCY_OFFSET);
+            else
+                setRadioStation(state_.control());
+        }
+        // toggles the manual tuning on or off
+        if (state_.controlPress())
+            setRadioManualTuning(! state_.radioManualTuning());
+        // volume change just changes the volume of the radio as the control is directly linked to volume state
+        if (state_.volumeChange())
+            updateVolume();
+        // toggles radio play on or off
+        if (state_.volumePress())
+            if (state_.idle())
+                play();
+            else
+                stop();
+        // toggles the audio lights on or off
+        if (state_.volumeLongPress())
+            setAudioLights(!state_.audioLights());
+    }
+    */
+
+    /** Tells RDA to tune the frequency in the state. 
+     */
+    /*void updateRadioFrequency() {
+        LOG("frequency: " + state_.radioFrequency());
+        radio_.setBandFrequency(RADIO_BAND_FM, state_.radioFrequency() * 10);
+        } */
+
+    //@}
+
+
+    
+
+    /*
+    void updateControl() {
+        LOG("control: " + state_.control());
+        switch (state_.mode()) {
+            case State::Mode::Radio:
+                if (manualTuning_)
+                    setRadioFrequency(state_.control() + 760);
+                else
+                    setRadioStation(state_.control());
+                break;
+            case State::Mode::MP3:
+                break;
+        }
+    }
+    */
+    
+
+
+    /*
+    void updateStatus() {
+        if (state_.controlLongPress()) {
+            switchMode();
+        }
+        switch (state_.mode()) {
+            case State::Mode::Radio:
+                radioModeUpdateState();
+                break;
+        }
+        
+        state_.clearEvents();
+        
+        //if (state_.volumeChange())
+        //    updateVolume();
+        //if (state_.volumePress())
+        //    togglePlay();
+        //if (state_.volumeLongPress()) {
+        //    LOG("toggle audio lights");
+        //    send(Command::SetAudioLights{! state_.audioLights()});
+        //}
+        
+        //if (state_.controlChange())
+        //    updateControl();
+        / *
         if (state_.controlPress()) {
             switch (state_.mode()) {
                 case State::Mode::Radio: {
-                    manualTuning_ = ! manualTuning_;
-                    LOG("manual tuning: " + manualTuning_);
-                    if (manualTuning_) {
-                        send(Command::SetControl{radioFrequency_ - 760, 320});
+                    state_.setRadioManualTuning(! state_.radioManualTuning());
+                    LOG("manual tuning: " + state_.radioManualTuning());
+                    if (state_.manualTuning()) {
+                        send(Command::SetControl{state_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX});
                     } else {
                         send(Command::SetControl{0, 7});
                         setRadioStation(0);
@@ -199,8 +489,11 @@ private:
             switchMode();
 
         state_.clearEvents();
+        * /
     }
+    */
 
+    /*
     void switchMode() {
         switch (state_.mode()) {
         case State::Mode::MP3:
@@ -214,7 +507,7 @@ private:
         default:
             enterMP3Mode();
         }
-    }
+        }*/
 
     template<typename T>
     void send(T msg) {
@@ -224,16 +517,21 @@ private:
         Wire.endTransmission();
     }
 
+    /** The AVR stored state. 
+     */
+    volatile bool stateUpdate_ = false;
     State state_;
     
     /** \name Radio & settings. 
+
+        These are extra settings 
      */
     //@{
     RDA5807M radio_;
-    uint16_t radioFrequency_ = 0;
+    //uint16_t radioFrequency_ = 0;
     RadioStation radioStations_[8];
-    uint8_t currentStation_ = 0;
-    bool manualTuning_ = false;
+    //uint8_t currentStation_ = 0;
+    //bool manualTuning_ = false;
     //@}
 
     /** \name MP3 & Settings
@@ -256,33 +554,12 @@ private:
 
 Player player;
 
-void Player::getStatus() {
-    size_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(State));
-    if (n == sizeof(State)) {
-        Wire.readBytes(pointer_cast<uint8_t*>(& state_), n);
-        LOG("state received: m" + (int)state_.mode() + " c" + state_.control() + " v" + state_.volume());
-        updateStatus();
-    } else {
-        /*            
-                      player.state_.clearIrq();
-                      irq_ = false;
-                      uint8_t * x = pointer_cast<uint8_t*>(& player.state_);
-                      while (Wire.available()) {
-                      *x = Wire.read();
-                      ++x;
-                      }
-                      if (state.volumeChange())
-                      setVolume(state.volume());
-                      } else { */
-        LOG("I2C status corruption: " + n);
-    }
-}
 
 /** Handler for the avr irq. 
  */
 ICACHE_RAM_ATTR void Player::AvrIRQ() {
     // Serial.println("IRQ");
-    player.state_.setIrq();
+    player.stateUpdate_ = true;
 }
 
 
@@ -338,7 +615,7 @@ void printDirectory(File dir, int numTabs) {
 void setup() {
     Core::Setup(/* disableWifi */ true);
     player.initialize();
-    player.enterRadioMode();
+    player.setMode(State::Mode::Radio);
     printSD();
     
     //Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
