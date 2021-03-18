@@ -33,11 +33,14 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 ## TODO
 
+- add ADC1 for voltage & charging & headphones
+- ADC can be used to get temperature off the chip, which may be cool
+
 - add timeout info to state after powered up
 - make esp read state from avr after powerup
 - make avr work with the new esp code and test them together
-- add ADC1 for voltage & charging & headphones
 - determine better indicator for the audio strength (some annaeling?)
+- add idle timer and poweroff
 
 - rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
 - the 3v3 rail drops a lot when in boost mode, see why (breadboard?)

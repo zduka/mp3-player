@@ -9,13 +9,16 @@
 #define RADIO_FREQUENCY_OFFSET 760
 #define RADIO_FREQUENCY_MAX 320
 
-#define BUTTONS_COLOR Neopixel::Purple()
+#define BUTTONS_COLOR Neopixel::DarkPurple()
+#define BUTTONS_LONG_PRESS_COLOR Neopixel::Purple()
 #define VOLUME_COLOR Neopixel::Blue()
 #define CONTROL_COLOR Neopixel::Green()
 #define AUDIO_COLOR accentColor_
 
-
-
+/** The values of resistors forming the voltage divider from up to 5V to the reference voltage of 1.1V at the VCC_SENSE pin. For better accuracy.
+ */
+#define VCC_DIVIDER_RES1 38.6
+#define VCC_DIVIDER_RES2 10
 
 /** \name Pointer-to-pointer cast
  
@@ -36,7 +39,7 @@ inline T pointer_cast(W * from) {
 
 /** We can't use bitfields as sadly, they are implementation specific. 
 
-    The state is kept at AVR, which preserves it throughout power cycles as long as the battery is not completely depleted. To make sure that the state is always consistent between AVR and ESP, only AVR is allowed to modify the state. When ESP wants to modify the state, it does so by sending commands to AVR. 
+    The state is kept at AVR, which preserves it throughout power cycles as long as the battery is not completely depleted. 
  */
 struct State {
 public:
@@ -87,16 +90,14 @@ public:
 
     /** Shows the current input voltage. 
 
-        Is constructed by reading the input voltage in scale 0..255 corresponding to 0..5v and then discarding the most signifficant byte as under normal conditions, this will always be 1. 
-
-        127 == 5v from external source (and likely charging)
-        86  == 4.2v, a fully charged li-ion battery
-        60  == 3.7v, nominal value for 
-        40  == 3.3v, value at which the low battery warning is given
-        25  == 3v, value at which attiny goes immediately to deepsleep again
+        VCC voltage times 10. Values from 30 to 50 are to be expected (3 to 5 volts). 
     */
-    uint16_t voltage() const {
-        return 500 * ((power_ & POWER_VOLTAGE) + 128) / 255;
+    uint8_t voltage() const {
+        return power_ & POWER_VOLTAGE;
+    }
+
+    void setVoltage(uint8_t value) {
+        power_ = (power_ & ~POWER_VOLTAGE) | (value & POWER_VOLTAGE);
     }
 
     bool charging() const {
@@ -108,19 +109,6 @@ public:
     /** \name Events Register. 
      */
     //@{
-    /*
-    bool irq() const {
-        return events_ & EVENT_IRQ;
-    }
-
-    void setIrq() {
-        events_ |= EVENT_IRQ;
-    }
-
-    void clearEvents() {
-        events_ = 0;
-    }
-    */
 
     bool alarm() const {
         return events_ & EVENT_ALARM;
@@ -130,16 +118,6 @@ public:
         return events_ & EVENT_RTC_SYNC;
     }
 
-    /*
-    bool volumeChange() const {
-        return events_ & EVENT_VOL_CHANGE;
-    }
-    
-    bool controlChange() const {
-        return events_ & EVENT_CTRL_CHANGE;
-    }
-    */
-    
     bool volumePress() const {
         return events_ & EVENT_VOL_PRESS;
     }
@@ -155,16 +133,6 @@ public:
     bool controlLongPress() const {
         return events_ & EVENT_CTRL_LONG_PRESS;
     }
-
-    /*
-    bool lowBatteryChanged() const {
-        return events_ & EVENT_LOW_BATTERY_CHANGE;
-    }
-    
-    bool headphonesChanged() const {
-        return events_ & EVENT_HEADPHONES_CHANGE;
-    }
-    */
 
     void clearEvents() {
         events_ = 0;
@@ -288,14 +256,9 @@ private:
     uint8_t state_ = 0;
 
     static constexpr uint8_t POWER_CHARGING = 1 << 7;
-    static constexpr uint8_t POWER_VOLTAGE = 127;
+    static constexpr uint8_t POWER_VOLTAGE = 63;
     uint8_t power_ = 0;
     
-    //static constexpr uint16_t EVENT_IRQ = 1 << 0;
-    //static constexpr uint16_t EVENT_VOL_CHANGE = 1 << 3;
-    //static constexpr uint16_t EVENT_CTRL_CHANGE = 1 << 4;
-    //static constexpr uint16_t EVENT_LOW_BATTERY_CHANGE = 1 << 9;
-    //static constexpr uint16_t EVENT_HEADPHONES_CHANGE = 1 << 10;
     static constexpr uint16_t EVENT_ALARM = 1 << 0;
     static constexpr uint16_t EVENT_RTC_SYNC = 1 << 1;
     static constexpr uint16_t EVENT_VOL_PRESS = 1 << 2;
@@ -303,7 +266,6 @@ private:
     static constexpr uint16_t EVENT_CTRL_PRESS = 1 << 4;
     static constexpr uint16_t EVENT_CTRL_LONG_PRESS = 1 << 5;
     uint8_t events_ = 0;
-
 
     static constexpr uint8_t AUDIO_AUDIO_VOLUME = 15;
     static constexpr uint8_t AUDIO_AUDIO_SRC = 1 << 4;
@@ -417,24 +379,24 @@ struct Command {
     } __attribute__((packed));
 
     struct SetAudioLights {
-        static constexpr uint8_t Id = 4;
+        static constexpr uint8_t Id = 5;
         bool on;
     } __attribute__((packed));
 
     struct SetBrightness {
-        static constexpr uint8_t Id = 5;
+        static constexpr uint8_t Id = 6;
         uint8_t brightness;
     } __attribute__((packed));
 
     struct SetAccentColor {
-        static constexpr uint8_t Id = 6;
+        static constexpr uint8_t Id = 7;
         uint8_t red;
         uint8_t green;
         uint8_t blue;
     } __attribute__((packed));
 
     struct SpecialLights {
-        static constexpr uint8_t Id = 7;
+        static constexpr uint8_t Id = 8;
         static constexpr uint8_t POINT = 0;
         static constexpr uint8_t BAR = 1;
         static constexpr uint8_t CENTERED_BAR = 2;
@@ -448,7 +410,7 @@ struct Command {
     } __attribute__((packed));
 
     struct Lights {
-        static constexpr uint8_t Id = 8;
+        static constexpr uint8_t Id = 9;
         uint8_t colors[24];
         uint16_t duration;
     } __attribute__((packed));

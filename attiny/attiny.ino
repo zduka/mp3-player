@@ -33,10 +33,12 @@
 #define AUDIO_SRC 3
 #define AUDIO_ADC 4
 #define VCC_SENSE 0
+#define HEADPHONES 1
 #define MIC 15
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
+extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
 /** The MP3 Player Device Controller
 
@@ -72,19 +74,98 @@ public:
         digitalWrite(AUDIO_SRC, LOW);
         // enable the ADC inputs (audio, mic, voltage), disable the digital input buffers and pull-up resistors
         // NOTE this requires that the pins stay the same
-        static_assert(AUDIO_ADC == 4, "Must be PB5");
+        static_assert(AUDIO_ADC == 4, "Must be PB5"); // ADC0 input 8
         PORTB.PIN5CTRL &= ~PORT_ISC_gm;
         PORTB.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
         PORTB.PIN5CTRL &= ~PORT_PULLUPEN_bm;
-
-        
-        //pinMode(AUDIO_ADC, INPUT);
-        pinMode(MIC, INPUT);
-        pinMode(VCC_SENSE, INPUT);
-
+        static_assert(MIC == 15, "Must be PA2"); // ADC0 input 2
+        PORTA.PIN2CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN2CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(VCC_SENSE == 0, "Must be PA4"); // ADC1 input 0
+        PORTA.PIN4CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN4CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(HEADPHONES == 1, "Must be PA5"); // ADC1 input 1
+        PORTA.PIN5CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN5CTRL &= ~PORT_PULLUPEN_bm;
     }
 
+    void setup() {
+        // setup ADC0 and ADC1 settings
+        // set reference to 1.1V
+        VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
+        VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
+        VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
+        VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
+        // clkdiv by 4, internal voltage reference
+        ADC0.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc;
+        ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc;
+
+        // get the voltage and determine if it's too low to proceed
+        uint8_t voltage = getVoltage();
+        powerOn();
+        neopixels_.showBar(voltage, 50, Neopixel::Red());
+        //        neopixels_.setAll(Neopixel::Green());
+        neopixels_.sync();
+        delay(1000);
+        neopixels_.setAll(Neopixel::Black());
+        neopixels_.sync();
+    }
     
+    void loop() {
+        if (rtcTick()) {
+            if (irq_.enabled && --irq_.timer == 0) {
+                resetEsp();
+            } else {
+                // if the buttons are pressed, decrement their down ticks so that long presses can be determined 
+                if (volBtnDownTicks_ > 0)
+                    --volBtnDownTicks_;
+                if (ctrlBtnDownTicks_ > 0)
+                    --ctrlBtnDownTicks_;
+                // update the lights
+                lightsTick();
+            }
+        }
+    }
+
+private:
+
+    void setMode(State::Mode mode) {
+        state_.setMode(mode);
+        switch (mode) {
+            case State::Mode::MP3:
+                enableAudioADC();
+                digitalWrite(AUDIO_SRC, LOW);
+                break;
+            case State::Mode::Radio:
+                enableAudioADC();
+                digitalWrite(AUDIO_SRC, HIGH);
+                break;
+        }
+    }
+
+    void setIdle(bool value) {
+        state_.setIdle(value);
+        // TODO start idle timer to poweroff
+    }
+    
+    void setVolume(uint8_t value) {
+        if (value != state_.audioVolume()) {
+            state_.setAudioVolume(value);
+            neopixels_.showBar(state_.audioVolume(), 15, VOLUME_COLOR.withBrightness(brightness_));
+            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
+        }
+    }
+
+    void setControl(uint16_t value) {
+        if (value != state_.control()) {
+            state_.setControl(value);
+            neopixels_.showPoint(state_.control(), control_.maxValue(), CONTROL_COLOR.withBrightness(brightness_));
+            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
+        }
+    }
 
     /** Returns true if there was an RTC tick since the last call to the function. 
 
@@ -110,92 +191,16 @@ public:
         }
     }
 
-    void requestPowerOn() {
-        if (++powerRequests_ == 1) {
-            digitalWrite(DCDC_PWR, HIGH);
-            state_.state_ |= State::STATE_DCDC_POWER; 
-            delay(50);
-        }
+    void powerOn() {
+        digitalWrite(DCDC_PWR, HIGH);
+        state_.state_ |= State::STATE_DCDC_POWER; 
+        delay(50);
     }
 
-    void releasePowerOn() {
-        if (powerRequests_ > 0) {
-            if (--powerRequests_ == 0) {
-                digitalWrite(DCDC_PWR, LOW);
-                state_.state_ &= ~State::STATE_DCDC_POWER;
-            }
-        }
+    void powerOff() {
+        digitalWrite(DCDC_PWR, LOW);
+        state_.state_ &= ~State::STATE_DCDC_POWER;
     }
-
-    void setVolume(uint8_t value) {
-        if (value != state_.volume()) {
-            state_.setVolume(value);
-            neopixels_.showBar(state_.volume(), 15, VOLUME_COLOR.withBrightness(brightness_));
-            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
-            setIrq();
-        }
-    }
-
-    void setControl(uint16_t value) {
-        if (value != state_.control()) {
-            state_.setControl(value);
-            neopixels_.showPoint(state_.control(), control_.maxValue(), CONTROL_COLOR.withBrightness(brightness_));
-            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
-            setIrq();
-        }
-    }
-
-    void enterMP3Mode(uint16_t controlValue, uint16_t controlMax) {
-        enableAudioADC();
-        control_.setMaxValue(controlMax);
-        control_.setValue(controlValue);
-        digitalWrite(AUDIO_SRC, LOW);
-        state_.setAudioSrc(State::AudioSrc::ESP);
-        state_.setMode(State::Mode::MP3);
-        state_.setControl(control_.value());
-        // make sure we have IRQ set
-        setIrq();
-    }
-
-    /** Enters the radio mode. 
-     */
-    void enterRadioMode(uint16_t controlValue, uint16_t controlMax) {
-        enableAudioADC();
-        control_.setMaxValue(controlMax);
-        control_.setValue(controlValue);
-        digitalWrite(AUDIO_SRC, HIGH);
-        state_.setAudioSrc(State::AudioSrc::Radio);
-        state_.setMode(State::Mode::Radio);
-        state_.setControl(control_.value());
-        // make sure we have IRQ set
-        setIrq();
-    }
-
-    void setup() {
-        neopixels_.setAll(Neopixel::Green());
-        neopixels_.update();
-        delay(100);
-        neopixels_.setAll(Neopixel::Black());
-        neopixels_.update();
-    }
-    
-    void loop() {
-        if (rtcTick()) {
-            if (state_.irq() && --irqTimer_ == 0) {
-                resetEsp();
-                return;
-            }
-            // if the buttons are pressed, decrement their down ticks so that long presses can be determined 
-            if (volBtnDownTicks_ > 0)
-                --volBtnDownTicks_;
-            if (ctrlBtnDownTicks_ > 0)
-                --ctrlBtnDownTicks_;
-            // update the lights
-            lightsTick();
-        }
-    }
-
-private:
 
     /** Resets the ESP8266. 
      */
@@ -215,11 +220,11 @@ private:
     /** Sets the IRQ to ping the esp8266. 
      */
     bool setIrq() {
-        if (!state_.irq()) {
-            state_.events_ |= State::EVENT_IRQ;
+        if (!irq_.enabled) {
+            irq_.enabled = true;
+            irq_.timer = IRQ_MAX_DELAY;
             pinMode(AVR_IRQ,OUTPUT);
             digitalWrite(AVR_IRQ, LOW);
-            irqTimer_ = IRQ_MAX_DELAY;
             return true;
         } else {
             return false;
@@ -227,8 +232,9 @@ private:
     }
 
     void clearIrq() {
-        if (state_.events_ & State::EVENT_IRQ) {
-            state_.events_ = 0;
+        if (irq_.enabled) {
+            irq_.enabled = false;
+            state_.clearEvents();
             pinMode(AVR_IRQ, INPUT);
         }
     }
@@ -245,6 +251,7 @@ private:
         }
     }
 
+
     /** \name Lights
 
      */
@@ -259,8 +266,10 @@ private:
     void lightsTick() {
         if (state_.volumeButtonDown() || state_.controlButtonDown()) {
             uint8_t v = BUTTON_LONG_PRESS_TICKS - max(volBtnDownTicks_, ctrlBtnDownTicks_);
-            neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_COLOR.withBrightness(brightness_));
-            neopixels_.sync();
+            if (v == BUTTON_LONG_PRESS_TICKS)
+                neopixels_.setAll(BUTTONS_LONG_PRESS_COLOR.withBrightness(brightness_));
+            else 
+                neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_COLOR.withBrightness(brightness_));
         } else {
             if (specialLights_ == 0) {
                 if (state_.audioLights())
@@ -268,13 +277,10 @@ private:
             } else if (--specialLights_ == 0) {
                 neopixels_.setAll(Neopixel::Black());
             }
-            neopixels_.tick(max(brightness_ / 16, 1));
         }
-        
+        neopixels_.tick(max(brightness_ / 16, 1));
     }
     //@}
-
-    
 
     /** \name Controls
      */
@@ -290,13 +296,17 @@ private:
     uint8_t ctrlBtnDownTicks_ = 0;
 
     void volumeChanged() {
-        volume_.poll();
-        setVolume(volume_.value());
+        if (volume_.poll()) {
+            setVolume(volume_.value());
+            setIrq();
+        }
     }
 
     void controlChanged() {
-        control_.poll();
-        setControl(control_.value());
+        if (control_.poll()) {
+            setControl(control_.value());
+            setIrq();
+        }
     }
 
     void volumeButtonChanged() {
@@ -343,34 +353,41 @@ private:
     void i2cReceiveEvent(int numBytes) {
         Wire.readBytes(pointer_cast<uint8_t*>(& cmdBuffer_), numBytes);
         switch (cmdBuffer_[0]) {
-            case Command::EnterMP3Mode::Id: {
-                Command::EnterRadioMode * cmd = pointer_cast<Command::EnterRadioMode*>(& cmdBuffer_[1]);
-                enterMP3Mode(cmd->controlValue, cmd->controlMaxValue);
+            case Command::SetMode::Id: {
+                Command::SetMode * cmd = pointer_cast<Command::SetMode*>(& cmdBuffer_[1]);
+                setMode(cmd->mode);
                 break;
             }
-            case Command::EnterRadioMode::Id: {
-                Command::EnterRadioMode * cmd = pointer_cast<Command::EnterRadioMode*>(& cmdBuffer_[1]);
-                enterRadioMode(cmd->controlValue, cmd->controlMaxValue);
+            case Command::SetIdle::Id: {
+                Command::SetIdle * cmd = pointer_cast<Command::SetIdle*>(& cmdBuffer_[1]);
+                setIdle(cmd->idle);
                 break;
             }
             case Command::SetVolume::Id: {
                 Command::SetVolume * cmd = pointer_cast<Command::SetVolume*>(& cmdBuffer_[1]);
                 volume_.setValue(cmd->value);
-                state_.setVolume(volume_.value(), /* recordChange */ false);
+                setVolume(cmd->value);
                 break;
             }
             case Command::SetControl::Id: {
                 Command::SetControl * cmd = pointer_cast<Command::SetControl*>(& cmdBuffer_[1]);
                 control_.setMaxValue(cmd->maxValue);
                 control_.setValue(cmd->value);
-                state_.setControl(control_.value(), /* recordChange */ false);
+                setControl(cmd->value);
                 break;
             }
+            case Command::SetRadioState::Id: {
+                Command::SetRadioState * cmd = pointer_cast<Command::SetRadioState*>(& cmdBuffer_[1]);
+                state_.setRadioStation(cmd->station);
+                state_.setRadioFrequency(cmd->frequency);
+                state_.setRadioManualTuning(cmd->manualTuning);
+                break;
+            }
+                
             case Command::SetAudioLights::Id: {
                 Command::SetAudioLights * cmd = pointer_cast<Command::SetAudioLights*>(& cmdBuffer_[1]);
                 state_.setAudioLights(cmd->on);
                 neopixels_.setAll(Neopixel::Black());
-                setIrq();
                 break;
             }
             case Command::SetBrightness::Id: {
@@ -443,9 +460,37 @@ private:
         unsigned counter : 5; // 0..31
     } rtcTick_;
 
-    uint8_t irqTimer_;
+    mutable volatile struct {
+        unsigned enabled : 1;
+        unsigned timer : 7;
+    } irq_;
 
-    /** \name Audio output readouts. 
+
+    /** \name ADC1 - Voltage, temperature and headphones
+     */
+    //@{
+
+    uint8_t getVoltage() {
+        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc;
+        ADC1.MUXPOS = ADC_MUXPOS_AIN0_gc;
+        ADC1.COMMAND = ADC_STCONV_bm;
+        // wait for the conversion to be complete
+        while (ADC1.INTFLAGS & ADC_RESRDY_bm == 0)
+            continue;
+        // convert the result to voltage and store it in the state
+        setVoltageFromADC(ADC1.RES);
+        return state_.voltage();
+    }
+
+    void setVoltageFromADC(uint8_t adc) {
+        state_.setVoltage(static_cast<uint8_t>(11.0 * adc / 255 * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2));
+    }
+
+    //@}
+
+    
+
+    /** \name Audio output and mic readouts. 
      */
     //@{
 
@@ -454,11 +499,6 @@ private:
         audioMin_ = 255;
         audioMax_ = 0;
         audioSamples_ = 0;
-        // set ADC0 reference to 1.1V
-        VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
-        VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
-        // clkdiv by 4, internal voltage reference
-        ADC0.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc;
         // enable and use 8bit resolution, freerun mode
         ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
         // select ADC channel to AUDIO_ADC pin
@@ -493,9 +533,6 @@ private:
     //@}
     
 
-    volatile uint8_t powerRequests_ = 0;
-
-    
     static void I2CSendEventTrampoline();
     static void I2CReceiveEventTrampoline(int numBytes);
 
@@ -506,6 +543,7 @@ private:
 
     friend void ::RTC_PIT_vect();
     friend void ::ADC0_RESRDY_vect();
+    friend void ::ADC1_RESRDY_vect();
 
 }; // Player
 
@@ -524,7 +562,6 @@ ISR(RTC_PIT_vect) {
 ISR(ADC0_RESRDY_vect) {
     player.addAudioReading(ADC0.RES); 
 }
-
 
 void AVRPlayer::I2CSendEventTrampoline() {
     player.i2cSendEvent();
@@ -556,13 +593,7 @@ void setup() {
     Serial.begin(9600);
     Serial.println("Hello world");
     */
-
-    
-
-    player.requestPowerOn();
-    // quick blink at startup
     player.setup();
-
 }
 
 

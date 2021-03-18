@@ -60,6 +60,8 @@ public:
     static Neopixel Red() { return Neopixel{255,0,0}; }
     static Neopixel Purple() { return Neopixel{255,0,255}; }
 
+    static Neopixel DarkPurple() { return Neopixel{128, 0, 128}; }
+
 private:
     static bool MoveChannelTowards(uint8_t & channel, uint8_t target, uint8_t step) {
         if (channel == target)
