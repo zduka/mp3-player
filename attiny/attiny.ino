@@ -152,19 +152,17 @@ private:
     }
     
     void setVolume(uint8_t value) {
-        if (value != state_.audioVolume()) {
+        if (value != state_.audioVolume()) 
             state_.setAudioVolume(value);
-            neopixels_.showBar(state_.audioVolume(), 15, VOLUME_COLOR.withBrightness(brightness_));
-            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
-        }
+        neopixels_.showBar(state_.audioVolume(), 15, VOLUME_COLOR.withBrightness(brightness_));
+        specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
     }
 
     void setControl(uint16_t value) {
-        if (value != state_.control()) {
+        if (value != state_.control()) 
             state_.setControl(value);
-            neopixels_.showPoint(state_.control(), control_.maxValue(), CONTROL_COLOR.withBrightness(brightness_));
-            specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
-        }
+        neopixels_.showPoint(state_.control(), control_.maxValue() - 1, controlColor_.withBrightness(brightness_));
+        specialLights_ = SPECIAL_LIGHTS_TIMEOUT;
     }
 
     /** Returns true if there was an RTC tick since the last call to the function. 
@@ -259,6 +257,7 @@ private:
     NeopixelStrip<NEOPIXEL, 8> neopixels_;
     uint8_t specialLights_ = 0;
     Neopixel accentColor_ = Neopixel::White();
+    Neopixel controlColor_;
     /** Maximum brightness of the strip. 
      */
     uint8_t brightness_ = 32;
@@ -296,17 +295,15 @@ private:
     uint8_t ctrlBtnDownTicks_ = 0;
 
     void volumeChanged() {
-        if (volume_.poll()) {
-            setVolume(volume_.value());
-            setIrq();
-        }
+        volume_.poll();
+        setVolume(volume_.value());
+        setIrq();
     }
 
     void controlChanged() {
-        if (control_.poll()) {
-            setControl(control_.value());
-            setIrq();
-        }
+        control_.poll();
+        setControl(control_.value());
+        setIrq();
     }
 
     void volumeButtonChanged() {
@@ -381,6 +378,16 @@ private:
                 state_.setRadioStation(cmd->station);
                 state_.setRadioFrequency(cmd->frequency);
                 state_.setRadioManualTuning(cmd->manualTuning);
+                controlColor_ = state_.radioManualTuning() ? RADIO_FREQUENCY_COLOR : RADIO_STATION_COLOR;
+                break;
+            }
+                
+            case Command::SetMP3State::Id: {
+                Command::SetMP3State * cmd = pointer_cast<Command::SetMP3State*>(& cmdBuffer_[1]);
+                state_.setMp3PlaylistId(cmd->playlist);
+                state_.setMp3TrackId(cmd->track);
+                state_.setMp3PlaylistSelection(cmd->playlistSelection);
+                controlColor_ = state_.mp3PlaylistSelection() ? MP3_PLAYLIST_COLOR : MP3_TRACK_COLOR;
                 break;
             }
                 
@@ -471,19 +478,19 @@ private:
     //@{
 
     uint8_t getVoltage() {
-        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc;
         ADC1.MUXPOS = ADC_MUXPOS_AIN0_gc;
+        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc;
         ADC1.COMMAND = ADC_STCONV_bm;
         // wait for the conversion to be complete
-        while (ADC1.INTFLAGS & ADC_RESRDY_bm == 0)
+        while (! ADC1.INTFLAGS & ADC_RESRDY_bm)
             continue;
         // convert the result to voltage and store it in the state
         setVoltageFromADC(ADC1.RES);
         return state_.voltage();
     }
 
-    void setVoltageFromADC(uint8_t adc) {
-        state_.setVoltage(static_cast<uint8_t>(11.0 * adc / 255 * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2));
+    void setVoltageFromADC(uint16_t adc) {
+        state_.setVoltage(static_cast<uint8_t>(110 * adc / 255 * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2 / 10));
     }
 
     //@}
@@ -499,10 +506,10 @@ private:
         audioMin_ = 255;
         audioMax_ = 0;
         audioSamples_ = 0;
-        // enable and use 8bit resolution, freerun mode
-        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
         // select ADC channel to AUDIO_ADC pin
         ADC0.MUXPOS  = ADC_MUXPOS_AIN8_gc;
+        // enable and use 8bit resolution, freerun mode
+        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
         // enable the interrupt
         ADC0.INTCTRL |= ADC_RESRDY_bm;
         // and start the conversion

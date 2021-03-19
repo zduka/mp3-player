@@ -3,22 +3,27 @@
 #define AVR_I2C_ADDRESS 42
 
 
+#define ESP_VOLUME_STEP 0.2
+
 #define BUTTON_LONG_PRESS_TICKS 64
 #define SPECIAL_LIGHTS_TIMEOUT 32
 #define IRQ_MAX_DELAY 32
 #define RADIO_FREQUENCY_OFFSET 760
 #define RADIO_FREQUENCY_MAX 320
 
-#define BUTTONS_COLOR Neopixel::DarkPurple()
-#define BUTTONS_LONG_PRESS_COLOR Neopixel::Purple()
-#define VOLUME_COLOR Neopixel::Blue()
-#define CONTROL_COLOR Neopixel::Green()
+#define BUTTONS_COLOR Neopixel::DarkRed()
+#define BUTTONS_LONG_PRESS_COLOR Neopixel::Red()
+#define VOLUME_COLOR Neopixel::Yellow()
+#define RADIO_STATION_COLOR Neopixel::Green()
+#define RADIO_FREQUENCY_COLOR Neopixel::Cyan()
+#define MP3_TRACK_COLOR Neopixel::Blue()
+#define MP3_PLAYLIST_COLOR Neopixel::Purple()
 #define AUDIO_COLOR accentColor_
 
 /** The values of resistors forming the voltage divider from up to 5V to the reference voltage of 1.1V at the VCC_SENSE pin. For better accuracy.
  */
-#define VCC_DIVIDER_RES1 38.6
-#define VCC_DIVIDER_RES2 10
+#define VCC_DIVIDER_RES1 386
+#define VCC_DIVIDER_RES2 100
 
 /** \name Pointer-to-pointer cast
  
@@ -204,8 +209,27 @@ public:
         return mp3_ & MP3_TRACK_ID;
     }
 
-    uint16_t mp3AlbumId() const {
-        return mp3_ & MP3_ALBUM_ID >> 10;
+    void setMp3TrackId(uint16_t value) {
+        mp3_ = (mp3_ & ~MP3_TRACK_ID) | (value & MP3_TRACK_ID);
+    }
+
+    uint8_t mp3PlaylistId() const {
+        return (mp3_ & MP3_PLAYLIST_ID) >> 10;
+    }
+
+    void setMp3PlaylistId(uint16_t value) {
+        mp3_ = (mp3_ & ~MP3_PLAYLIST_ID) | ((value << 10) & MP3_PLAYLIST_ID);
+    }
+
+    bool mp3PlaylistSelection() const {
+        return mp3_ & MP3_PLAYLIST_SELECTION;
+    }
+
+    void setMp3PlaylistSelection(bool value) {
+        if (value)
+            mp3_ |= MP3_PLAYLIST_SELECTION;
+        else
+            mp3_ &= ~MP3_PLAYLIST_SELECTION;
     }
     
     //@}
@@ -276,7 +300,8 @@ private:
     uint16_t control_ = 0;
 
     static constexpr uint16_t MP3_TRACK_ID = 1023;
-    static constexpr uint16_t MP3_ALBUM_ID = 7 << 10;
+    static constexpr uint16_t MP3_PLAYLIST_ID = 7 << 10;
+    static constexpr uint16_t MP3_PLAYLIST_SELECTION = 1 << 15;
     uint16_t mp3_;
 
     static constexpr uint16_t RADIO_FREQUENCY = 511;
@@ -378,25 +403,39 @@ struct Command {
         
     } __attribute__((packed));
 
-    struct SetAudioLights {
+    struct SetMP3State {
         static constexpr uint8_t Id = 5;
+        uint8_t playlist;
+        uint16_t track;
+        bool playlistSelection;
+
+        SetMP3State(State const & state):
+            playlist{state.mp3PlaylistId()},
+            track{state.mp3TrackId()},
+            playlistSelection{state.mp3PlaylistSelection()} {
+        }
+        
+    } __attribute__((packed));
+
+    struct SetAudioLights {
+        static constexpr uint8_t Id = 6;
         bool on;
     } __attribute__((packed));
 
     struct SetBrightness {
-        static constexpr uint8_t Id = 6;
+        static constexpr uint8_t Id = 7;
         uint8_t brightness;
     } __attribute__((packed));
 
     struct SetAccentColor {
-        static constexpr uint8_t Id = 7;
+        static constexpr uint8_t Id = 8;
         uint8_t red;
         uint8_t green;
         uint8_t blue;
     } __attribute__((packed));
 
     struct SpecialLights {
-        static constexpr uint8_t Id = 8;
+        static constexpr uint8_t Id = 9;
         static constexpr uint8_t POINT = 0;
         static constexpr uint8_t BAR = 1;
         static constexpr uint8_t CENTERED_BAR = 2;
@@ -410,36 +449,10 @@ struct Command {
     } __attribute__((packed));
 
     struct Lights {
-        static constexpr uint8_t Id = 9;
+        static constexpr uint8_t Id = 10;
         uint8_t colors[24];
         uint16_t duration;
     } __attribute__((packed));
-
-
-
-
-    /*struct EnterMP3Mode {
-        static constexpr uint8_t Id = 0;
-        uint16_t controlValue;
-        uint16_t controlMaxValue;
-
-        EnterMP3Mode(uint16_t controlValue, uint16_t controlMaxValue):
-            controlValue{controlValue},
-            controlMaxValue{controlMaxValue} {
-        }
-        } __attribute__((packed)); */
-
-    /*    struct EnterRadioMode {
-        static constexpr uint8_t Id = 1;
-        uint16_t controlValue;
-        uint16_t controlMaxValue;
-
-        EnterRadioMode(uint16_t controlValue, uint16_t controlMaxValue):
-            controlValue{controlValue},
-            controlMaxValue{controlMaxValue} {
-        }
-        } __attribute__((packed)); */
-
     
 };
 

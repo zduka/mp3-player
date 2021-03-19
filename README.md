@@ -33,17 +33,19 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 ## TODO
 
+- change voltage input to 4.2 - 3.4, low battery warning from 3.5 or 3.6? need to test this, the regulators won't work below 3.4v
 - add ADC1 for voltage & charging & headphones
 - ADC can be used to get temperature off the chip, which may be cool
 
-- add timeout info to state after powered up
+- add idle timer and poweroff, add timeout info to state after powered up
 - make esp read state from avr after powerup
-- make avr work with the new esp code and test them together
 - determine better indicator for the audio strength (some annaeling?)
-- add idle timer and poweroff
+
+- repeat modes for mp3
+- some mp3 files take time to load and make avr reset esp, see why?
+- extra settings, such as time limited volume, radio, 
 
 - rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
-- the 3v3 rail drops a lot when in boost mode, see why (breadboard?)
 
 ## AVR
 

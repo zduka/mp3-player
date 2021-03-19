@@ -40,7 +40,7 @@ public:
 
         We can't use the constructor as this interferes with the WiFi. Initializes the peripherals (namely I2C to AVR and the IRQ pin and interrupt) and loads the extra configuration from the SD card. 
      */
-    void initialize() {
+    void setup() {
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
         Wire.begin();
@@ -50,100 +50,14 @@ public:
         delay(200);
     }
 
-    /** Enters the radio mode. 
-     */
-    /*
-    void enterRadioMode() {
-        LOG("entering radio mode");
-        radio_.init();
-        radio_.setVolume(state_.volume());
-        // we can always simply set radio frequency here because in stations mode, it contains the current station's frequency
-        updateRadioFrequency();
-        //setRadioFrequency(state_.radioFrequency());
-        // update the control dial range depending on the mode used 
-        if (state_.radioManualTuning())
-            send(Command::EnterRadioMode{state_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX});
-        else
-            send(Command::EnterRadioMode{state_.radioStation(), 7});
-    }
-    */
-
-    /*
-    void setRadioFrequency(uint16_t frequency) {
-        state_.setRadioFrequency(frequency);
-        updateRadioFrequency();
-        // TODO Send command that updates the frequency on AVR
-        }*/
-
-    /*
-    void enterMP3Mode() {
-        LOG("entering mp3 mode");
-        // TODO actually check the number of playlists and the files, the current playlist and file
-        mp3File_.open("000/005.mp3");
-        i2s_.SetGain(state_.volume() * 0.25);
-        mp3_.begin(& mp3File_, & i2s_);
-        send(Command::EnterMP3Mode{0, 7});
-    }
-    */
-
-    /*
-    void leaveRadioMode() {
-        LOG("leaving radio mode");
-        radio_.term();
-        } */
-
-
-    /*
-    void leaveMP3Mode() {
-        LOG("leaving mp3 mode");
-        mp3_.stop();
-        i2s_.stop();
-        mp3File_.close();
-        }*/
-
-    /*
-    void setRadioStation(uint16_t i) {
-        if (i < 8) {
-            LOG("station: " + i);
-            currentStation_ = i;
-            setRadioFrequency(radioStations_[i].frequency);
-        } else {
-            LOG("! Invalid station index " + i);
-        }
-    }
-    */
-
-    /*
-    void enableManualTuning(bool value) {
-        state_->setManualTuning(true);
-        send(Command::UpdateRadioState{state_})
-        // tell AVR to update control dial value
-        } */
-
-    /*
-    void togglePlay() {
-        LOG("toggle play");
-        switch (state_.mode()) {
-            case State::Mode::MP3:
-                if (mp3_.isRunning()) { 
-                    mp3_.stop();
-                    send(Command::SetIdle{true});
-                }
-                break;
-            case State::Mode::Radio:
-                radio_.setMute(! radio_.getMute());
-                send(Command::SetIdle{radio_.getMute()});
-                break;
-        }
-        }*/
-
     void loop() {
         switch (state_.mode()) {
         case State::Mode::MP3:
             if (mp3_.isRunning()) {
                 if (!mp3_.loop()) {
                     mp3_.stop();
-                    LOG("MP3 done");
+                    LOG("song done");
+                    playNextTrack();
                 }
             }
             break;
@@ -152,20 +66,18 @@ public:
             getStateUpdate();
     }
 
-
     void setMode(State::Mode mode) {
         if (mode != state_.mode()) {
             leaveMode();
             send(Command::SetMode{mode});
         }
         state_.setMode(mode);
+        // TODO disable idle as we start playing immediately
         switch (mode) {
             case State::Mode::MP3:
                 LOG("mode: mp3");
-                // TODO actually check the number of playlists and the files, the current playlist and file
-                mp3File_.open("000/005.mp3");
-                i2s_.SetGain(state_.audioVolume() * 0.25);
-                mp3_.begin(& mp3File_, & i2s_);
+                setPlaylist(state_.mp3PlaylistId());
+                setMp3PlaylistSelection(state_.mp3PlaylistSelection());
                 break;
             case State::Mode::Radio:
                 LOG("mode: radio");
@@ -179,9 +91,13 @@ public:
 
     void play() {
         LOG("play");
+        if (state_.idle()) {
+            state_.setIdle(false);
+            send(Command::SetIdle{false});
+        }
         switch (state_.mode()) {
             case State::Mode::MP3:
-                // TODO
+                setTrack(state_.mp3TrackId());
                 break;
             case State::Mode::Radio:
                 radio_.init();
@@ -189,17 +105,18 @@ public:
                 setRadioFrequency(state_.radioFrequency());
                 break;
         }
-        if (state_.idle()) {
-            state_.setIdle(false);
-            send(Command::SetIdle{false});
-        }
     }
 
     void stop() {
         LOG("stop");
         switch (state_.mode()) {
             case State::Mode::MP3:
-                // TODO
+                // stop current playback
+                if (mp3_.isRunning()) {
+                    mp3_.stop();
+                    i2s_.stop();
+                    mp3File_.close();
+                }
                 break;
             case State::Mode::Radio:
                 // instead of mute, terminate the radio to conserve power
@@ -210,7 +127,19 @@ public:
             state_.setIdle(true);
             send(Command::SetIdle{true});
         }
-        
+    }
+
+    /** Plays next track. 
+
+        Depending on the settings, this would play next song, or cycle tracks / albums.
+
+        TODO
+     */
+    void playNextTrack() {
+        if (state_.mp3TrackId() + 1 <  numTracks_)
+            setTrack(state_.mp3TrackId() + 1);
+        else
+            stop();
     }
 
     /** Sets the volume. 
@@ -222,7 +151,7 @@ public:
         LOG("volume: " + volume);
         switch (state_.mode()) {
             case State::Mode::MP3:
-                i2s_.SetGain(volume * 0.25);
+                i2s_.SetGain(volume * ESP_VOLUME_STEP);
                 break;
             case State::Mode::Radio:
                 radio_.setVolume(volume);
@@ -263,24 +192,53 @@ public:
     }
 
     void setRadioManualTuning(bool value) {
+        if (state_.radioManualTuning() != value) {
+            state_.setRadioManualTuning(value);
+            send(Command::SetRadioState{state_});
+        }
         LOG("radio manual tuning: " + value);
         if (state_.mode() == State::Mode::Radio) {
             if (value) {
                 send(Command::SetControl{state_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX});
             } else {
-                send(Command::SetControl{state_.radioStation(), 7});
+                send(Command::SetControl{state_.radioStation(), 8});
                 setRadioStation(state_.radioStation());
             }
         }
-        if (state_.radioManualTuning() != value) {
-            state_.setRadioManualTuning(value);
-            send(Command::SetRadioState{state_});
-        }
     }
 
+    void setMp3PlaylistSelection(bool value) {
+        LOG("mp3 playlist selection: " + value);
+        if (state_.mp3PlaylistSelection() != value) {
+            state_.setMp3PlaylistSelection(value);
+            send(Command::SetMP3State{state_});
+        }
+        if (state_.mode() == State::Mode::MP3) {
+            if (value)
+                send(Command::SetControl{state_.mp3PlaylistId(), numPlaylists_});
+            else
+                send(Command::SetControl{state_.mp3TrackId(), numTracks_});
+        }
+    }
+    
 private:
 
     void initializeExtraSettings() {
+        // determine song banks
+        if (SD.begin(CS, SPI_HALF_SPEED)) {
+            LOG("SD card detected, analyzing:");
+            numPlaylists_ = 1;
+            for (; numPlaylists_ <= 8; ++numPlaylists_) {
+                File f = SD.open(String("/") + numPlaylists_);
+                if (!f)
+                    break;
+                f.close();
+            }
+            --numPlaylists_;
+            LOG("Playlists detected: " + numPlaylists_);
+        } else {
+            LOG("Error reading from SD card. MP3 mode will be disabled.");
+        }
         // TODO replace this with actual stations
         radioStations_[0].frequency = 937; // city
         radioStations_[1].frequency = 1050; // vltava
@@ -293,6 +251,7 @@ private:
     }
 
     void getStateUpdate() {
+        stateUpdate_ = false;
         size_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(State));
         if (n == sizeof(State)) {
             State old{state_};
@@ -308,7 +267,35 @@ private:
     /** Updates the peripherals according to the state changes. 
      */
     void updateState(State & old) {
-        // first react to events, since these will be cleared at the end, there is no need to check them against the old state
+
+        // check volume and control first as they can be changed by the rest
+
+        // if volume has changed, update the volume
+        if (old.audioVolume() != state_.audioVolume())
+            setAudioVolume(state_.audioVolume());
+        
+        // if control has changed, determine what is the control's function and update accordingly
+        if (old.control() != state_.control()) {
+            switch (state_.mode()) {
+                case State::Mode::MP3:
+                    if (state_.mp3PlaylistSelection()) {
+                        if (state_.mp3PlaylistId() != state_.control())
+                            setPlaylist(state_.control());
+                    } else {
+                        if (state_.mp3TrackId() != state_.control())
+                            setTrack(state_.control());
+                    }
+                    break;
+                case State::Mode::Radio:
+                    if (state_.radioManualTuning())
+                        setRadioFrequency(state_.control() + RADIO_FREQUENCY_OFFSET);
+                    else
+                        setRadioStation(state_.control());
+                    break;
+            }
+        }
+        
+        // react to events, since these will be cleared at the end, there is no need to check them against the old state
         // short press of volume button starts / stops the music 
         if (state_.volumePress())
             state_.idle() ? play() : stop();
@@ -320,7 +307,7 @@ private:
         if (state_.controlPress()) {
             switch (state_.mode()) {
                 case State::Mode::MP3:
-                    // TODO
+                    setMp3PlaylistSelection(! state_.mp3PlaylistSelection());
                     break;
                 case State::Mode::Radio:
                     setRadioManualTuning(!state_.radioManualTuning());
@@ -328,22 +315,16 @@ private:
             }
         }
 
-        // if volume has changed, update the volume
-        if (old.audioVolume() != state_.audioVolume())
-            setAudioVolume(state_.audioVolume());
-        
-        // if control has changed, determine what is the control's function and update accordingly
-        if (old.control() != state_.control()) {
+        // control long press changes mode
+        if (state_.controlLongPress()) {
             switch (state_.mode()) {
                 case State::Mode::MP3:
-                    // update the track id
+                    setMode(State::Mode::Radio);
                     break;
                 case State::Mode::Radio:
-                    if (state_.radioManualTuning())
-                        setRadioFrequency(state_.control() + RADIO_FREQUENCY_OFFSET);
-                    else
-                        setRadioStation(state_.control());
+                    setMode(State::Mode::MP3);
                     break;
+                
             }
         }
 
@@ -355,9 +336,11 @@ private:
         switch (state_.mode()) {
             case State::Mode::MP3:
                 LOG("leaving: mp3");
-                mp3_.stop();
-                i2s_.stop();
-                mp3File_.close();
+                if (mp3_.isRunning()) {
+                    mp3_.stop();
+                    i2s_.stop();
+                    mp3File_.close();
+                }
                 break;
             case State::Mode::Radio:
                 LOG("leaving: radio");
@@ -366,148 +349,76 @@ private:
         }
     }
 
-    /** Updates the volume settings to reflect current state. 
-     */
-    /*
-    void updateVolume() {
-        LOG("volume: " + state_.volume()); 
-        switch (state_.mode()) {
-            case State::Mode::Radio:
-                radio_.setVolume(state_.volume());
+    void setPlaylist(unsigned i) {
+        if (i >= numPlaylists_)
+            i = 0;
+        LOG("Opening playlist: " + i);
+        state_.setMp3PlaylistId(i);
+        currentPlaylist_.close();
+        String playlistDir{String{"/"} + (state_.mp3PlaylistId() + 1)};
+        currentPlaylist_ = SD.open(playlistDir.c_str());
+        numTracks_ = 0;
+        while (true) {
+            File f = currentPlaylist_.openNextFile();
+            // check if there are more files
+            if (!f)
                 break;
-            case State::Mode::MP3:
-                i2s_.SetGain(state_.volume() * 0.25);
-                break;
-        }
-        }*/
-
-
-    /** \name Radio mode
-     */
-    //@{
-
-    /** Updates the radio-specific state. 
-     */
-    /*
-    void radioModeUpdateState() {
-        // sets either the frequency directly in manual tuning mode, or radio station
-        if (state_.controlChange()) {
-            if (state_.radioManualTuning())
-                setRadioFrequency(state_.control() + RADIO_FREQUENCY_OFFSET);
-            else
-                setRadioStation(state_.control());
-        }
-        // toggles the manual tuning on or off
-        if (state_.controlPress())
-            setRadioManualTuning(! state_.radioManualTuning());
-        // volume change just changes the volume of the radio as the control is directly linked to volume state
-        if (state_.volumeChange())
-            updateVolume();
-        // toggles radio play on or off
-        if (state_.volumePress())
-            if (state_.idle())
-                play();
-            else
-                stop();
-        // toggles the audio lights on or off
-        if (state_.volumeLongPress())
-            setAudioLights(!state_.audioLights());
-    }
-    */
-
-    /** Tells RDA to tune the frequency in the state. 
-     */
-    /*void updateRadioFrequency() {
-        LOG("frequency: " + state_.radioFrequency());
-        radio_.setBandFrequency(RADIO_BAND_FM, state_.radioFrequency() * 10);
-        } */
-
-    //@}
-
-
-    
-
-    /*
-    void updateControl() {
-        LOG("control: " + state_.control());
-        switch (state_.mode()) {
-            case State::Mode::Radio:
-                if (manualTuning_)
-                    setRadioFrequency(state_.control() + 760);
-                else
-                    setRadioStation(state_.control());
-                break;
-            case State::Mode::MP3:
-                break;
-        }
-    }
-    */
-    
-
-
-    /*
-    void updateStatus() {
-        if (state_.controlLongPress()) {
-            switchMode();
-        }
-        switch (state_.mode()) {
-            case State::Mode::Radio:
-                radioModeUpdateState();
-                break;
-        }
-        
-        state_.clearEvents();
-        
-        //if (state_.volumeChange())
-        //    updateVolume();
-        //if (state_.volumePress())
-        //    togglePlay();
-        //if (state_.volumeLongPress()) {
-        //    LOG("toggle audio lights");
-        //    send(Command::SetAudioLights{! state_.audioLights()});
-        //}
-        
-        //if (state_.controlChange())
-        //    updateControl();
-        / *
-        if (state_.controlPress()) {
-            switch (state_.mode()) {
-                case State::Mode::Radio: {
-                    state_.setRadioManualTuning(! state_.radioManualTuning());
-                    LOG("manual tuning: " + state_.radioManualTuning());
-                    if (state_.manualTuning()) {
-                        send(Command::SetControl{state_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX});
-                    } else {
-                        send(Command::SetControl{0, 7});
-                        setRadioStation(0);
-                    }
-                    break;
-                }
+            if (f.isDirectory())
+                continue;
+            if (String{f.name()}.endsWith(".mp3")) {
+                LOG("    " + f.name());
+                ++numTracks_;
             }
         }
-        if (state_.controlLongPress())
-            switchMode();
-
-        state_.clearEvents();
-        * /
+        LOG("tracks: " + numTracks_);
+        currentPlaylist_.rewindDirectory();
+        state_.setMp3PlaylistId(i);
+        // if current track id is greater than tracks found, reset
+        if (state_.mp3TrackId() >= numTracks_)
+            state_.setMp3TrackId(0);
+        // set the track as well
+        setTrack(state_.mp3TrackId());
+        // TODO
+        //else
+        //    send(Command::)
+        
     }
-    */
 
-    /*
-    void switchMode() {
-        switch (state_.mode()) {
-        case State::Mode::MP3:
-            leaveMP3Mode();
-            enterRadioMode();
-            break;
-        case State::Mode::Radio:
-            leaveRadioMode();
-            enterMP3Mode();
-            break;
-        default:
-            enterMP3Mode();
+    void setTrack(unsigned i) {
+        if (numTracks_ == 0) {
+            LOG("Cannot play from empty playlist");
+            // TODO flash error
+            return;
         }
-        }*/
+        if (i >= numTracks_)
+            i = numTracks_ - 1;
+        // this is super extra not efficient, but whatever, seek before the file to open
+        currentPlaylist_.rewindDirectory();
+        while (i != 0) {
+            File f = currentPlaylist_.openNextFile();
+            if (String(f.name()).endsWith(".mp3"))
+                --i;
+            f.close();
+        }
+        // stop the current playback and start the new track, if running
+        if (mp3_.isRunning()) {
+            mp3_.stop();
+            i2s_.stop();
+            mp3File_.close();
+        }
+        if (! state_.idle()) {
+            // open the file and start playing it
+            File f = currentPlaylist_.openNextFile();
+            String fileName{String{"/"} + (state_.mp3PlaylistId() + 1) + "/" + f.name()};
+            LOG("Playing file: " + fileName);
+            mp3File_.open(fileName.c_str());
+            f.close();
+            i2s_.SetGain(state_.audioVolume() * ESP_VOLUME_STEP);
+            mp3_.begin(& mp3File_, & i2s_);
+        }
+        state_.setMp3TrackId(i);
+        send(Command::SetMP3State{state_});
+    }
 
     template<typename T>
     void send(T msg) {
@@ -522,30 +433,27 @@ private:
     volatile bool stateUpdate_ = false;
     State state_;
     
-    /** \name Radio & settings. 
-
-        These are extra settings 
+    /** \name Radio
      */
     //@{
     RDA5807M radio_;
-    //uint16_t radioFrequency_ = 0;
     RadioStation radioStations_[8];
-    //uint8_t currentStation_ = 0;
-    //bool manualTuning_ = false;
     //@}
 
-    /** \name MP3 & Settings
+    /** \name MP3
      */
     //@{
     AudioGeneratorMP3 mp3_;
     AudioOutputI2SNoDAC i2s_;
     AudioFileSourceSD mp3File_;
-    
+    unsigned numPlaylists_;
+    File currentPlaylist_;
+    unsigned numTracks_; // number of tracks in current playlist
     //@}
 
     static ICACHE_RAM_ATTR void AvrIRQ();
 
-    static double Gain_[16];
+    //static double Gain_[16];
 
     
 }; // Player
@@ -614,9 +522,8 @@ void printDirectory(File dir, int numTabs) {
 
 void setup() {
     Core::Setup(/* disableWifi */ true);
-    player.initialize();
+    player.setup();
     player.setMode(State::Mode::Radio);
-    printSD();
     
     //Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
     //Server.on("/authenticate", server::authenticate);

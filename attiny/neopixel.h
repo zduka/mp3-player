@@ -55,11 +55,14 @@ public:
 
     static Neopixel Black() { return Neopixel{0,0,0}; }
     static Neopixel White() { return Neopixel{255,255,255}; }
+    static Neopixel Red() { return Neopixel{255,0,0}; }
     static Neopixel Green() { return Neopixel{0,255, 0}; }
     static Neopixel Blue() { return Neopixel{0,0,255}; }
-    static Neopixel Red() { return Neopixel{255,0,0}; }
     static Neopixel Purple() { return Neopixel{255,0,255}; }
+    static Neopixel Yellow() { return Neopixel{255,255,0}; }
+    static Neopixel Cyan() { return Neopixel{0,255,255}; }
 
+    static Neopixel DarkRed() { return Neopixel{128, 0, 0}; }
     static Neopixel DarkPurple() { return Neopixel{128, 0, 128}; }
 
 private:
