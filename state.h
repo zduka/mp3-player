@@ -53,11 +53,10 @@ public:
      */
     //@{
     enum class Mode : uint8_t {
-        None = 0,                           
-        MP3 = 1,
-        Radio = 2,
-        WWW = 3,
-        NightLight = 4,
+        MP3 = 0,
+        Radio = 1,
+        WWW = 2,
+        NightLight = 3,
     };
 
     Mode mode() const {
@@ -95,14 +94,19 @@ public:
 
     /** Shows the current input voltage. 
 
-        VCC voltage times 10. Values from 30 to 50 are to be expected (3 to 5 volts). 
+        VCC voltage times 100. Values from 340 to 500 are expected. Internally, the state stores the ADC result. 
+ 
     */
-    uint8_t voltage() const {
-        return power_ & POWER_VOLTAGE;
+    uint16_t voltage() const {
+        uint16_t result = (power_ & POWER_VOLTAGE);
+        return (result == 0) ? 0 : (result * 160 / 127 + 340);
     }
 
-    void setVoltage(uint8_t value) {
-        power_ = (power_ & ~POWER_VOLTAGE) | (value & POWER_VOLTAGE);
+    void setVoltage(uint16_t value) {
+        value = (value > 500) ? 500 : value;
+        value = (value > 340) ? (value - 340) : value;
+        value = (value * 127) / 160;
+        power_ = (power_ &~ POWER_VOLTAGE) | (value & POWER_VOLTAGE);
     }
 
     bool charging() const {
@@ -267,6 +271,27 @@ public:
 
     //@}
 
+    /** \name Temperature. 
+     */
+    //@{
+
+    uint16_t temperatureKelvin() const {
+        return temp_;
+    }
+
+    /** Returns the temperature in Celsius times 10. 
+     */
+    int16_t temperature() const {
+        int16_t result = (temp_ / 4) - 4370;
+        return result * 10 / 16;
+    }
+
+    void setTemperature(uint16_t kelvinx64) {
+        temp_ = kelvinx64;
+    }
+    
+    //}
+
 
 private:
 
@@ -280,7 +305,7 @@ private:
     uint8_t state_ = 0;
 
     static constexpr uint8_t POWER_CHARGING = 1 << 7;
-    static constexpr uint8_t POWER_VOLTAGE = 63;
+    static constexpr uint8_t POWER_VOLTAGE = 127;
     uint8_t power_ = 0;
     
     static constexpr uint16_t EVENT_ALARM = 1 << 0;
@@ -302,12 +327,14 @@ private:
     static constexpr uint16_t MP3_TRACK_ID = 1023;
     static constexpr uint16_t MP3_PLAYLIST_ID = 7 << 10;
     static constexpr uint16_t MP3_PLAYLIST_SELECTION = 1 << 15;
-    uint16_t mp3_;
+    uint16_t mp3_ = 0;
 
     static constexpr uint16_t RADIO_FREQUENCY = 511;
     static constexpr uint16_t RADIO_STATION = 7 << 9;
     static constexpr uint16_t RADIO_MANUAL_TUNING = 1 << 15;
-    uint16_t radio_;
+    uint16_t radio_ = 0;
+
+    uint16_t temp_ = 0;
 
 } __attribute__((packed));
 

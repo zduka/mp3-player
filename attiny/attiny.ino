@@ -1,4 +1,5 @@
-#include "Wire.h"
+#include <avr/sleep.h>
+#include <Wire.h>
 
 #include "state.h"
 #include "inputs.h"
@@ -6,12 +7,12 @@
 
 /** Chip Pinout
 
-               -- VDD   GND --
+               -- VDD             GND --
      VCC_SENSE -- (00) PA4   PA3 (16) -- AVR_IRQ
-    HEADPHONES -- (01) PA5   PA2 (15) -- MIC
+           MIC -- (01) PA5   PA2 (15) -- HEADPHONES
       DCDC_PWR -- (02) PA6   PA1 (14) -- 
-     AUDIO_SRC -- (03) PA7   PA0 (17) -- UPDI
-     AUDIO_ADC -- (04) PB5   PC3 (13) -- CTRL_A
+     AUDIO_ADC -- (03) PA7   PA0 (17) -- UPDI
+     AUDIO_SRC -- (04) PB5   PC3 (13) -- CTRL_A
          VOL_B -- (05) PB4   PC2 (12) -- CTRL_BTN
          VOL_A -- (06) PB3   PC1 (11) -- NEOPIXEL
        VOL_BTN -- (07) PB2   PC0 (10) -- CTRL_B
@@ -30,11 +31,11 @@
 #define VOL_B 5
 #define VOL_BTN 7
 #define AVR_IRQ 16
-#define AUDIO_SRC 3
-#define AUDIO_ADC 4
+#define AUDIO_SRC 4
+#define AUDIO_ADC 3
 #define VCC_SENSE 0
-#define HEADPHONES 1
-#define MIC 15
+#define HEADPHONES 15
+#define MIC 1
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
@@ -74,25 +75,28 @@ public:
         digitalWrite(AUDIO_SRC, LOW);
         // enable the ADC inputs (audio, mic, voltage), disable the digital input buffers and pull-up resistors
         // NOTE this requires that the pins stay the same
-        static_assert(AUDIO_ADC == 4, "Must be PB5"); // ADC0 input 8
-        PORTB.PIN5CTRL &= ~PORT_ISC_gm;
-        PORTB.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTB.PIN5CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(MIC == 15, "Must be PA2"); // ADC0 input 2
-        PORTA.PIN2CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTA.PIN2CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(VCC_SENSE == 0, "Must be PA4"); // ADC1 input 0
-        PORTA.PIN4CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTA.PIN4CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(HEADPHONES == 1, "Must be PA5"); // ADC1 input 1
+        static_assert(AUDIO_ADC == 3, "Must be PA7"); // ADC1 input 3
+        PORTA.PIN7CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN7CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN7CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(MIC == 1, "Must be PA5"); // ADC1 input 1
         PORTA.PIN5CTRL &= ~PORT_ISC_gm;
         PORTA.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
         PORTA.PIN5CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(VCC_SENSE == 0, "Must be PA4"); // ADC0 input 4
+        PORTA.PIN4CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN4CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(HEADPHONES == 15, "Must be PA2"); // ADC0 input 2
+        PORTA.PIN2CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN2CTRL &= ~PORT_PULLUPEN_bm;
     }
 
     void setup() {
+        // set sleep to full power down and enable sleep feature
+        set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+        sleep_enable();         
         // setup ADC0 and ADC1 settings
         // set reference to 1.1V
         VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
@@ -100,18 +104,38 @@ public:
         VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
         VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
         // clkdiv by 4, internal voltage reference
-        ADC0.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc;
-        ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc;
-
+        ADC0.CTRLC = ADC_PRESC_DIV32_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 1mhz
+        ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
+        // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 16 values
+        ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
+        ADC0.SAMPCTRL = 30;
+        ADC0.CTRLB = ADC_SAMPNUM_ACC64_gc;
+        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc;
+       
         // get the voltage and determine if it's too low to proceed
-        uint8_t voltage = getVoltage();
+        delay(100);
+        uint16_t voltage = getVoltage();
+
+
+
+
+        // start the vcc & temp & headphones sensing
+        ADC0.INTCTRL |= ADC_RESRDY_bm;
+        ADC0.COMMAND = ADC_STCONV_bm;
+        
+        // TODO deal with the voltage
         powerOn();
+
+
+
+        /*
         neopixels_.showBar(voltage, 50, Neopixel::Red());
         //        neopixels_.setAll(Neopixel::Green());
         neopixels_.sync();
         delay(1000);
         neopixels_.setAll(Neopixel::Black());
         neopixels_.sync();
+        */
     }
     
     void loop() {
@@ -119,18 +143,83 @@ public:
             if (irq_.enabled && --irq_.timer == 0) {
                 resetEsp();
             } else {
-                // if the buttons are pressed, decrement their down ticks so that long presses can be determined 
-                if (volBtnDownTicks_ > 0)
-                    --volBtnDownTicks_;
-                if (ctrlBtnDownTicks_ > 0)
-                    --ctrlBtnDownTicks_;
                 // update the lights
                 lightsTick();
+            }
+        }
+        if (rtcTickSecond()) {
+            if (state_.idle() && sleep_.countdown > 0) {
+                if (--sleep_.countdown == 0)
+                    sleep();
             }
         }
     }
 
 private:
+
+    static constexpr unsigned AVR_ACTIVE = 0;
+    static constexpr unsigned AVR_SLEEPING = 1;
+    static constexpr unsigned AVR_WAKING = 2;
+
+    /** The sleep state and countdown. 
+     */
+    volatile struct {
+        unsigned state : 2;
+        unsigned countdown : 6;        
+    } sleep_;
+
+
+    void setIdle(bool value) {
+        state_.setIdle(value);
+        if (value) {
+            sleep_.countdown = 60;
+        }
+    }
+    
+    /** Enters sleep mode. 
+
+        
+     */
+    void sleep() {
+        neopixels_.showBar(8,8,Neopixel::Red());
+        neopixels_.sync();
+        delay(300);
+        neopixels_.setAll(Neopixel::Black());
+        neopixels_.sync();
+        // set audio src to 0 so that we don't bleed voltage
+        digitalWrite(AUDIO_SRC, LOW);
+        // turn of power to 3v3 and 5v
+        powerOff();
+        // going to sleep
+        sleep_.state = AVR_SLEEPING;
+        // change rtc period to 1 second
+        RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm; // enable PTI and set the tick to 1/32th of second
+        // disable interrupts for rotary encoders (we only keep the buttons)
+        // TODO
+        
+
+        // since we will keep receiving the RTC interrupts every 1 second, we'll sleep immediately afterwards unless it is a button interrupt which clears the sleep flag
+        while (sleep_.state != AVR_ACTIVE)
+            sleep_cpu();
+        // here we wake up
+        wakeup();
+    }
+
+    void wakeup() {
+        RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; // enable PTI and set the tick to 1/32th of second
+        // wake-up to non-idle mode
+        setIdle(false);
+        powerOn();
+        // if current mode is radio, make sure to to enable the source
+        if (state_.mode() == State::Mode::Radio)
+            digitalWrite(AUDIO_SRC, HIGH);
+        delay(100);
+        neopixels_.showBar(8,8,Neopixel::Green());
+        neopixels_.sync();
+        delay(300);
+        neopixels_.setAll(Neopixel::Black());
+        neopixels_.sync();
+    }
 
     void setMode(State::Mode mode) {
         state_.setMode(mode);
@@ -146,10 +235,6 @@ private:
         }
     }
 
-    void setIdle(bool value) {
-        state_.setIdle(value);
-        // TODO start idle timer to poweroff
-    }
     
     void setVolume(uint8_t value) {
         if (value != state_.audioVolume()) 
@@ -242,9 +327,24 @@ private:
     }
 
     void doRtcTick() {
-        rtcTick_.tick = 1;
-        if (++rtcTick_.counter == 0) {
-            rtcTick_.tickSecond = 1;
+        if (sleep_.state != AVR_SLEEPING) {
+            rtcTick_.tick = 1;
+            if (++rtcTick_.counter == 0) {
+                rtcTick_.tickSecond = 1;
+                clock_.secondTick();
+            }
+            // if the buttons are pressed, decrement their down ticks so that long presses can be determined, if the long press is the wakeup press clear the state for given button so that it won't register
+            if (volBtnDownTicks_ > 0)
+                if (--volBtnDownTicks_ == 0 && sleep_.state == AVR_WAKING) {
+                    state_.state_ &= ~State::STATE_VOL_BTN;
+                    sleep_.state = AVR_ACTIVE;
+                }
+            if (ctrlBtnDownTicks_ > 0)
+                if (--ctrlBtnDownTicks_ == 0 && sleep_.state == AVR_WAKING) {
+                    state_.state_ &= ~State::STATE_CTRL_BTN;
+                    sleep_.state = AVR_ACTIVE;
+                }
+        } else {
             clock_.secondTick();
         }
     }
@@ -309,10 +409,23 @@ private:
     void volumeButtonChanged() {
         volumeButton_.poll();
         if (volumeButton_.pressed()) {
+            if (sleep_.state == AVR_SLEEPING) {
+                // switch RTC to every 1/32th second
+                RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; 
+                sleep_.state = AVR_WAKING;
+            } 
             volBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
             state_.state_ |= State::STATE_VOL_BTN;
-        } else {
+        // if this was waking-up press, it has been cleared so that it won't register
+        } else if (state_.volumeButtonDown()){
             state_.state_ &= ~State::STATE_VOL_BTN;
+            // go back to sleep if the threshold has not been reached
+            if (sleep_.state == AVR_WAKING) {
+                sleep_.state = AVR_SLEEPING;
+                // switch RTC to once a second
+                RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
+                return;
+            }
             state_.events_ |= (volBtnDownTicks_ == 0) ? State::EVENT_VOL_LONG_PRESS : State::EVENT_VOL_PRESS;
             neopixels_.setAll(Neopixel::Black());
             setIrq();
@@ -322,10 +435,23 @@ private:
     void controlButtonChanged() {
         controlButton_.poll();
         if (controlButton_.pressed()) {
+            if (sleep_.state == AVR_SLEEPING) {
+                // switch RTC to every 1/32th second
+                RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; 
+                sleep_.state = AVR_WAKING;
+            } 
             ctrlBtnDownTicks_ = BUTTON_LONG_PRESS_TICKS;
             state_.state_ |= State::STATE_CTRL_BTN;
-        } else {
+        // if this was waking-up press, it has been cleared so that it won't register
+        } else if (state_.controlButtonDown()){
             state_.state_ &= ~State::STATE_CTRL_BTN;
+            // go back to sleep if the threshold has not been reached
+            if (sleep_.state == AVR_WAKING) {
+                sleep_.state = AVR_SLEEPING;
+                // switch RTC to once a second
+                RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
+                return;
+            }
             state_.events_ |= (ctrlBtnDownTicks_ == 0) ? State::EVENT_CTRL_LONG_PRESS : State::EVENT_CTRL_PRESS;
             neopixels_.setAll(Neopixel::Black());
             setIrq();
@@ -472,25 +598,56 @@ private:
         unsigned timer : 7;
     } irq_;
 
-
-    /** \name ADC1 - Voltage, temperature and headphones
+    /** \name ADC0 - Voltage, temperature and headphones
      */
     //@{
 
     uint8_t getVoltage() {
-        ADC1.MUXPOS = ADC_MUXPOS_AIN0_gc;
-        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc;
-        ADC1.COMMAND = ADC_STCONV_bm;
+        ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc;
+        ADC0.COMMAND = ADC_STCONV_bm;
         // wait for the conversion to be complete
-        while (! ADC1.INTFLAGS & ADC_RESRDY_bm)
+        while (! ADC0.INTFLAGS & ADC_RESRDY_bm)
             continue;
         // convert the result to voltage and store it in the state
-        setVoltageFromADC(ADC1.RES);
+        setVoltageFromADC(ADC0.RES);
         return state_.voltage();
     }
 
     void setVoltageFromADC(uint16_t adc) {
-        state_.setVoltage(static_cast<uint8_t>(110 * adc / 255 * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2 / 10));
+        // convert adc to voltage times 100, i.e. in range 0..110, but anything below 0.55 volts gets compressed to 0
+        adc = (adc > 512) ? ((adc - 512) * 110 / 1023) + 55 : 0;
+        // update to real voltage using the voltage divider
+        adc = adc * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2;
+        state_.setVoltage(adc);
+    }
+
+    void setTemperatureFromADC(uint16_t temp) {
+        int8_t sigrow_offset = SIGROW.TEMPSENSE1; // Read signed value from signature row
+        uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
+        temp -= sigrow_offset >> 2;
+        temp *= (sigrow_gain >> 2); // so that we won't overflow 16bit value
+        state_.setTemperature(temp);
+    }
+
+    void adc0ResultReady(uint16_t adc) {
+        switch (ADC0.MUXPOS) {
+            case ADC_MUXPOS_AIN4_gc: // VCC sense
+                setVoltageFromADC(adc);
+                ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc;
+                break;
+            case ADC_MUXPOS_AIN2_gc: // headphones
+                // TODO detect headphones
+                ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
+                break;
+            case ADC_MUXPOS_TEMPSENSE_gc: // temperature
+                setTemperatureFromADC(adc);
+                ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc;
+                break;
+            default: // invalid muxpoint, start VCC_SENSE
+                ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc;
+                break;
+        }
+        ADC0.COMMAND = ADC_STCONV_bm;
     }
 
     //@}
@@ -507,13 +664,13 @@ private:
         audioMax_ = 0;
         audioSamples_ = 0;
         // select ADC channel to AUDIO_ADC pin
-        ADC0.MUXPOS  = ADC_MUXPOS_AIN8_gc;
+        ADC1.MUXPOS  = ADC_MUXPOS_AIN3_gc;
         // enable and use 8bit resolution, freerun mode
-        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
+        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
         // enable the interrupt
-        ADC0.INTCTRL |= ADC_RESRDY_bm;
+        ADC1.INTCTRL |= ADC_RESRDY_bm;
         // and start the conversion
-        ADC0.COMMAND = ADC_STCONV_bm;        
+        ADC1.COMMAND = ADC_STCONV_bm;        
     }
     
     void addAudioReading(uint8_t value) {
@@ -567,7 +724,11 @@ ISR(RTC_PIT_vect) {
 }
 
 ISR(ADC0_RESRDY_vect) {
-    player.addAudioReading(ADC0.RES); 
+    player.adc0ResultReady(ADC0.RES); 
+}
+
+ISR(ADC1_RESRDY_vect) {
+    player.addAudioReading(ADC1.RES); 
 }
 
 void AVRPlayer::I2CSendEventTrampoline() {

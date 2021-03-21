@@ -45,9 +45,11 @@ public:
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
         Wire.begin();
         // initialize the settings from SD card
-        initializeExtraSettings();
+        setupSDCard();
         // and now, get the state from AVR and initialize the peripherals as kept in the AVR state
-        delay(200);
+        setupState();
+        //delay(200);
+        
     }
 
     void loop() {
@@ -62,8 +64,11 @@ public:
             }
             break;
         }
-        if (stateUpdate_)
+        if (stateUpdate_) {
+            State old{state_};
             getStateUpdate();
+            updateState(old);
+        }
     }
 
     void setMode(State::Mode mode) {
@@ -86,6 +91,8 @@ public:
                 setRadioFrequency(state_.radioFrequency());
                 setRadioManualTuning(state_.radioManualTuning());
                 break;
+            default:
+                LOG("unknown mode: " + (int) mode);
         }
     }
 
@@ -223,7 +230,7 @@ public:
     
 private:
 
-    void initializeExtraSettings() {
+    void setupSDCard() {
         // determine song banks
         if (SD.begin(CS, SPI_HALF_SPEED)) {
             LOG("SD card detected, analyzing:");
@@ -250,14 +257,23 @@ private:
         radioStations_[7].frequency = 966; // Impuls
     }
 
+    /** Sets up the player state based on the latest state stored in avr. 
+     */
+    void setupState() {
+        LOG("Loading state from AVR");
+        getStateUpdate();
+        setMode(state_.mode());
+    }
+
     void getStateUpdate() {
         stateUpdate_ = false;
         size_t n = Wire.requestFrom(AVR_I2C_ADDRESS,sizeof(State));
         if (n == sizeof(State)) {
-            State old{state_};
             Wire.readBytes(pointer_cast<uint8_t*>(& state_), n);
             LOG("I2C state received");
-            updateState(old);
+            LOG("voltage: " + state_.voltage());
+            LOG("temp C: " + state_.temperature());
+            LOG("temp K64: " + state_.temperatureKelvin());
         } else {
             LOG("I2C status corruption: " + n);
         }
@@ -523,7 +539,6 @@ void printDirectory(File dir, int numTabs) {
 void setup() {
     Core::Setup(/* disableWifi */ true);
     player.setup();
-    player.setMode(State::Mode::Radio);
     
     //Core::Connect({SSID1,PASSWORD1, SSID2, PASSWORD2});
     //Server.on("/authenticate", server::authenticate);
@@ -533,58 +548,10 @@ void setup() {
     //    pinMode(4, OUTPUT);
     //LOG("Setup done.");
 
-    
 
-
-    /*
-  delay(200);
-  radio.init();
-  radio.debugEnable();
-  radio.setBandFrequency(FIX_BAND, FIX_STATION);
-  radio.setVolume(FIX_VOLUME);
-  radio.setMono(false);
-  radio.setMute(false);
-  delay(500);
-  char s[12];
-  radio.formatFrequency(s, sizeof(s));
-  Serial.print("Station:"); 
-  Serial.println(s);
-  
-  Serial.print("Radio:"); 
-  radio.debugRadioInfo();
-  
-  Serial.print("Audio:"); 
-  radio.debugAudioInfo();
-
-
-
-
-    printSD();
-
-    
-
-
-    //printSD();
-    */
     //Core::DeepSleep();
 }
 
 void loop() {
     player.loop();
-  //Core::Loop();
-  // put your main code here, to run repeatedly:
-  //digitalWrite(4, HIGH);
-  //digitalWrite(4, LOW);
-  /*
-  unsigned long t = millis();
-  if (t - lastMillis > 1000 / 30) {
-    lastMillis = t;
-    i += 1;
-    pixels.setPixelColor(0, pixels.Color(i,i,i));
-    pixels.show();
-  }*/
-  
-  //delay(5);
-  //printSD();
-  //delay(900);
 }
