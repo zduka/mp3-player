@@ -94,18 +94,18 @@ public:
 
     /** Shows the current input voltage. 
 
-        VCC voltage times 100. Values from 340 to 500 are expected. Internally, the state stores the ADC result. 
+        VCC voltage times 100. Values from 300 to 500 are expected. Internally, the state stores the ADC result. 
  
     */
     uint16_t voltage() const {
         uint16_t result = (power_ & POWER_VOLTAGE);
-        return (result == 0) ? 0 : (result * 160 / 127 + 340);
+        return (result == 0) ? 0 : (result * 200 / 127 + 300);
     }
 
     void setVoltage(uint16_t value) {
         value = (value > 500) ? 500 : value;
-        value = (value > 340) ? (value - 340) : value;
-        value = (value * 127) / 160;
+        value = (value > 300) ? (value - 300) : value;
+        value = (value * 127) / 200;
         power_ = (power_ &~ POWER_VOLTAGE) | (value & POWER_VOLTAGE);
     }
 
@@ -177,6 +177,17 @@ public:
             audio_ |= AUDIO_AUDIO_SRC;
         else
             audio_ &= ~AUDIO_AUDIO_SRC;
+    }
+
+    bool audioHeadphones() const {
+        return audio_ & AUDIO_HEADPHONES;
+    }
+
+    void setAudioHeadphones(bool value) {
+        if (value)
+            audio_ |= AUDIO_HEADPHONES;
+        else
+            audio_ &= ~AUDIO_HEADPHONES;
     }
 
     bool audioLights() const {
@@ -318,9 +329,9 @@ private:
 
     static constexpr uint8_t AUDIO_AUDIO_VOLUME = 15;
     static constexpr uint8_t AUDIO_AUDIO_SRC = 1 << 4;
-    static constexpr uint8_t HEADPHONES = 1 << 5;
+    static constexpr uint8_t AUDIO_HEADPHONES = 1 << 5;
     static constexpr uint8_t AUDIO_LIGHTS = 1 << 6;
-    uint8_t audio_ = 0;
+    uint8_t audio_ = 5; // start with volume 5 so that something can be heard immediately after start
 
     uint16_t control_ = 0;
 

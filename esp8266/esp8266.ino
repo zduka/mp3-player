@@ -274,6 +274,9 @@ private:
             LOG("voltage: " + state_.voltage());
             LOG("temp C: " + state_.temperature());
             LOG("temp K64: " + state_.temperatureKelvin());
+            LOG("control: " + state_.control());
+            LOG("track id: " + state_.mp3TrackId());
+            LOG("headphones: " + state_.audioHeadphones());
         } else {
             LOG("I2C status corruption: " + n);
         }
@@ -408,6 +411,7 @@ private:
         }
         if (i >= numTracks_)
             i = numTracks_ - 1;
+        state_.setMp3TrackId(i);
         // this is super extra not efficient, but whatever, seek before the file to open
         currentPlaylist_.rewindDirectory();
         while (i != 0) {
@@ -432,7 +436,6 @@ private:
             i2s_.SetGain(state_.audioVolume() * ESP_VOLUME_STEP);
             mp3_.begin(& mp3File_, & i2s_);
         }
-        state_.setMp3TrackId(i);
         send(Command::SetMP3State{state_});
     }
 
@@ -486,55 +489,6 @@ ICACHE_RAM_ATTR void Player::AvrIRQ() {
     player.stateUpdate_ = true;
 }
 
-
-
-
-
-
-void printSD() {
-    if (!SD.begin(CS, SPI_HALF_SPEED)) {
-      Serial.println("Initialising failed!");
-      return;
-    }    
-    File root;
-    root = SD.open("/");
-    root.rewindDirectory();
-    printDirectory(root, 0); //Display the card contents
-    root.close();
-    Serial.println("\r\nOPEN FILE example completed");  
-}
-
-
-void printDirectory(File dir, int numTabs) {
-    int colcnt =0;
-    while(true) {
-        File entry =  dir.openNextFile();
-        if (! entry) {
-            // no more files
-            break;
-        }
-        if (numTabs > 0) {
-           for (uint8_t i=0; i<=numTabs; i++) {
-               Serial.print('\t');
-           }
-        }
-        Serial.print(entry.name());
-        if (entry.isDirectory()) {
-            Serial.println("/");
-            printDirectory(entry, numTabs+1);
-        } else {
-            // files have sizes, directories do not
-            Serial.print("\t");
-            Serial.println(entry.size(), DEC);
-        }
-    }
-}
-
-//#define FIX_BAND     RADIO_BAND_FM    //Radio Band -FM
-//#define FIX_STATION  9370            //Station Tuned = 93.7 MHz.
-//#define FIX_VOLUME   15               //Audio Volume Level 5.
-
-//RDA5807M radio;    
 
 void setup() {
     Core::Setup(/* disableWifi */ true);

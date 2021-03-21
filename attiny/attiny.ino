@@ -8,7 +8,7 @@
 /** Chip Pinout
 
                -- VDD             GND --
-     VCC_SENSE -- (00) PA4   PA3 (16) -- AVR_IRQ
+               -- (00) PA4   PA3 (16) -- AVR_IRQ
            MIC -- (01) PA5   PA2 (15) -- HEADPHONES
       DCDC_PWR -- (02) PA6   PA1 (14) -- 
      AUDIO_ADC -- (03) PA7   PA0 (17) -- UPDI
@@ -33,7 +33,6 @@
 #define AVR_IRQ 16
 #define AUDIO_SRC 4
 #define AUDIO_ADC 3
-#define VCC_SENSE 0
 #define HEADPHONES 15
 #define MIC 1
 
@@ -50,26 +49,19 @@ extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 class AVRPlayer {
 public:
 
-    AVRPlayer() {
-        // enable control interrupts
-        volume_.setInterrupt(VolumeChangedTrampoline);
-        control_.setInterrupt(ControlChangedTrampoline);
-        volumeButton_.setInterrupt(VolumeButtonChangedTrampoline);
-        controlButton_.setInterrupt(ControlButtonChangedTrampoline);
-        
+    /** Setup is executed when powered on. 
+
+        Technically, this can only happen after a reset, or after BOD when voltage gets high again due to charging, or new battery. As such, we can simply assume enough battery is present and power stuff without checking voltage. 
+     */
+    void setup() {
         // enable the AVR_IRQ as input
         pinMode(AVR_IRQ, INPUT);
         // disable 3v and 5v rails
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
-        // enable real-time clock
+        // configure the real time clock
         RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
         RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
-        RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm; // enable PTI and set the tick to 1/32th of second
-        // enable I2C slave
-        Wire.begin(AVR_I2C_ADDRESS);
-        Wire.onRequest(I2CSendEventTrampoline);
-        Wire.onReceive(I2CReceiveEventTrampoline);
         // set audio source to esp8266
         pinMode(AUDIO_SRC, OUTPUT);
         digitalWrite(AUDIO_SRC, LOW);
@@ -83,17 +75,11 @@ public:
         PORTA.PIN5CTRL &= ~PORT_ISC_gm;
         PORTA.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
         PORTA.PIN5CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(VCC_SENSE == 0, "Must be PA4"); // ADC0 input 4
-        PORTA.PIN4CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTA.PIN4CTRL &= ~PORT_PULLUPEN_bm;
         static_assert(HEADPHONES == 15, "Must be PA2"); // ADC0 input 2
         PORTA.PIN2CTRL &= ~PORT_ISC_gm;
         PORTA.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
         PORTA.PIN2CTRL &= ~PORT_PULLUPEN_bm;
-    }
 
-    void setup() {
         // set sleep to full power down and enable sleep feature
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
         sleep_enable();         
@@ -104,38 +90,28 @@ public:
         VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
         VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
         // clkdiv by 4, internal voltage reference
-        ADC0.CTRLC = ADC_PRESC_DIV32_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 1mhz
         ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
         // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 16 values
-        ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
-        ADC0.SAMPCTRL = 30;
-        ADC0.CTRLB = ADC_SAMPNUM_ACC64_gc;
         ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc;
-       
-        // get the voltage and determine if it's too low to proceed
-        delay(100);
-        uint16_t voltage = getVoltage();
-
-
-
-
-        // start the vcc & temp & headphones sensing
+        ADC0.CTRLB = ADC_SAMPNUM_ACC64_gc;
+        ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+        ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
+        ADC0.SAMPCTRL = 31;
+        // start the vcc & temp & headphones sensing, enable interrupt and measure the VCC once more
+        ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
         ADC0.INTCTRL |= ADC_RESRDY_bm;
         ADC0.COMMAND = ADC_STCONV_bm;
-        
-        // TODO deal with the voltage
-        powerOn();
-
-
-
-        /*
-        neopixels_.showBar(voltage, 50, Neopixel::Red());
-        //        neopixels_.setAll(Neopixel::Green());
-        neopixels_.sync();
-        delay(1000);
-        neopixels_.setAll(Neopixel::Black());
-        neopixels_.sync();
-        */
+        // enable I2C slave
+        Wire.begin(AVR_I2C_ADDRESS);
+        Wire.onRequest(I2CSendEventTrampoline);
+        Wire.onReceive(I2CReceiveEventTrampoline);
+        // attach the interrupts
+        volume_.setInterrupt(VolumeChangedTrampoline);
+        control_.setInterrupt(ControlChangedTrampoline);
+        volumeButton_.setInterrupt(VolumeButtonChangedTrampoline);
+        controlButton_.setInterrupt(ControlButtonChangedTrampoline);
+        // and continue as if waking up from sleep
+        wakeup();
     }
     
     void loop() {
@@ -227,10 +203,12 @@ private:
             case State::Mode::MP3:
                 enableAudioADC();
                 digitalWrite(AUDIO_SRC, LOW);
+                controlColor_ = state_.mp3PlaylistSelection() ? MP3_PLAYLIST_COLOR : MP3_TRACK_COLOR;
                 break;
             case State::Mode::Radio:
                 enableAudioADC();
                 digitalWrite(AUDIO_SRC, HIGH);
+                controlColor_ = state_.radioManualTuning() ? RADIO_FREQUENCY_COLOR : RADIO_STATION_COLOR;
                 break;
         }
     }
@@ -602,22 +580,14 @@ private:
      */
     //@{
 
-    uint8_t getVoltage() {
-        ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc;
-        ADC0.COMMAND = ADC_STCONV_bm;
-        // wait for the conversion to be complete
-        while (! ADC0.INTFLAGS & ADC_RESRDY_bm)
-            continue;
-        // convert the result to voltage and store it in the state
-        setVoltageFromADC(ADC0.RES);
-        return state_.voltage();
-    }
-
     void setVoltageFromADC(uint16_t adc) {
+        // kind of complicated so that we stay in the 16bit unsigned, which 110 * 1024 won't give us
+        adc = 110 * 512 / adc;
+        adc = adc * 2;
         // convert adc to voltage times 100, i.e. in range 0..110, but anything below 0.55 volts gets compressed to 0
-        adc = (adc > 512) ? ((adc - 512) * 110 / 1023) + 55 : 0;
+        //adc = (adc > 512) ? ((adc - 512) * 110 / 1023) + 55 : 0;
         // update to real voltage using the voltage divider
-        adc = adc * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2;
+        //adc = adc * (VCC_DIVIDER_RES1 + VCC_DIVIDER_RES2) / VCC_DIVIDER_RES2;
         state_.setVoltage(adc);
     }
 
@@ -631,20 +601,30 @@ private:
 
     void adc0ResultReady(uint16_t adc) {
         switch (ADC0.MUXPOS) {
-            case ADC_MUXPOS_AIN4_gc: // VCC sense
-                setVoltageFromADC(adc);
+            case ADC_MUXPOS_INTREF_gc: // VCC sense
+                // switch the ADC to internal reference which will be used for other readings
                 ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                setVoltageFromADC(adc);
                 break;
-            case ADC_MUXPOS_AIN2_gc: // headphones
-                // TODO detect headphones
+            case ADC_MUXPOS_AIN2_gc: { // headphones
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
+                bool headphones = adc < 512;
+                if (headphones != state_.audioHeadphones()) {
+                    state_.setAudioHeadphones(headphones);
+                    setIrq();
+                }
                 break;
+            }
             case ADC_MUXPOS_TEMPSENSE_gc: // temperature
+                // switch the ADC to VDD reference which will be used 
+                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
                 setTemperatureFromADC(adc);
-                ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc;
                 break;
             default: // invalid muxpoint, start VCC_SENSE
-                ADC0.MUXPOS = ADC_MUXPOS_AIN4_gc;
+                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
                 break;
         }
         ADC0.COMMAND = ADC_STCONV_bm;
@@ -724,7 +704,7 @@ ISR(RTC_PIT_vect) {
 }
 
 ISR(ADC0_RESRDY_vect) {
-    player.adc0ResultReady(ADC0.RES); 
+    player.adc0ResultReady(ADC0.RES / 64); // 64 sampling 
 }
 
 ISR(ADC1_RESRDY_vect) {
@@ -755,6 +735,17 @@ void AVRPlayer::ControlButtonChangedTrampoline() {
     player.controlButtonChanged();
 }
 
+
+
+
+
+
+
+
+
+
+
+
 void setup() {
     /*
     Serial.swap();
@@ -766,11 +757,6 @@ void setup() {
 
 
 
-/** During the loop, the following things must be checked:
-
-    - determine the input voltage by reading the VCC_SENSE (low)
-    
- */
 void loop() {
     player.loop();
 }

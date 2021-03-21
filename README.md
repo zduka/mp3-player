@@ -33,11 +33,7 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 
 ## TODO
 
-- change voltage input to 4.2 - 3.4, low battery warning from 3.5 or 3.6? need to test this, the regulators won't work below 3.4v
-
-- adc for voltage and temperature seems to be super inaccurate
-- going back to mp3 0 in playlist does not do anything
-
+- lights do not always turn themselves off?
 - determine better indicator for the audio strength (some annaeling?)
 
 - repeat modes for mp3
@@ -47,6 +43,7 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 - rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
 - audio src and adc have switched pins
 - headpnoes and mic have switched pins
+- no vcc sense pin, vcc is determined by comparing INTREF to VCC
 
 ## AVR
 
