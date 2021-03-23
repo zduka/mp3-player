@@ -87,6 +87,7 @@ public:
             case State::Mode::Radio:
                 LOG("mode: radio");
                 radio_.init();
+                radio_.setMono(true);
                 radio_.setVolume(state_.audioVolume());
                 setRadioFrequency(state_.radioFrequency());
                 setRadioManualTuning(state_.radioManualTuning());
@@ -108,6 +109,7 @@ public:
                 break;
             case State::Mode::Radio:
                 radio_.init();
+                radio_.setMono(true);
                 radio_.setVolume(state_.audioVolume());
                 setRadioFrequency(state_.radioFrequency());
                 break;
