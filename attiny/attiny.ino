@@ -8,33 +8,31 @@
 /** Chip Pinout
 
                -- VDD             GND --
-               -- (00) PA4   PA3 (16) -- AVR_IRQ
-           MIC -- (01) PA5   PA2 (15) -- HEADPHONES
-      DCDC_PWR -- (02) PA6   PA1 (14) -- 
-     AUDIO_ADC -- (03) PA7   PA0 (17) -- UPDI
-     AUDIO_SRC -- (04) PB5   PC3 (13) -- CTRL_A
-         VOL_B -- (05) PB4   PC2 (12) -- CTRL_BTN
-         VOL_A -- (06) PB3   PC1 (11) -- NEOPIXEL
-       VOL_BTN -- (07) PB2   PC0 (10) -- CTRL_B
+         VOL_B -- (00) PA4   PA3 (16) -- CTRL_A
+         VOL_A -- (01) PA5   PA2 (15) -- CTRL_BTN
+       VOL_BTN -- (02) PA6   PA1 (14) -- HEADPHONES
+               -- (03) PA7   PA0 (17) -- UPDI
+               -- (04) PB5   PC3 (13) -- CTRL_B
+      DCDC_PWR -- (05) PB4   PC2 (12) -- AUDIO_ADC
+      NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC
+       AVR_IRQ -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
 
-    - monitor input voltage
-    
  */
 
-#define DCDC_PWR 2
-#define NEOPIXEL 11
-#define CTRL_A 13
-#define CTRL_B 10
-#define CTRL_BTN 12
-#define VOL_A 6
-#define VOL_B 5
-#define VOL_BTN 7
-#define AVR_IRQ 16
-#define AUDIO_SRC 4
-#define AUDIO_ADC 3
-#define HEADPHONES 15
-#define MIC 1
+#define DCDC_PWR 5
+#define NEOPIXEL 6
+#define CTRL_A 16
+#define CTRL_B 13
+#define CTRL_BTN 15
+#define VOL_A 1
+#define VOL_B 0
+#define VOL_BTN 2
+#define AVR_IRQ 7
+#define AUDIO_SRC 11
+#define AUDIO_ADC 12
+#define HEADPHONES 14
+#define MIC 10
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
@@ -67,18 +65,18 @@ public:
         digitalWrite(AUDIO_SRC, LOW);
         // enable the ADC inputs (audio, mic, voltage), disable the digital input buffers and pull-up resistors
         // NOTE this requires that the pins stay the same
-        static_assert(AUDIO_ADC == 3, "Must be PA7"); // ADC1 input 3
-        PORTA.PIN7CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN7CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTA.PIN7CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(MIC == 1, "Must be PA5"); // ADC1 input 1
-        PORTA.PIN5CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN5CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTA.PIN5CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(HEADPHONES == 15, "Must be PA2"); // ADC0 input 2
-        PORTA.PIN2CTRL &= ~PORT_ISC_gm;
-        PORTA.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTA.PIN2CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
+        PORTC.PIN2CTRL &= ~PORT_ISC_gm;
+        PORTC.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTC.PIN2CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(MIC == 10, "Must be PC0"); // ADC1 input 6
+        PORTC.PIN0CTRL &= ~PORT_ISC_gm;
+        PORTC.PIN0CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTC.PIN0CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(HEADPHONES == 14, "Must be PA1"); // ADC0 input 1
+        PORTA.PIN1CTRL &= ~PORT_ISC_gm;
+        PORTA.PIN1CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTA.PIN1CTRL &= ~PORT_PULLUPEN_bm;
 
         // set sleep to full power down and enable sleep feature
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
@@ -603,11 +601,11 @@ private:
         switch (ADC0.MUXPOS) {
             case ADC_MUXPOS_INTREF_gc: // VCC sense
                 // switch the ADC to internal reference which will be used for other readings
-                ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc;
+                ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc;
                 ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
                 setVoltageFromADC(adc);
                 break;
-            case ADC_MUXPOS_AIN2_gc: { // headphones
+            case ADC_MUXPOS_AIN1_gc: { // headphones
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
                 bool headphones = adc < 512;
                 if (headphones != state_.audioHeadphones()) {
@@ -644,7 +642,7 @@ private:
         audioMax_ = 0;
         audioSamples_ = 0;
         // select ADC channel to AUDIO_ADC pin
-        ADC1.MUXPOS  = ADC_MUXPOS_AIN3_gc;
+        ADC1.MUXPOS  = ADC_MUXPOS_AIN8_gc;
         // enable and use 8bit resolution, freerun mode
         ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
         // enable the interrupt

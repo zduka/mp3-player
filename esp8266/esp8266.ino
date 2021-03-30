@@ -14,14 +14,17 @@
 
          -- RST        up   1 -- TXD0
          -- ADC        up   3 -- I2S_DATA (RXD0)
-         -- CH_PC           5 -- SDA
-      CS -- 16 up           4 -- SCL
+         -- CH_PC           5 -- SCL
+      CS -- 16 up           4 -- SDA
     SCLK -- 14         up   0 -- AVR_IRQ
     MISO -- 12         up   2 -- I2S_WS
     MOSI -- 13       down  15 -- I2S_SCK
          -- VCC           GND --
  
  */
+
+#define I2C_SCL 5
+#define I2C_SDA 4
 
 #define CS 16
 #define AVR_IRQ 0
@@ -43,7 +46,7 @@ public:
     void setup() {
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
-        Wire.begin();
+        Wire.begin(I2C_SDA, I2C_SCL);
         // initialize the settings from SD card
         setupSDCard();
         // and now, get the state from AVR and initialize the peripherals as kept in the AVR state

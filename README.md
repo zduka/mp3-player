@@ -40,13 +40,7 @@ The attiny is responsible for the controls and device status maintenance (rtc, c
 - some mp3 files take time to load and make avr reset esp, see why?
 - extra settings, such as time limited volume, radio, 
 
-- change audio to full mono, use TS5A63157DBVR as multiplexer, keep multiplexer on control board
-- check if 2 headphones can be routed from headphone amp and if we can use it as a buffer for PAM8302
-- find small opamp chip for leds, that way we only need headphones to come from audio board
-- rewrite schematics for AC coupled headphones, make sure the noise is neopixel or breadboard relatred
-- audio src and adc have switched pins
-- headpnoes and mic have switched pins
-- no vcc sense pin, vcc is determined by comparing INTREF to VCC
+- AGND and GND should be joined at 5V regulator
 
 ## AVR
 
