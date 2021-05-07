@@ -1,2 +1,4 @@
 esp8266/wifi_setup.h
 *.skb
+*.dch~
+

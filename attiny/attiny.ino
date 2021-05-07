@@ -9,25 +9,24 @@
 
                -- VDD             GND --
          VOL_B -- (00) PA4   PA3 (16) -- CTRL_A
-         VOL_A -- (01) PA5   PA2 (15) -- CTRL_BTN
-       VOL_BTN -- (02) PA6   PA1 (14) -- HEADPHONES
-               -- (03) PA7   PA0 (17) -- UPDI
-               -- (04) PB5   PC3 (13) -- CTRL_B
-      DCDC_PWR -- (05) PB4   PC2 (12) -- AUDIO_ADC
+       VOL_BTN -- (01) PA5   PA2 (15) -- CTRL_BTN
+         VOL_A -- (02) PA6   PA1 (14) -- HEADPHONES
+      DCDC_PWR -- (03) PA7   PA0 (17) -- UPDI
+     V_CHARGER -- (04) PB5   PC3 (13) -- CTRL_B
+      CHARGING -- (05) PB4   PC2 (12) -- AUDIO_ADC
       NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC
        AVR_IRQ -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
-
  */
 
-#define DCDC_PWR 5
+#define DCDC_PWR 3
 #define NEOPIXEL 6
 #define CTRL_A 16
 #define CTRL_B 13
 #define CTRL_BTN 15
-#define VOL_A 1
+#define VOL_A 2
 #define VOL_B 0
-#define VOL_BTN 2
+#define VOL_BTN 1
 #define AVR_IRQ 7
 #define AUDIO_SRC 11
 #define AUDIO_ADC 12
