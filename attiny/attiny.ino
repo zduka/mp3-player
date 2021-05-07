@@ -54,9 +54,8 @@ public:
     void setup() {
         // enable the AVR_IRQ as input
         pinMode(AVR_IRQ, INPUT);
-        // disable 3v and 5v rails
-        pinMode(DCDC_PWR, OUTPUT);
-        digitalWrite(DCDC_PWR, LOW);
+        // disable 3v, audio and neopixel rails
+        pinMode(DCDC_PWR, INPUT);
         // configure the real time clock
         RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
         RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
@@ -251,13 +250,14 @@ private:
     }
 
     void powerOn() {
-        digitalWrite(DCDC_PWR, HIGH);
+        pinMode(DCDC_PWR,OUTPUT);
+        digitalWrite(DCDC_PWR, LOW);
         state_.state_ |= State::STATE_DCDC_POWER; 
         delay(50);
     }
 
     void powerOff() {
-        digitalWrite(DCDC_PWR, LOW);
+        pinMode(DCDC_PWR, INPUT);
         state_.state_ &= ~State::STATE_DCDC_POWER;
     }
 
@@ -270,9 +270,10 @@ private:
         delay(100);
         neopixels_.setAll(Neopixel::Black());
         neopixels_.sync();
-        digitalWrite(DCDC_PWR, LOW);
+        pinMode(DCDC_PWR,INPUT);
         delay(500);
-        digitalWrite(DCDC_PWR, HIGH);
+        pinMode(DCDC_PWR,OUTPUT);
+        digitalWrite(DCDC_PWR, LOW);
         // TODO add wake signal
     }
 
