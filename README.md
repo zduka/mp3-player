@@ -65,4 +65,3 @@ https://github.com/earlephilhower/arduino-esp8266littlefs-plugin/releases
 ## AVR ESP8266 Communication
 
 - esp runs
-
