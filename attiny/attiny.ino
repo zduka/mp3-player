@@ -33,6 +33,9 @@
 #define HEADPHONES 14
 #define MIC 10
 
+#define AUDIO_ESP HIGH
+#define AUDIO_RADIO LOW
+
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
@@ -60,7 +63,7 @@ public:
         RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
         // set audio source to esp8266
         pinMode(AUDIO_SRC, OUTPUT);
-        digitalWrite(AUDIO_SRC, LOW);
+        digitalWrite(AUDIO_SRC, AUDIO_ESP);
         // enable the ADC inputs (audio, mic, voltage), disable the digital input buffers and pull-up resistors
         // NOTE this requires that the pins stay the same
         static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
@@ -184,7 +187,9 @@ private:
         powerOn();
         // if current mode is radio, make sure to to enable the source
         if (state_.mode() == State::Mode::Radio)
-            digitalWrite(AUDIO_SRC, HIGH);
+            digitalWrite(AUDIO_SRC, AUDIO_RADIO);
+        else
+            digitalWrite(AUDIO_SRC, AUDIO_ESP);
         delay(100);
         neopixels_.showBar(8,8,Neopixel::Green());
         neopixels_.sync();
@@ -198,12 +203,12 @@ private:
         switch (mode) {
             case State::Mode::MP3:
                 enableAudioADC();
-                digitalWrite(AUDIO_SRC, LOW);
+                digitalWrite(AUDIO_SRC, AUDIO_ESP);
                 controlColor_ = state_.mp3PlaylistSelection() ? MP3_PLAYLIST_COLOR : MP3_TRACK_COLOR;
                 break;
             case State::Mode::Radio:
                 enableAudioADC();
-                digitalWrite(AUDIO_SRC, HIGH);
+                digitalWrite(AUDIO_SRC, AUDIO_RADIO);
                 controlColor_ = state_.radioManualTuning() ? RADIO_FREQUENCY_COLOR : RADIO_STATION_COLOR;
                 break;
         }

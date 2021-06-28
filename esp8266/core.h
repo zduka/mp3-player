@@ -14,7 +14,8 @@ public:
     /** Initializes the chip. 
      */
     static void Setup(bool disableWiFi = false) {
-        Serial.begin(115200);
+        // instead of 115200 start at 74880, which is the baudrate at which ESP bootloader prints its stuff as well so both are legible
+        Serial.begin(74880);
         delay(50);
         LOG("Initializing ESP8266...");
         // disable caching the SSID and password in memory, which wears it down excessively
