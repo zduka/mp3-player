@@ -1,3 +1,4 @@
+#if (defined ARCH_ESP8266)
 #include <Wire.h>
 #include <radio.h>
 #include <RDA5807M.h>
@@ -5,8 +6,7 @@
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2SNoDAC.h>
 
-#include "core.h"
-#include "wifi_setup.h"
+#include "esp8266/core.h"
 #include "state.h"
 
 
@@ -52,7 +52,6 @@ public:
         // and now, get the state from AVR and initialize the peripherals as kept in the AVR state
         setupState();
         //delay(200);
-        
     }
 
     void loop() {
@@ -514,3 +513,7 @@ void setup() {
 void loop() {
     player.loop();
 }
+
+
+
+#endif

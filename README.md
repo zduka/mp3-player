@@ -2,6 +2,15 @@
 
 A simple and pretty low quality mp3 and fm radio player with the following main features:
 
+## Setup & Build
+
+`platform.io` is used by both targets. In visual studio, install the platform.io IDE plugin and then simply open the folder.
+
+To be able to program & use the serial monitor, run the following and then restart:
+
+    sudo adduser YOUR_USER dialout
+
+Tested on ubuntu 20.04. 
 
 ## Controls
 
@@ -60,8 +69,3 @@ https://github.com/me-no-dev/EspExceptionDecoder
 ### LittleFS Uploader
 
 https://github.com/earlephilhower/arduino-esp8266littlefs-plugin/releases
-
-
-## AVR ESP8266 Communication
-
-- esp runs

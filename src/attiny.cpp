@@ -1,9 +1,12 @@
+#if (defined ARCH_ATTINY)
+
+
 #include <avr/sleep.h>
 #include <Wire.h>
 
 #include "state.h"
-#include "inputs.h"
-#include "neopixel.h"
+#include "attiny/inputs.h"
+#include "attiny/neopixel.h"
 
 /** Chip Pinout
 
@@ -758,8 +761,8 @@ void setup() {
     player.setup();
 }
 
-
-
 void loop() {
     player.loop();
 }
+
+#endif
