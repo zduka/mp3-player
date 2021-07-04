@@ -12,6 +12,21 @@ To be able to program & use the serial monitor, run the following and then resta
 
 Tested on ubuntu 20.04. 
 
+## Basic Design
+
+The player contains two chips, ATTiny3216 and ESP8266:
+
+- the ATTiny is responsible for power management, user input events, microphone and persisting state
+- esp is responsible for playing music, controlling the radio, web access, and the other higher level functions
+
+### ATTiny
+
+
+### ESP
+
+
+The attiny is responsible for the controls and device status maintenance (rtc, charging, I/O operations, such as switching audio source, detecting headphones, etc.). The ESP is responsible for actual playback (i.e. the mp3 songs from the SD card a)
+
 ## Controls
 
 The player uses two rotary encoders with integrated buttons as the only physical controllers. The buttons support a short press and a long press, which is indicated on the led strip.
@@ -36,9 +51,6 @@ Volume: controls the volume and play/pause.
 
 A lot more can be configured via the web interface.
 
-## Basic Design
-
-The attiny is responsible for the controls and device status maintenance (rtc, charging, I/O operations, such as switching audio source, detecting headphones, etc.). The ESP is responsible for actual playback (i.e. the mp3 songs from )
 
 ## TODO
 

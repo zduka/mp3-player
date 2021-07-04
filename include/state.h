@@ -1,5 +1,7 @@
 #pragma once
 
+#include <assert.h>
+
 #define AVR_I2C_ADDRESS 42
 
 
@@ -42,6 +44,438 @@ inline T pointer_cast(W * from) {
 //@}
 
 
+
+/** Date & time down to a second in 4 bytes. 
+ */
+class DateTime {
+public:
+
+    DateTime() {
+        setMonth(1);
+        setDay(1);
+    }
+
+    uint16_t year() const { // 2021..2084 => 6
+        return ((raw_ & YEAR_MASK) >> 26) + 2021;
+    }
+
+    uint8_t month() const { // 1..12 => 4
+        return (raw_ & MONTH_MASK) >> 22;
+    }
+
+    uint8_t day() const { // 1..31 => 5
+        return (raw_ & DAY_MASK) >> 17;
+    }
+
+    uint8_t hour() const { // 0..23 => 5
+        return (raw_ & HOUR_MASK) >> 12;
+    }
+
+    uint8_t minute() const { // 0..59 => 6
+        return (raw_ & MINUTE_MASK) >> 6;
+    }
+
+    uint8_t second() const { // 0..59 => 6
+        return raw_ & SECOND_MASK;
+    }
+
+    void setYear(uint16_t year) {
+        assert(year >= 2021 && year <= 2084);
+        raw_ &= ~YEAR_MASK;
+        raw_ += (year - 2021) << 26;
+    }
+
+    void setMonth(uint8_t month) {
+        assert(month >= 1 && month <= 12);
+        raw_ &= ~MONTH_MASK;
+        raw_ += month << 22;
+    }
+
+    void setDay(uint8_t day) {
+        assert(day >= 1 && day <= 31);
+        raw_ &= ~DAY_MASK;
+        raw_ += day << 17;
+    }
+
+    void setHour(uint8_t hour) {
+        assert(hour >= 0 && hour <= 23);
+        raw_ &= ~HOUR_MASK;
+        raw_ += hour << 12;
+    }
+
+    void setMinute(uint8_t m) {
+        assert(m >= 0 && m <= 59);
+        raw_ &= ~MINUTE_MASK;
+        raw_ += m << 6;
+    }
+
+    void setSecond(uint8_t s) {
+        assert(s >= 0 && s <= 59);
+        raw_ &= ~SECOND_MASK;
+        raw_ += s;
+    }
+
+    void secondTick() {
+        if (second() == 59) {
+            setSecond(0);
+            if (minute() == 59) {
+                setMinute(0);
+                if (hour() == 23) {
+                    setHour(0);
+                    if (day() == DaysInMonth(year(), month())) {
+                        setDay(1);
+                        if (month() == 12) {
+                            setMonth(0);
+                            // years can overflow
+                            setYear(year() + 1 == 2085 ? 2021 : year() + 1);
+                        } else {
+                            setMonth(month() + 1);
+                        }
+                    } else {
+                        setDay(day() + 1);
+                    }
+                } else {
+                    setHour(hour() + 1);
+                }
+            } else {
+                setMinute(minute() + 1);
+            }
+        } else {
+            setSecond(second() + 1);
+        }
+    }
+
+    static uint8_t DaysInMonth(uint16_t year, uint8_t month) {
+        switch (month) {
+            case 1: // Jan
+            case 3: // Mar
+            case 5: // May
+            case 7: // Jul
+            case 8: // Aug
+            case 10: // Oct
+            case 12: // Dec
+                return 31;
+            case 2 : // Feb
+                // I'm ignoring the every 100 years leap year skip as the code will hopefully not be around for that long:)
+                return (year % 4 == 0) ? 29 : 28;
+            case 4:
+            case 6:
+            case 9:
+            case 11:
+            default: // whatever
+                return 30;
+        }
+    }
+
+private:
+    static constexpr uint32_t YEAR_MASK = 63 << 26;
+    static constexpr uint32_t MONTH_MASK = 16 << 22;
+    static constexpr uint32_t DAY_MASK = 31 << 17;
+    static constexpr uint32_t HOUR_MASK = 31 << 12;
+    static constexpr uint32_t MINUTE_MASK = 63 << 6;
+    static constexpr uint32_t SECOND_MASK = 63;
+
+    uint32_t raw_ = 0;
+
+} __attribute__((packed));
+
+enum class MP3Selection : uint8_t {
+    Track = 0, 
+    Playlist = 1,
+}; // MP3Selection
+
+enum class RadioTuning : uint8_t {
+    Presets = 0,
+    Manual = 1
+}; // RadioTuning
+
+/** The player state. 
+ 
+    The state is shared with both AVR and ESP via I2C bus. Getters and setters are used to both enforce platform independent storage and to make sure the stored compressed values can be retrieved in reasonable format. 
+
+    State getters are available on both platforms, but different setters are provided for AVR and ESP. 
+
+    - 
+    - audio
+    - control
+    - rtc
+    - lights
+    - mp3 mode
+    - radio mode
+
+ */
+class State {
+
+/** \name Events
+ 
+    Contains information about the events that triggered the state update (when coming from AVR to ESP). When an event is active, the relevant part of the status register then contains the actual value, where applicable.
+ */
+//@{
+public:
+
+    bool chargingChange() const {
+        return events_ & CHARGING_CHANGE_MASK;
+    }
+
+    bool headphonesChange() const {
+        return events_ & HEADPHONES_CHANGE_MASK;
+    }
+
+    bool controlChange() const {
+        return events_ & CONTROL_CHANGE_MASK;
+    }
+
+    bool controlButtonChange() const {
+        return events_ & CONTROL_BUTTON_CHANGE_MASK;
+    }
+
+    bool controlPress() const {
+        return events_ & CONTROL_PRESS_MASK;
+    }
+
+    bool controlLongPress() const {
+        return events_ & CONTROL_LONG_PRESS_MASK;
+    }
+
+    bool volumeChange() const {
+        return events_ & VOLUME_CHANGE_MASK;
+    }
+
+    bool volumeButtonChange() const {
+        return events_ & VOLUME_BUTTON_CHANGE_MASK;
+    }
+
+    bool volumePress() const {
+        return events_ & VOLUME_PRESS_MASK;
+    }
+
+    bool volumeLongPress() const {
+        return events_ & VOLUME_LONG_PRESS_MASK;
+    }
+
+    bool alarm() const {
+        return events_ & ALARM_MASK;
+
+    }
+
+#if (defined ARCH_ATTINY)
+    /** Clears the events. 
+     
+        This is to be called whenever the state with the events is sent to ESP so that we do not resend existing events. 
+     */
+    void clearEvents() {
+        events_ = 0;
+    }
+
+    /** Clears any events coming from the buttons 
+     * */
+    void clearButtonEvents() {
+        events_ &= ~(CONTROL_PRESS_MASK + CONTROL_LONG_PRESS_MASK + CONTROL_BUTTON_CHANGE_MASK +
+                     VOLUME_PRESS_MASK + VOLUME_LONG_PRESS_MASK + VOLUME_BUTTON_CHANGE_MASK);
+    }
+
+    void setControlPress() {
+        events_ |= CONTROL_PRESS_MASK;
+    }
+
+    void setControlLongPress() {
+        events_ |= CONTROL_LONG_PRESS_MASK;
+    }
+
+    void setVolumePress() {
+        events_ |= VOLUME_PRESS_MASK;
+    }
+
+    void setVolumeLongPress() {
+        events_ |= VOLUME_LONG_PRESS_MASK;
+    }
+#endif
+
+private:
+
+    static constexpr uint16_t CHARGING_CHANGE_MASK = 1 << 0;
+    static constexpr uint16_t HEADPHONES_CHANGE_MASK = 1 << 1;
+    static constexpr uint16_t CONTROL_CHANGE_MASK = 1 << 2;
+    static constexpr uint16_t CONTROL_BUTTON_CHANGE_MASK = 1 << 3;
+    static constexpr uint16_t CONTROL_PRESS_MASK = 1 << 4;
+    static constexpr uint16_t CONTROL_LONG_PRESS_MASK = 1 << 5;
+    static constexpr uint16_t VOLUME_CHANGE_MASK = 1 << 6;
+    static constexpr uint16_t VOLUME_BUTTON_CHANGE_MASK = 1 << 7;
+    static constexpr uint16_t VOLUME_PRESS_MASK = 1 << 8;
+    static constexpr uint16_t VOLUME_LONG_PRESS_MASK = 1 << 9;
+    static constexpr uint16_t ALARM_MASK = 1 << 10;
+
+    uint16_t events_;    
+
+//@}
+
+
+/** \name Peripherals
+ 
+    Information about the peripherals managed by the AVR.
+    */
+//@{
+public:
+
+
+    /** Returns the input voltage times 100. 
+     
+        Only values between the valid range, 340 - 500 are supported. Value 0 means anything below 3.4V and value 500 means also anything above 5V. Note that although the reading is returned as [V] * 100, the measurement precision is less than 0.01 [V]. 
+     */    
+    uint16_t voltage() const {
+        
+    }
+
+    /** Returns true if the player is currently being charged. 
+     */
+    bool charging() const {
+
+    }
+
+    /** Returns the temperature measured by the onboard sensor in [C] * 10. 
+     */
+    uint8_t temp() const {
+
+    }
+
+    /** Returns true if headphones are attached. 
+     */
+    bool headphones() const {
+
+    }
+
+private:
+
+    uint16_t perihperals_;
+
+//@}
+
+
+/** \name Controls
+ 
+    Contains the actual information about the control and volume knob values and the state of their buttons.
+ */
+//@{
+public:
+
+    /** The current value of the control knob. 
+     
+        Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
+     */
+    uint16_t control() const {
+        return controlValues_ & CONTROL_MASK;
+    }
+
+    /** Maximum value (inclusive) the control knob can have, values up to 1023 are allowed. The minimum value is always 0. 
+     */
+    uint16_t maxControl() const {
+        return controlMaximums_ & CONTROL_MASK;
+    }
+
+    /** Determines if the control knob is currently pressed. 
+     */
+    bool controlDown() const {
+        return controlState_ & CONTROL_DOWN_MASK;
+    }
+
+    /** The current value of the volume knob. 
+     
+        Can be anywhere between 0 and maxVolume() value which may not exceed 63. 
+     */
+    uint8_t volume() const {
+        return (controlValues_ >> 10) & 63;
+    }
+
+    /** The maximum value of the volume knob. 
+     
+        Can be up to 63. Min value is always 0. 
+     */
+    uint8_t maxVolume() const {
+        return (controlMaximums_ >> 10) & 63;
+    }
+
+    /** Determines if the volume knob is currently pressed. 
+     */
+    bool volumeDown() const {
+        return controlState_ & CONTROL_DOWN_MASK;
+    }
+
+#if (defined ARCH_ATTINY) 
+    void setControl(uint16_t value) {
+        assert(value <= maxControl());
+        controlValues_ &= ~1023;
+        controlValues_ |= value;
+        events_ |= CONTROL_CHANGE_MASK;
+    }
+
+    void setControlDown(bool down) {
+        if (down)
+            controlState_ |= CONTROL_DOWN_MASK;
+        else
+            controlState_ &= ~CONTROL_DOWN_MASK;
+        events_ |= CONTROL_BUTTON_CHANGE_MASK;
+    }
+
+    void setVolume(uint8_t value) {
+        assert(value < maxVolume());
+        controlValues_ &= ~(63 << 10);
+        controlValues_ |= value << 10; 
+        events_ |= VOLUME_CHANGE_MASK;
+    }
+
+    void setVolumeDown(bool down) {
+        if (down)
+            controlState_ |= VOLUME_DOWN_MASK;
+        else
+            controlState_ &= ~VOLUME_DOWN_MASK;
+        events_ |= VOLUME_BUTTON_CHANGE_MASK;
+    }
+
+#elif (defined ARCH_ESP8266)
+    /** Sets the control value & maximum value. 
+     
+        And informs AtTiny of the change. 
+     */
+    void setControl(uint16_t value, uint16_t maxValue) {
+
+    }
+#endif
+
+private:
+    static constexpr uint16_t CONTROL_MASK = 1023;
+    static constexpr uint16_t VOLUME_MASK = 63;
+    uint16_t controlValues_ = 0;
+    uint16_t controlMaximums_ = 0;
+    static constexpr uint8_t CONTROL_DOWN_MASK = 1;
+    static constexpr uint8_t VOLUME_DOWN_MASK = 2;
+    uint8_t controlState_ = 0;
+//@}
+
+/** \name Clock
+ */
+//@{
+public:
+    DateTime time() const {
+        return time_;
+    }
+
+    DateTime alarmTime() const {
+        return alarmTime_;
+    }
+private:
+    DateTime time_;
+    DateTime alarmTime_;
+//@}
+
+// color
+
+// mode backups
+
+} __attribute__((packed)); // State 
+
+#ifdef HAHA
+
+
 /** We can't use bitfields as sadly, they are implementation specific. 
 
     The state is kept at AVR, which preserves it throughout power cycles as long as the battery is not completely depleted. 
@@ -53,10 +487,18 @@ public:
      */
     //@{
     enum class Mode : uint8_t {
+        /** Default mode where MP3 files from the SD card are played. 
+         */
         MP3 = 0,
+        /** Radio mode where ESP controls the RD8507 chip to play FM radio stations. 
+         */
         Radio = 1,
+        /** WWW Settings mode. 
+         */
         WWW = 2,
         NightLight = 3,
+        WalkieTalkie = 4,
+
     };
 
     Mode mode() const {
@@ -493,5 +935,7 @@ struct Command {
     } __attribute__((packed));
     
 };
+
+#endif // HAHA
 
 

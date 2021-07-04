@@ -36,6 +36,309 @@
 #define HEADPHONES 14
 #define MIC 10
 
+extern "C" void RTC_PIT_vect(void) __attribute__((signal));
+extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
+extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
+
+
+/** ATTiny part of the player. 
+    
+ */
+class Player {
+public:
+    Player() = delete;
+
+    /** Initializes the chip. 
+     */
+    static void Initialize() {
+        // disable power to other systems
+        pinMode(DCDC_PWR, INPUT);
+        // enable the AVR_IRQ as input so that we can observe if ESP wants something
+        pinMode(AVR_IRQ, INPUT);
+        // headphones are input pin as well
+        pinMode(HEADPHONES, INPUT);
+        // configure the real time clock
+        RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
+        RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
+        // set sleep to full power down and enable sleep feature
+        set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+        sleep_enable();     
+        // setup the ADC pins (microphone input & audio out)
+        static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
+        PORTC.PIN2CTRL &= ~PORT_ISC_gm;
+        PORTC.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTC.PIN2CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(MIC == 10, "Must be PC0"); // ADC1 input 6
+        PORTC.PIN0CTRL &= ~PORT_ISC_gm;
+        PORTC.PIN0CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTC.PIN0CTRL &= ~PORT_PULLUPEN_bm;
+        // setup ADC voltage references to 1.1V (internal)
+        VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
+        VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
+        VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
+        VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
+        // set ADC1 settings (mic & audio) - clkdiv by 4, internal voltage reference
+        ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
+        // set ADC0 settings (vcc, )
+        // TODO
+
+        // initialize I2C slave. 
+        Wire.begin(AVR_I2C_ADDRESS);
+        Wire.onRequest(I2CRequest);
+        Wire.onReceive(I2CReceive);
+        // enable control interrupts for buttons
+        ControlBtn_.setInterrupt(ControlButtonChanged);
+        VolumeBtn_.setInterrupt(VolumeButtonChanged);
+        
+        // from now on proceed identically to a wakeup
+        Wakeup();
+    }
+
+private:
+
+    /** Initialized when the chip wakes up into normal operation. 
+     */
+    static void Wakeup() {
+        // enable the RTC interrupt to 1/32th of a second while awake
+        RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
+        // enable interrupts for rotary encoders
+        Control_.setInterrupt(ControlValueChanged);
+        Volume_.setInterrupt(VolumeValueChanged);
+        // turn on ESP and neopixels
+        // TODO have this in a method so that it can be called from reset function as well? 
+        pinMode(DCDC_PWR, OUTPUT);
+        digitalWrite(DCDC_PWR, LOW);
+        delay(50);
+        // TODO flash neopixels for wakeup
+    }
+
+    static void Sleep() {
+        // enable RTC interrupt every second so that the time can be kept
+        RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
+        // disable rotary encoder interrupts so that they do not wake us from sleep
+        Control_.clearInterrupt();
+        Volume_.clearInterrupt();
+        // turn off neopixels and esp
+        pinMode(DCDC_PWR, INPUT);
+        // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
+        Status_.sleep = true;
+        while (Status_.sleep) {
+            sleep_cpu();
+        }
+        // if we are not longer sleeping, wakeup
+        Wakeup();
+    }
+
+    static void SetIrq() {
+        if (!Status_.irq) {
+            Status_.irq = true;
+            Status_.irqTimer = IRQ_MAX_DELAY;
+            pinMode(AVR_IRQ, OUTPUT);
+            digitalWrite(AVR_IRQ, LOW);
+        }
+    }
+
+    static void ClearIrq() {
+        if (Status_.irq) {
+            Status_.irq = false;
+            pinMode(AVR_IRQ, INPUT);
+        }
+    }
+
+    static void ResetESP() {
+        // this is necessary so that ESP boots into normal mode
+        ClearIrq();
+
+    }
+
+
+
+
+
+    /** Triggered when ESP requests data to be sent. 
+     
+        By default, the state bytes are sent.
+     */
+    static void I2CRequest() {
+        switch (I2CSource_) {
+            case I2CSource::State:
+                Wire.write(pointer_cast<uint8_t*>(& State_), sizeof (State));
+                State_.clearEvents();
+                ClearIrq();
+        }
+    }
+
+    static void I2CReceive(int numBytes) {
+
+    }
+
+
+    friend void RTC_PIT_vect(void) __attribute__((signal)) {
+        RTC.PITINTFLAGS = RTC_PI_bm;
+        // determine whether we have 1 second or 1/32th second ticks and call the appropriate functions
+        if (RTC.PITCTRLA & RTC_PERIOD_gm == RTC_PERIOD_CYC1024_gc)
+            Player::RTCTick();
+        else
+            Player::RTCSecondTick();
+    }
+
+    static void RTCTick() {
+        // if buttons are down, decrease their long press ticks
+        if (ControlBtnCounter_ > 0)
+            --ControlBtnCounter_;
+        if (VolumeBtnCounter_ > 0)
+            --VolumeBtnCounter_;
+        // TODO do other stuff
+
+        // decrement the tick and we have full circle, do a second tick
+        if (Status_.ticks-- == 0)
+            RTCSecondTick();
+    }
+
+    static void RTCSecondTick() {
+        
+    }
+
+    friend void ADC0_RESRDY_vect(void) __attribute__((signal)) {
+
+    }
+
+    friend void ADC1_RESRDY_vect(void) __attribute__((signal)) {
+        
+    }
+
+
+    enum class I2CSource : uint8_t {
+        State
+    };
+
+    inline static I2CSource I2CSource_ = I2CSource::State;
+
+    inline static struct {
+        uint8_t sleep : 1;
+        uint8_t ticks : 5; // 0..31
+        uint8_t irq : 1;
+        static_assert(IRQ_MAX_DELAY < 64);
+        uint8_t irqTimer : 6;
+
+    } Status_;
+
+
+
+
+
+    inline static State State_;
+
+/** \name Knobs & Buttons
+ 
+    
+ */
+//@{
+
+    inline static RotaryEncoder Control_{CTRL_A, CTRL_B, 256};
+    inline static RotaryEncoder Volume_{VOL_A, VOL_B, 16};
+    inline static Button ControlBtn_{CTRL_BTN};
+    inline static Button VolumeBtn_{VOL_BTN};
+    inline static uint8_t ControlBtnCounter_ = 0;
+    inline static uint8_t VolumeBtnCounter_ = 0;
+
+    static void ControlValueChanged() {
+        Control_.poll();
+        State_.setControl(Control_.value());
+        SetIrq();
+    }   
+
+    static void VolumeValueChanged() {
+        Volume_.poll();
+        State_.setVolume(Volume_.value());
+        SetIrq();
+    } 
+
+    static void ControlButtonChanged() {
+        ControlBtn_.poll();
+        if (ControlBtn_.pressed()) {
+            ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
+            State_.setControlDown(true);
+            // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
+            if (Status_.sleep)
+                RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
+        } else {
+            State_.setControlDown(false);
+            if (ControlBtnCounter_ == 0) {
+                State_.setControlLongPress();
+                // wake up from sleep if sleeping
+                Status_.sleep = false;
+            } else {
+                ControlBtnCounter_ = 0;
+                State_.setControlPress();
+            }
+        }
+        // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
+        if (! Status_.sleep)
+            SetIrq();
+    }
+
+    static void VolumeButtonChanged() {
+        VolumeBtn_.poll();
+        if (VolumeBtn_.pressed()) {
+            VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
+            State_.setVolumeDown(true);
+            // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
+            if (Status_.sleep)
+                RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
+        } else {
+            State_.setVolumeDown(false);
+            if (VolumeBtnCounter_ == 0) {
+                State_.setVolumeLongPress();
+                // wake up from sleep if sleeping
+                Status_.sleep = false;
+            } else {
+                VolumeBtnCounter_ = 0;
+                State_.setVolumePress();
+            }
+        }
+        // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
+        if (! Status_.sleep)
+            SetIrq();
+    }
+
+
+//@}
+
+
+/** \name Lights
+ */
+//@{
+
+    static void LightsTick() {
+
+
+
+
+    }
+
+    inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
+    inline static Neopixel AccentColor_ = Neopixel::White();
+
+//@}
+
+}; // Player
+
+
+
+void setup() {
+    Player::Initialize();
+}
+
+void loop() {
+    //player.loop();
+}
+
+
+
+
+#ifdef HAHA
+
 #define AUDIO_ESP HIGH
 #define AUDIO_RADIO LOW
 
@@ -749,9 +1052,6 @@ void AVRPlayer::ControlButtonChangedTrampoline() {
 
 
 
-
-
-
 void setup() {
     /*
     Serial.swap();
@@ -764,5 +1064,7 @@ void setup() {
 void loop() {
     player.loop();
 }
+
+#endif
 
 #endif

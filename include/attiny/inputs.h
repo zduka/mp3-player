@@ -55,6 +55,10 @@ public:
         attachInterrupt(digitalPinToInterrupt(a_), isr, CHANGE);    
     }
 
+    void clearInterrupt() {
+        detachInterrupt(digitalPinToInterrupt(a_));
+    }
+
     /** Updates the value of the encoder.
 
         Safe to be called from within an ISR.
