@@ -20,7 +20,7 @@
 #define RADIO_FREQUENCY_COLOR Neopixel::Cyan()
 #define MP3_TRACK_COLOR Neopixel::Blue()
 #define MP3_PLAYLIST_COLOR Neopixel::Purple()
-#define AUDIO_COLOR accentColor_
+#define AUDIO_COLOR AccentColor_
 
 /** The values of resistors forming the voltage divider from up to 5V to the reference voltage of 1.1V at the VCC_SENSE pin. For better accuracy.
  */
@@ -35,6 +35,11 @@
 template<typename T, typename W>
 inline T pointer_cast(W const * from) {
     return static_cast<T>(static_cast<void const *>(from));
+}
+
+template<typename T, typename W>
+inline T pointer_cast(W volatile * from) {
+    return static_cast<T>(static_cast<void *>(const_cast<W*>(from)));
 }
 
 template<typename T, typename W>
@@ -326,6 +331,7 @@ public:
         
     }
 
+
     /** Returns true if the player is currently being charged. 
      */
     bool charging() const {
@@ -343,6 +349,19 @@ public:
     bool headphones() const {
 
     }
+
+#if (defined ARCH_ATTINY)
+    void setVoltage(uint16_t value) {
+        value = (value > 500) ? 500 : value;
+        value 
+
+    }
+
+    void setTemp(uint16_t value) {
+
+    }
+#endif
+
 
 private:
 
@@ -449,22 +468,6 @@ private:
     static constexpr uint8_t CONTROL_DOWN_MASK = 1;
     static constexpr uint8_t VOLUME_DOWN_MASK = 2;
     uint8_t controlState_ = 0;
-//@}
-
-/** \name Clock
- */
-//@{
-public:
-    DateTime time() const {
-        return time_;
-    }
-
-    DateTime alarmTime() const {
-        return alarmTime_;
-    }
-private:
-    DateTime time_;
-    DateTime alarmTime_;
 //@}
 
 // color

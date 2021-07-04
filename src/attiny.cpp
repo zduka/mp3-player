@@ -94,6 +94,18 @@ public:
         Wakeup();
     }
 
+    static void Loop() {
+        if (Status_.sleep)
+            Sleep();
+
+        if (Status_.tick) {
+            LightsTick();
+        }
+        if (Status_.secondTick) {
+
+        }
+    }
+
 private:
 
     /** Initialized when the chip wakes up into normal operation. 
@@ -125,22 +137,93 @@ private:
         while (Status_.sleep) {
             sleep_cpu();
         }
+        // clear the button events that led to the wakeup
+        State_.clearButtonEvents();
         // if we are not longer sleeping, wakeup
         Wakeup();
     }
 
+
+    friend void RTC_PIT_vect(void) __attribute__((signal)) {
+        RTC.PITINTFLAGS = RTC_PI_bm;
+        // determine whether we have 1 second or 1/32th second ticks and call the appropriate functions
+        if (RTC.PITCTRLA & RTC_PERIOD_gm == RTC_PERIOD_CYC1024_gc) {
+            Player::Status_.tick = true;
+            // if buttons are down, decrease their long press ticks
+            if (Player::ControlBtnCounter_ > 0)
+                --Player::ControlBtnCounter_;
+            if (Player::VolumeBtnCounter_ > 0)
+                --Player::VolumeBtnCounter_;
+            // if this is the 32th tick, continue to second tick, otherwise return now            
+            if (Player::Status_.ticksCounter-- != 0)
+                return;
+        } 
+        // the one-second tick
+        Player::Status_.secondTick = true;
+        Player::Time_.secondTick();
+        // TODO alarm & stuff
+    }
+
+    friend void ADC0_RESRDY_vect(void) __attribute__((signal)) {
+        uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
+        switch (ADC0.MUXPOS) {
+            case ADC_MUXPOS_INTREF_gc: { // VCC Sense
+                value = 110 * 512 / value;
+                value = value * 2;
+                Player::State_.setVoltage(value);
+                // switch the ADC to be ready to measure the temperature
+                ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+            }
+            case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
+                int8_t sigrow_offset = SIGROW.TEMPSENSE1; // Read signed value from signature row
+                uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
+                value -= sigrow_offset >> 2;
+                value *= (sigrow_gain >> 2); // so that we won't overflow 16bit value
+                Player::State_.setTemperature(value);
+                // fallthrough to the default where we set the next measurement to be that of input voltage
+            }
+            default:
+                // switch the ADC to be ready to measure the VCC
+                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+        }
+    }
+
+
+
+    inline volatile static struct {
+        bool sleep : 1;
+        bool idle : 1;
+        bool tick : 1;
+        bool secondTick : 1;
+        uint8_t ticksCounter : 5; // 0..31
+        uint8_t sleepCountdown: 10; // 0..1023
+    } Status_;
+
+    inline static volatile State State_;
+
+    inline static volatile DateTime Time_;
+
+/** \name Comms
+ */
+//@{
+private:
+
     static void SetIrq() {
-        if (!Status_.irq) {
-            Status_.irq = true;
-            Status_.irqTimer = IRQ_MAX_DELAY;
+        if (!Irq_.enabled) {
+            Irq_.enabled = true;
+            Irq_.timer = IRQ_MAX_DELAY;
             pinMode(AVR_IRQ, OUTPUT);
             digitalWrite(AVR_IRQ, LOW);
         }
     }
 
     static void ClearIrq() {
-        if (Status_.irq) {
-            Status_.irq = false;
+        if (Irq_.enabled) {
+            Irq_.enabled = false;
             pinMode(AVR_IRQ, INPUT);
         }
     }
@@ -150,9 +233,6 @@ private:
         ClearIrq();
 
     }
-
-
-
 
 
     /** Triggered when ESP requests data to be sent. 
@@ -172,62 +252,20 @@ private:
 
     }
 
-
-    friend void RTC_PIT_vect(void) __attribute__((signal)) {
-        RTC.PITINTFLAGS = RTC_PI_bm;
-        // determine whether we have 1 second or 1/32th second ticks and call the appropriate functions
-        if (RTC.PITCTRLA & RTC_PERIOD_gm == RTC_PERIOD_CYC1024_gc)
-            Player::RTCTick();
-        else
-            Player::RTCSecondTick();
-    }
-
-    static void RTCTick() {
-        // if buttons are down, decrease their long press ticks
-        if (ControlBtnCounter_ > 0)
-            --ControlBtnCounter_;
-        if (VolumeBtnCounter_ > 0)
-            --VolumeBtnCounter_;
-        // TODO do other stuff
-
-        // decrement the tick and we have full circle, do a second tick
-        if (Status_.ticks-- == 0)
-            RTCSecondTick();
-    }
-
-    static void RTCSecondTick() {
-        
-    }
-
-    friend void ADC0_RESRDY_vect(void) __attribute__((signal)) {
-
-    }
-
-    friend void ADC1_RESRDY_vect(void) __attribute__((signal)) {
-        
-    }
-
-
     enum class I2CSource : uint8_t {
         State
     };
 
+    static_assert(IRQ_MAX_DELAY < 128);
+    inline volatile static struct {
+        bool enabled : 1;
+        bool timer : 7; // 0..127
+    } Irq_;
+
     inline static I2CSource I2CSource_ = I2CSource::State;
-
-    inline static struct {
-        uint8_t sleep : 1;
-        uint8_t ticks : 5; // 0..31
-        uint8_t irq : 1;
-        static_assert(IRQ_MAX_DELAY < 64);
-        uint8_t irqTimer : 6;
-
-    } Status_;
+//@}
 
 
-
-
-
-    inline static State State_;
 
 /** \name Knobs & Buttons
  
@@ -319,6 +357,64 @@ private:
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static Neopixel AccentColor_ = Neopixel::White();
+    inline static uint8_t MaxBrightness_ = 255;
+
+//@}
+
+
+/** \name Audio & Microphone Listening
+ */
+//@{
+private:
+
+    enum class AudioADCSource : uint8_t {
+        Audio = ADC_MUXPOS_AIN8_gc,
+        Mic = ADC_MUXPOS_AIN6_gc
+    }; // AudioADCSource
+
+    static_assert(AUDIO_ADC == 12, "Must be PC2, ADC1 input 8");
+    static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
+
+    static void StartAudioADC(AudioADCSource channel) {
+        AudioMin_ = 255;
+        AudioMax_ = 0;
+        // select ADC channel to either MIC or audio ADC
+        ADC1.MUXPOS  = static_cast<uint8_t>(channel);
+        // enable and use 8bit resolution, freerun mode
+        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
+        // enable the interrupt
+        ADC1.INTCTRL |= ADC_RESRDY_bm;
+        // and start the conversion
+        ADC1.COMMAND = ADC_STCONV_bm;        
+    }
+
+    static void StopAudioADC() {
+        ADC1.CTRLA = 0;
+    }
+
+    static bool AudioADCRunning() {
+        return ADC1.CTRLA & ADC_ENABLE_bm;
+    }
+
+    static void UpdateAudioLights() {
+        uint8_t v = AudioMax_ - AudioMin_;
+        v = v < 32 ? 0 : v - 32;
+        Neopixels_.showCenteredBar(v, 128, AUDIO_COLOR.withBrightness(MaxBrightness_));
+        AudioMin_ = 255;
+        AudioMax_ = 0;
+    }
+
+    friend void ADC1_RESRDY_vect(void) __attribute__((signal)) {
+        uint8_t value = ADC1.RES;
+        // whether this is audio, or microphone, update the audio bar levels
+        if (value < Player::AudioMin_)
+            Player::AudioMin_ = value; 
+        if (value > Player::AudioMax_)
+            Player::AudioMax_ = value;
+    }
+
+    inline static volatile uint8_t AudioMin_;
+    inline static volatile uint8_t AudioMax_;
 
 //@}
 
@@ -331,10 +427,8 @@ void setup() {
 }
 
 void loop() {
-    //player.loop();
+    Player::Loop();
 }
-
-
 
 
 #ifdef HAHA
