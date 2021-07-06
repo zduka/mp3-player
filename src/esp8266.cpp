@@ -21,6 +21,9 @@
     MOSI -- 13       down  15 -- I2S_SCK
          -- VCC           GND --
  
+   TODO: Add AUDIO_SRC
+   TODO: Add TPA311 power
+
  */
 
 #define I2C_SCL 5
@@ -36,21 +39,65 @@ public:
 
      */
     static void Initialize() {
+        // first disable wifi, we only want it when needed
+        WiFi.persistent(false);
+        WiFi.mode(WIFI_OFF);
+        WiFi.forceSleepBegin();
+        Serial.begin(74880);
+        LOG("Initializing ESP8266...");
+        // set the IRQ pin as input so that we can tell when AVR has an interrupt
+        pinMode(AVR_IRQ, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
+        // start the I2C comms
+        Wire.begin(I2C_SDA, I2C_SCL);
+        // tell AVR that we are awake by requesting initial state
+        UpdateState();
+        // initialize the SD card
+        
+        
         
     }
 
     static void Loop() {
-        
+        // based on the mode, do the bookkeeping
+
+
+        if (Irq_) 
+            UpdateState();
     }
 
 private:
 
+    /** Handler for the state update requests.
+
+        These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
+     */
+    static ICACHE_RAM_ATTR void AVRIrq() {
+        Irq_ = true;
+    }
+
+    /** Gets the state from ATTiny. 
+     */
+    static void UpdateState() {
+        Irq_ = false;
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
+        if (n == sizeof(State)) {
+            Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
+            LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
+            LOG("   Events:");
+            // TODO process the events now 
+        } else {
+            LOG("I2C State corruption: " + n);
+        }
+    }
+
     
+    static inline State State_;
+
+    static inline volatile bool Irq_ = false;
 
     
 }; // Player
-
-
 
 
 

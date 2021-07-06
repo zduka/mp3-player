@@ -2,9 +2,11 @@
 
 
 #include <avr/sleep.h>
+#include <util/delay.h>
 #include <Wire.h>
 
 #include "state.h"
+#include "comms.h"
 #include "attiny/inputs.h"
 #include "attiny/neopixel.h"
 
@@ -15,11 +17,13 @@
        VOL_BTN -- (01) PA5   PA2 (15) -- CTRL_BTN
          VOL_A -- (02) PA6   PA1 (14) -- HEADPHONES
       DCDC_PWR -- (03) PA7   PA0 (17) -- UPDI
-     V_CHARGER -- (04) PB5   PC3 (13) -- CTRL_B
+               -- (04) PB5   PC3 (13) -- CTRL_B
       CHARGING -- (05) PB4   PC2 (12) -- AUDIO_ADC
-      NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC
+      NEOPIXEL -- (06) PB3   PC1 (11) -- 
        AVR_IRQ -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
+
+TODO change AVR_IRQ to PB5 and set PB2 for TX for serial, this would make debugging less painful
  */
 
 #define DCDC_PWR 3
@@ -99,6 +103,14 @@ public:
     }
 
     static void Loop() {
+        if (x_) {
+            x_ = false;
+            Neopixels_.setAll(Neopixel::White().withBrightness(32));
+            Neopixels_.sync();
+            _delay_ms(100);
+            Neopixels_.setAll(Neopixel::Black());
+            Neopixels_.sync();
+        }
         if (Status_.sleep)
             Sleep();
 
@@ -122,8 +134,8 @@ private:
         ADC0.INTCTRL |= ADC_RESRDY_bm;
         ADC0.COMMAND = ADC_STCONV_bm;
         // wait for the voltage measurement to finish
-        while (ADC0.MUXPOS == ADC_MUXPOS_INTREF_gc) {
-        }
+        //while (ADC0.MUXPOS == ADC_MUXPOS_INTREF_gc) {
+        //}
         // TODO deal with the voltage value appropriately
         
         // enable interrupts for rotary encoders
@@ -133,7 +145,9 @@ private:
         // TODO have this in a method so that it can be called from reset function as well? 
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
-        delay(50);
+        _delay_ms(50);
+        Neopixels_.setAll(Neopixel::Red().withBrightness(32));
+        Neopixels_.sync();
         // TODO flash neopixels for wakeup
     }
 
@@ -258,10 +272,20 @@ private:
                 State_.clearEvents();
                 ClearIrq();
         }
+        x_ = true;
     }
 
     static void I2CReceive(int numBytes) {
-
+        // TODO check that numBytes <=32
+        Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
+        switch (Buffer_[0]) {
+            case Message::SetVolume::Id: {
+                auto msg = Message::SetVolume::At(Buffer_);
+            }
+            case Message::SetControl::Id: {
+            
+            }
+        }
     }
 
     enum class I2CSource : uint8_t {
@@ -275,6 +299,10 @@ private:
     } Irq_;
 
     inline static I2CSource I2CSource_ = I2CSource::State;
+
+    inline static uint8_t Buffer_[32];
+
+    inline static volatile bool x_ = false;
 //@}
 
 
