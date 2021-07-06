@@ -321,51 +321,100 @@ private:
     */
 //@{
 public:
-
-
-    /** Returns the input voltage times 100. 
-     
-        Only values between the valid range, 340 - 500 are supported. Value 0 means anything below 3.4V and value 500 means also anything above 5V. Note that although the reading is returned as [V] * 100, the measurement precision is less than 0.01 [V]. 
-     */    
-    uint16_t voltage() const {
-        
+    /** Returns true if headphones are attached. 
+     */
+    bool headphones() const {
+        return peripherals_ & HEADPHONES_MASK;
     }
-
 
     /** Returns true if the player is currently being charged. 
      */
     bool charging() const {
+        return peripherals_ & CHARGING_MASK;
+    }
 
+    /** Returns the input voltage times 100. 
+
+        As this is only useful to judge the battery capacity, or whether we are charhing, the following values may be returned:
+
+        500 = charging
+        420 .. 320 = battery level
+        0 = below 
+     */    
+    uint16_t voltage() const {
+        uint16_t result = (peripherals_ & VOLTAGE_MASK) >> 8;
+        if (result == 63)
+            result = 500;
+        else if (result != 0)
+            result = 320 + (result - 1) * 100 / 61;
+        return result;
     }
 
     /** Returns the temperature measured by the onboard sensor in [C] * 10. 
-     */
-    uint8_t temp() const {
 
+        Has the precision of 0.25 degree over the entire range. 
+     */
+    int16_t temp() const {
+        int16_t result = static_cast<int16_t>(peripherals_ & TEMP_MASK);
+        result = result * 10 / 4;
+        return -100 + result;
     }
 
-    /** Returns true if headphones are attached. 
-     */
-    bool headphones() const {
-
-    }
 
 #if (defined ARCH_ATTINY)
-    void setVoltage(uint16_t value) {
-        value = (value > 500) ? 500 : value;
-        value 
+    /** Sets the voltage. 
+        
+        Takes the result of the adc and converts it to value from 0 to 127, where 0 means below 3.4V and 127 means 5V or above. 
 
+        The input is the ADC measurement, which is the value for the internal 1.1V reference measured at the 0..VCC scale. The value is first converted to actual voltage * 100
+
+
+         
+     */
+    void setVoltage(uint16_t value) {
+        // convert value to voltage * 100, using the x = 1024 / value * 110 equation. Multiply by 512 only, then divide and multiply by two so that we always stay within uint16_t
+        value = 110 * 512 / value;
+        value = value * 2;
+        // now update the value to fit the desired range
+        if (value >= 320) {
+            if (value > 430) 
+                value = 63; // highest value, encodes 500
+            else if (value > 420) 
+                value = 62; // equivalent to 420
+            else
+                // value is in range 320..420, we need to map this to 1..62 (61 values)
+                value = ((value - 320) * 61 / 100) + 1;
+        } else {
+            value = 0;
+        }
+        peripherals_ &= ~VOLTAGE_MASK;
+        peripherals_ |= (value << 8);
     }
 
-    void setTemp(uint16_t value) {
-
+    void setTemp(uint16_t temp) {
+        // convert to celsius offset by 10 (263.15 K)
+        if (temp < 16842) {
+            temp = 0;
+        } else {
+            temp -= 16842;
+            if (temp > 3271)
+                temp = 3271;
+        }
+        // now convert to celsius / 10
+        temp = temp * 10 / 128;
+        peripherals_ &= ~TEMP_MASK;
+        peripherals_ |= temp;
     }
 #endif
 
 
 private:
+    static const uint16_t HEADPHONES_MASK = 0x1 << 15;
+    static const uint16_t CHARGING_MASK = 0x1 << 14;
+    static const uint16_t VOLTAGE_MASK = 0x3f << 8;
+    static const uint16_t TEMP_MASK = 0xff;
 
-    uint16_t perihperals_;
+    uint16_t peripherals_ = 0;
 
 //@}
 

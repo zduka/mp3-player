@@ -79,9 +79,13 @@ public:
         VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
         // set ADC1 settings (mic & audio) - clkdiv by 4, internal voltage reference
         ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
-        // set ADC0 settings (vcc, )
-        // TODO
-
+        // set ADC0 settings (vcc, temperature)
+        // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 64 values
+        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc;
+        ADC0.CTRLB = ADC_SAMPNUM_ACC64_gc;
+        ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+        ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
+        ADC0.SAMPCTRL = 31;
         // initialize I2C slave. 
         Wire.begin(AVR_I2C_ADDRESS);
         Wire.onRequest(I2CRequest);
@@ -113,6 +117,15 @@ private:
     static void Wakeup() {
         // enable the RTC interrupt to 1/32th of a second while awake
         RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
+        // start ADC0 to measure the VCC and wait for the first measurement to be done
+        ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+        ADC0.INTCTRL |= ADC_RESRDY_bm;
+        ADC0.COMMAND = ADC_STCONV_bm;
+        // wait for the voltage measurement to finish
+        while (ADC0.MUXPOS == ADC_MUXPOS_INTREF_gc) {
+        }
+        // TODO deal with the voltage value appropriately
+        
         // enable interrupts for rotary encoders
         Control_.setInterrupt(ControlValueChanged);
         Volume_.setInterrupt(VolumeValueChanged);
@@ -168,8 +181,6 @@ private:
         uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
         switch (ADC0.MUXPOS) {
             case ADC_MUXPOS_INTREF_gc: { // VCC Sense
-                value = 110 * 512 / value;
-                value = value * 2;
                 Player::State_.setVoltage(value);
                 // switch the ADC to be ready to measure the temperature
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
@@ -177,11 +188,13 @@ private:
                 break;
             }
             case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
-                int8_t sigrow_offset = SIGROW.TEMPSENSE1; // Read signed value from signature row
-                uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
-                value -= sigrow_offset >> 2;
-                value *= (sigrow_gain >> 2); // so that we won't overflow 16bit value
-                Player::State_.setTemperature(value);
+                // drop 2 bits of precission so that we fit in 16bits
+                value = value >> 2;
+                int8_t sigrow_offset = SIGROW.TEMPSENSE1 >> 2; // Read signed value from signature row
+                uint8_t sigrow_gain = SIGROW.TEMPSENSE0 >> 2;
+                value = (value - sigrow_offset) * sigrow_gain;
+                value += 0x10; // add 1/2 to get correct rounding
+                Player::State_.setTemp(value);
                 // fallthrough to the default where we set the next measurement to be that of input voltage
             }
             default:
@@ -231,7 +244,6 @@ private:
     static void ResetESP() {
         // this is necessary so that ESP boots into normal mode
         ClearIrq();
-
     }
 
 

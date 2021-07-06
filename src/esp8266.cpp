@@ -29,6 +29,44 @@
 #define CS 16
 #define AVR_IRQ 0
 
+
+class Player {
+public:
+    /** Initializes the player. 
+
+     */
+    static void Initialize() {
+        
+    }
+
+    static void Loop() {
+        
+    }
+
+private:
+
+    
+
+    
+}; // Player
+
+
+
+
+
+void setup() {
+    Player::Initialize();
+}
+
+void loop() {
+    Player::Loop();
+}
+
+
+
+
+#ifdef HAHA
+
 /** Radio station. 
 
  */
@@ -514,6 +552,10 @@ void loop() {
     player.loop();
 }
 
+
+
+
+#endif // HAHA
 
 
 #endif
