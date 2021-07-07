@@ -1,5 +1,9 @@
 #if (defined ARCH_ATTINY)
 
+#if (F_CPU!=8000000UL)
+#error "Only 8Mhz clock is supported"
+#endif
+
 
 #include <avr/sleep.h>
 #include <util/delay.h>
@@ -103,22 +107,15 @@ public:
     }
 
     static void Loop() {
-        if (x_) {
-            x_ = false;
-            Neopixels_.setAll(Neopixel::White().withBrightness(32));
-            Neopixels_.sync();
-            _delay_ms(100);
-            Neopixels_.setAll(Neopixel::Black());
-            Neopixels_.sync();
-        }
         if (Status_.sleep)
             Sleep();
 
         if (Status_.tick) {
+            Status_.tick = false;
             LightsTick();
         }
         if (Status_.secondTick) {
-
+            Status_.secondTick = false;
         }
     }
 
@@ -128,6 +125,7 @@ private:
      */
     static void Wakeup() {
         // enable the RTC interrupt to 1/32th of a second while awake
+        while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
         // start ADC0 to measure the VCC and wait for the first measurement to be done
         ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
@@ -145,14 +143,13 @@ private:
         // TODO have this in a method so that it can be called from reset function as well? 
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
-        _delay_ms(50);
-        Neopixels_.setAll(Neopixel::Red().withBrightness(32));
-        Neopixels_.sync();
+        delay(50);
         // TODO flash neopixels for wakeup
     }
 
     static void Sleep() {
         // enable RTC interrupt every second so that the time can be kept
+        while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
         // disable rotary encoder interrupts so that they do not wake us from sleep
         Control_.clearInterrupt();
@@ -170,56 +167,9 @@ private:
         Wakeup();
     }
 
+    friend void ::RTC_PIT_vect();
 
-    friend void RTC_PIT_vect(void) __attribute__((signal)) {
-        RTC.PITINTFLAGS = RTC_PI_bm;
-        // determine whether we have 1 second or 1/32th second ticks and call the appropriate functions
-        if (RTC.PITCTRLA & RTC_PERIOD_gm == RTC_PERIOD_CYC1024_gc) {
-            Player::Status_.tick = true;
-            // if buttons are down, decrease their long press ticks
-            if (Player::ControlBtnCounter_ > 0)
-                --Player::ControlBtnCounter_;
-            if (Player::VolumeBtnCounter_ > 0)
-                --Player::VolumeBtnCounter_;
-            // if this is the 32th tick, continue to second tick, otherwise return now            
-            if (Player::Status_.ticksCounter-- != 0)
-                return;
-        } 
-        // the one-second tick
-        Player::Status_.secondTick = true;
-        Player::Time_.secondTick();
-        // TODO alarm & stuff
-    }
-
-    friend void ADC0_RESRDY_vect(void) __attribute__((signal)) {
-        uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
-        switch (ADC0.MUXPOS) {
-            case ADC_MUXPOS_INTREF_gc: { // VCC Sense
-                Player::State_.setVoltage(value);
-                // switch the ADC to be ready to measure the temperature
-                ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
-                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-                break;
-            }
-            case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
-                // drop 2 bits of precission so that we fit in 16bits
-                value = value >> 2;
-                int8_t sigrow_offset = SIGROW.TEMPSENSE1 >> 2; // Read signed value from signature row
-                uint8_t sigrow_gain = SIGROW.TEMPSENSE0 >> 2;
-                value = (value - sigrow_offset) * sigrow_gain;
-                value += 0x10; // add 1/2 to get correct rounding
-                Player::State_.setTemp(value);
-                // fallthrough to the default where we set the next measurement to be that of input voltage
-            }
-            default:
-                // switch the ADC to be ready to measure the VCC
-                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
-                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-                break;
-        }
-    }
-
-
+    friend void ::ADC0_RESRDY_vect();
 
     inline volatile static struct {
         bool sleep : 1;
@@ -272,7 +222,6 @@ private:
                 State_.clearEvents();
                 ClearIrq();
         }
-        x_ = true;
     }
 
     static void I2CReceive(int numBytes) {
@@ -302,7 +251,6 @@ private:
 
     inline static uint8_t Buffer_[32];
 
-    inline static volatile bool x_ = false;
 //@}
 
 
@@ -338,8 +286,10 @@ private:
             ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
             State_.setControlDown(true);
             // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
-            if (Status_.sleep)
+            if (Status_.sleep) {
+                while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
                 RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
+            }
         } else {
             State_.setControlDown(false);
             if (ControlBtnCounter_ == 0) {
@@ -362,8 +312,10 @@ private:
             VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
             State_.setVolumeDown(true);
             // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
-            if (Status_.sleep)
+            if (Status_.sleep) {
+                while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
                 RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
+            }
         } else {
             State_.setVolumeDown(false);
             if (VolumeBtnCounter_ == 0) {
@@ -444,14 +396,7 @@ private:
         AudioMax_ = 0;
     }
 
-    friend void ADC1_RESRDY_vect(void) __attribute__((signal)) {
-        uint8_t value = ADC1.RES;
-        // whether this is audio, or microphone, update the audio bar levels
-        if (value < Player::AudioMin_)
-            Player::AudioMin_ = value; 
-        if (value > Player::AudioMax_)
-            Player::AudioMax_ = value;
-    }
+    friend void ::ADC1_RESRDY_vect();
 
     inline static volatile uint8_t AudioMin_;
     inline static volatile uint8_t AudioMax_;
@@ -461,6 +406,62 @@ private:
 }; // Player
 
 
+ISR(RTC_PIT_vect) {
+    RTC.PITINTFLAGS = RTC_PI_bm;
+    // determine whether we have 1 second or 1/32th second ticks and call the appropriate functions
+    if (! Player::Status_.sleep || Player::State_.controlDown() || Player::State_.volumeDown()) {
+        Player::Status_.tick = true;
+        // if buttons are down, decrease their long press ticks
+        if (Player::ControlBtnCounter_ > 0)
+            --Player::ControlBtnCounter_;
+        if (Player::VolumeBtnCounter_ > 0)
+            --Player::VolumeBtnCounter_;
+        // if this is the 32th tick, continue to second tick, otherwise return now            
+        if (Player::Status_.ticksCounter-- != 0)
+            return;
+    } 
+    // the one-second tick
+    Player::Status_.secondTick = true;
+    Player::Time_.secondTick();
+    // TODO alarm & stuff
+}
+
+ISR(ADC0_RESRDY_vect) {
+    uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
+    switch (ADC0.MUXPOS) {
+        case ADC_MUXPOS_INTREF_gc: { // VCC Sense
+            Player::State_.setVoltage(value);
+            // switch the ADC to be ready to measure the temperature
+            ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
+            ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+            break;
+        }
+        case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
+            // drop 2 bits of precission so that we fit in 16bits
+            value = value >> 2;
+            int8_t sigrow_offset = SIGROW.TEMPSENSE1 >> 2; // Read signed value from signature row
+            uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
+            value = (value - sigrow_offset) * sigrow_gain;
+            value += 0x20; // add 1/2 to get correct rounding
+            Player::State_.setTemp(value);
+            // fallthrough to the default where we set the next measurement to be that of input voltage
+        }
+        default:
+            // switch the ADC to be ready to measure the VCC
+            ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+            ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+            break;
+    }
+}
+
+ISR(ADC1_RESRDY_vect) {
+    uint8_t value = ADC1.RES;
+    // whether this is audio, or microphone, update the audio bar levels
+    if (value < Player::AudioMin_)
+        Player::AudioMin_ = value; 
+    if (value > Player::AudioMax_)
+        Player::AudioMax_ = value;
+}
 
 void setup() {
     Player::Initialize();

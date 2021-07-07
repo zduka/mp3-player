@@ -10,6 +10,10 @@ To be able to program & use the serial monitor, run the following and then resta
 
     sudo adduser YOUR_USER dialout
 
+To be able to upload to ATTiny via UPDI, run the following:
+
+    sudo pip install https://github.com/mraardvark/pyupdi/archive/master.zip
+
 Tested on ubuntu 20.04. 
 
 ## Basic Design
