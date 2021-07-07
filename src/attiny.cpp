@@ -437,12 +437,6 @@ ISR(ADC0_RESRDY_vect) {
             break;
         }
         case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
-            // drop 2 bits of precission so that we fit in 16bits
-            value = value >> 2;
-            int8_t sigrow_offset = SIGROW.TEMPSENSE1 >> 2; // Read signed value from signature row
-            uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
-            value = (value - sigrow_offset) * sigrow_gain;
-            value += 0x20; // add 1/2 to get correct rounding
             Player::State_.setTemp(value);
             // fallthrough to the default where we set the next measurement to be that of input voltage
         }
@@ -452,6 +446,8 @@ ISR(ADC0_RESRDY_vect) {
             ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
             break;
     }
+    // start new conversion
+    ADC0.COMMAND = ADC_STCONV_bm;
 }
 
 ISR(ADC1_RESRDY_vect) {

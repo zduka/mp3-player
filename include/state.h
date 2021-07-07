@@ -392,18 +392,24 @@ public:
     }
 
     void setTemp(uint16_t temp) {
+        // drop 2 bits of precission so that we fit in 16bits
+        int8_t sigrow_offset = SIGROW.TEMPSENSE1; // Read signed value from signature row
+        uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
+        uint32_t x = (temp - sigrow_offset);
+        x *= sigrow_gain;
+        x += 0x80; // add 1/2 to get correct rounding
         // convert to celsius offset by 10 (263.15 K)
-        if (temp < 16842) {
-            temp = 0;
+        if (x < 67336) {
+            x = 0;
         } else {
-            temp -= 16842;
-            if (temp > 3271)
-                temp = 3271;
+            x -= 67336;
+            if (x > 16320)
+                x = 16320;
         }
-        // now convert to celsius / 10
-        temp = temp * 10 / 128;
+        // now convert to celsius / 4
+        x = x / 64;
         peripherals_ &= ~TEMP_MASK;
-        peripherals_ |= temp;
+        peripherals_ |= (x & TEMP_MASK);
     }
 #endif
 
