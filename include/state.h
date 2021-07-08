@@ -475,9 +475,17 @@ public:
     }
 
 #if (defined ARCH_ATTINY) 
+
+    void resetControl(uint16_t value, uint16_t maxValue) {
+        controlValues_ &= ~CONTROL_MASK;
+        controlValues_ |= value;
+        controlMaximums_ &= ~ CONTROL_MASK;
+        controlMaximums_ |= maxValue;
+    }
+
     void setControl(uint16_t value) {
         assert(value <= maxControl());
-        controlValues_ &= ~1023;
+        controlValues_ &= ~CONTROL_MASK;
         controlValues_ |= value;
         events_ |= CONTROL_CHANGE_MASK;
     }
@@ -490,9 +498,16 @@ public:
         events_ |= CONTROL_BUTTON_CHANGE_MASK;
     }
 
+    void resetVolume(uint8_t value, uint8_t maxValue) {
+        controlValues_ &= ~VOLUME_MASK;
+        controlValues_ |= value << 10;
+        controlMaximums_ &= ~VOLUME_MASK;
+        controlMaximums_ |= maxValue << 10;
+    }
+    
     void setVolume(uint8_t value) {
         assert(value < maxVolume());
-        controlValues_ &= ~(63 << 10);
+        controlValues_ &= ~VOLUME_MASK;
         controlValues_ |= value << 10; 
         events_ |= VOLUME_CHANGE_MASK;
     }
@@ -517,7 +532,7 @@ public:
 
 private:
     static constexpr uint16_t CONTROL_MASK = 1023;
-    static constexpr uint16_t VOLUME_MASK = 63;
+    static constexpr uint16_t VOLUME_MASK = 63 << 10;
     uint16_t controlValues_ = 0;
     uint16_t controlMaximums_ = 0;
     static constexpr uint8_t CONTROL_DOWN_MASK = 1;

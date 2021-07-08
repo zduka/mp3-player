@@ -8,6 +8,7 @@
 
 #include "esp8266/core.h"
 #include "state.h"
+#include "comms.h"
 
 
 /* ESP8266 PINOUT
@@ -45,6 +46,7 @@ public:
         WiFi.forceSleepBegin();
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
+        LOG("mac address: " + WiFi.macAddress());
         // set the IRQ pin as input so that we can tell when AVR has an interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
@@ -53,7 +55,11 @@ public:
         // tell AVR that we are awake by requesting initial state
         UpdateState();
         // initialize the SD card
-        
+
+
+
+        Message::Send(Message::SetVolume{0, 16});
+        UpdateState();
         
         
     }

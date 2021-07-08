@@ -101,7 +101,7 @@ public:
         Server.handleClient();
     }
 
-    static ESP8266WebServer Server;
+    static inline ESP8266WebServer Server{80};
 
 
 private:
@@ -146,5 +146,3 @@ private:
     }    
     
 }; // Core
-
-ESP8266WebServer Core::Server{80};

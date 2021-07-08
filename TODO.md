@@ -10,3 +10,7 @@
 # ATTiny
 
 - make sure that ADC is disconnected while sleeping
+
+# ESP
+
+- use core in setup

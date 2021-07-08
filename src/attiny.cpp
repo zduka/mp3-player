@@ -228,11 +228,15 @@ private:
         // TODO check that numBytes <=32
         Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
         switch (Buffer_[0]) {
+            case Message::SetControl::Id: {
+                auto msg = Message::SetControl::At(Buffer_);
+                State_.resetControl(msg.value, msg.maxValue);
+                break;
+            }
             case Message::SetVolume::Id: {
                 auto msg = Message::SetVolume::At(Buffer_);
-            }
-            case Message::SetControl::Id: {
-            
+                State_.resetVolume(msg.value, msg.maxValue);
+                break;
             }
         }
     }
