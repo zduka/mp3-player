@@ -1,15 +1,27 @@
 #if (defined ARCH_ESP8266)
 #include <Wire.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <LittleFS.h>
+#include <SPI.h>
+#include <SD.h>
+#include <DNSServer.h>
+
 #include <radio.h>
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
 #include <AudioGeneratorMP3.h>
 #include <AudioOutputI2SNoDAC.h>
 
-#include "esp8266/core.h"
 #include "state.h"
 #include "comms.h"
 
+#define LOG(...) Log_(String("") + __VA_ARGS__)
+
+inline void Log_(String const & str) {
+    Serial.print(String(millis() / 1000) + ": ");
+    Serial.println(str);
+}
 
 /* ESP8266 PINOUT
 
@@ -46,25 +58,39 @@ public:
         WiFi.forceSleepBegin();
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
-        LOG("mac address: " + WiFi.macAddress());
+        LOG("chip id:      " + ESP.getChipId());
+        LOG("cpu_freq:     " + ESP.getCpuFreqMHz());
+        LOG("core version: " + ESP.getCoreVersion());
+        LOG("SDK version:  " + ESP.getSdkVersion());
+        LOG("mac address:  " + WiFi.macAddress());
         // set the IRQ pin as input so that we can tell when AVR has an interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
         // start the I2C comms
         Wire.begin(I2C_SDA, I2C_SCL);
+        Wire.setClock(400000);
+        // initialize the on-chip filesystem
+        InitializeLittleFS();
         // tell AVR that we are awake by requesting initial state
         UpdateState();
+
+
         // initialize the SD card
 
 
 
         Message::Send(Message::SetVolume{0, 16});
         UpdateState();
+        InitializeAP();
+        InitializeServer();
         
         
     }
 
     static void Loop() {
+        DNSServer_.processNextRequest();
+        Server_.handleClient();
+
         // based on the mode, do the bookkeeping
 
 
@@ -73,6 +99,37 @@ public:
     }
 
 private:
+
+    static void Error(uint8_t code = 0) {
+        LOG("ERROR: " + code);
+        // TODO tell avr
+    }
+
+    static void InitializeLittleFS() {
+        LittleFS.begin();
+        FSInfo fs_info;
+        LittleFS.info(fs_info); 
+        LOG("LittleFS Stats:");
+        LOG("  Total bytes:      " +fs_info.totalBytes);
+        LOG("  Used bytes:       " +fs_info.usedBytes);
+        LOG("  Block size:       " +fs_info.blockSize);
+        LOG("  Page size:        " +fs_info.pageSize);
+        LOG("  Max open files:   " +fs_info.maxOpenFiles);
+        LOG("  Max path lenghth: " +fs_info.maxPathLength);
+    }
+    
+    static void InitializeAP() {
+        String ssid = "mp3-player";
+        String pass = "mp3-player";
+        LOG("Initializing soft AP, ssid " + ssid + ", password " + pass);
+        LOG("    own ip: 10.0.0.0");
+        LOG("    subnet: 255.255.255.0");
+        IPAddress ip{10,0,0,0};
+        IPAddress subnet{255, 255, 255, 0};
+        WiFi.softAPConfig(ip, ip, subnet);
+        if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
+            Error();            
+    }
 
     /** Handler for the state update requests.
 
@@ -97,12 +154,40 @@ private:
         }
     }
 
-    
+
     static inline State State_;
 
     static inline volatile bool Irq_ = false;
 
-    
+
+
+
+/** \name Webserver
+ */
+//@{
+private:
+
+    static void InitializeServer() {
+        Server_.onNotFound(Http404);
+        Server_.serveStatic("/", LittleFS, "/index.html");
+        IPAddress ip{10,0,0,0};
+        DNSServer_.start(
+            53,
+            "*",
+            ip
+        );
+        Server_.begin();
+    }
+
+    static void Http404() {
+        Server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + Server_.uri() + "\" }");
+    }
+
+    static inline ESP8266WebServer Server_{80};
+    static inline DNSServer DNSServer_;
+
+//@}
+
 }; // Player
 
 
