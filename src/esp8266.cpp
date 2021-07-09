@@ -122,9 +122,9 @@ private:
         String ssid = "mp3-player";
         String pass = "mp3-player";
         LOG("Initializing soft AP, ssid " + ssid + ", password " + pass);
-        LOG("    own ip: 10.0.0.0");
+        LOG("    own ip: 10.0.0.1");
         LOG("    subnet: 255.255.255.0");
-        IPAddress ip{10,0,0,0};
+        IPAddress ip{10,0,0,1};
         IPAddress subnet{255, 255, 255, 0};
         WiFi.softAPConfig(ip, ip, subnet);
         if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
@@ -170,7 +170,7 @@ private:
     static void InitializeServer() {
         Server_.onNotFound(Http404);
         Server_.serveStatic("/", LittleFS, "/index.html");
-        IPAddress ip{10,0,0,0};
+        IPAddress ip{10,0,0,1};
         DNSServer_.start(
             53,
             "*",
