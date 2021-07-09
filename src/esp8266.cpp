@@ -17,6 +17,7 @@
 #include "comms.h"
 
 #define LOG(...) Log_(String("") + __VA_ARGS__)
+#define STR(...) (String("") + __VA_ARGS__)
 
 inline void Log_(String const & str) {
     Serial.print(String(millis() / 1000) + ": ");
@@ -58,11 +59,11 @@ public:
         WiFi.forceSleepBegin();
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
-        LOG("chip id:      " + ESP.getChipId());
-        LOG("cpu_freq:     " + ESP.getCpuFreqMHz());
-        LOG("core version: " + ESP.getCoreVersion());
-        LOG("SDK version:  " + ESP.getSdkVersion());
-        LOG("mac address:  " + WiFi.macAddress());
+        LOG("  chip id:      " + ESP.getChipId());
+        LOG("  cpu_freq:     " + ESP.getCpuFreqMHz());
+        LOG("  core version: " + ESP.getCoreVersion());
+        LOG("  SDK version:  " + ESP.getSdkVersion());
+        LOG("  mac address:  " + WiFi.macAddress());
         // set the IRQ pin as input so that we can tell when AVR has an interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
@@ -75,12 +76,13 @@ public:
         UpdateState();
 
 
+
         // initialize the SD card
+        InitializeSDCard();
 
 
-
-        Message::Send(Message::SetVolume{0, 16});
-        UpdateState();
+        //Message::Send(Message::SetVolume{0, 16});
+        //UpdateState();
         InitializeAP();
         InitializeServer();
         
@@ -116,6 +118,31 @@ private:
         LOG("  Page size:        " +fs_info.pageSize);
         LOG("  Max open files:   " +fs_info.maxOpenFiles);
         LOG("  Max path lenghth: " +fs_info.maxPathLength);
+    }
+
+    static void InitializeSDCard() {
+        if (SD.begin(CS, SPI_HALF_SPEED)) {
+            LOG("SD Card:");
+            switch (SD.type()) {
+                case 0:
+                    LOG("  type: SD1");
+                    break;
+                case 1:
+                    LOG("  type: SD2");
+                    break;
+                case 2:
+                    LOG("  type: SDHC");
+                    break;
+                default:
+                    LOG("  type: unknown");
+            }
+            LOG("  volume type: FAT" + SD.fatType());
+            LOG("  volume size: " + (static_cast<uint32_t>(SD.totalClusters()) * SD.clusterSize() / 1000000) + " [MB]");
+        } else {
+            LOG("Error reading from SD card");
+            Error();
+        }
+        // once the SD card has been successfully initialized, read the persistent settings from it
     }
     
     static void InitializeAP() {
@@ -159,8 +186,122 @@ private:
 
     static inline volatile bool Irq_ = false;
 
+/** \name Controls
+ 
+    This section contains handlers for the input events such as rotary encoder changes, presses, headphones, etc. 
+ */
+//@{
+private:
+
+    static void ControlChange(uint16_t value) {
+
+    }
+
+    static void ControlDown() {
+
+    }
+
+    static void ControlUp() {
+
+    }
+
+    static void ControlPress() {
+
+    }
+
+    static void ControlLongPress() {
+
+    }
+
+    static void VolumeChange(uint8_t value) {
+        switch (State_.mode()) {
+            case Mode::MP3:
+            case Mode::WalkieTalkie:
+            case Mode::NightLight:
+                I2S_.SetGain(value * ESP_VOLUME_STEP);
+                break;
+            case Mode::Radio:
+                Radio_.setVolume(value);
+        }
+    }
+
+    static void VolumeDown() {
+
+    }
+
+    static void VolumeUp() {
+
+    }
+
+    static void VolumePress() {
+
+    }
+
+    static void VolumeLongPress() {
+
+    }
 
 
+
+
+//@}
+
+    /** Changes the player's mode. 
+     */
+    static void SetMode(Mode mode) {
+        // if the new mode is different than the old mode, we must first close the old mode
+        if (State_.mode() != mode) {
+            switch (State_.mode()) {
+                case Mode::MP3:
+                    if (MP3_.isRunning()) {
+                        MP3_.stop();
+                        I2S_.stop();
+                        MP3File_.close();
+                    }
+                    break;
+                case Mode::Radio:
+                    Radio_.term();
+                    break;
+                case Mode::WalkieTalkie:
+                    break;
+                case Mode::NightLight:
+                    break;
+            }
+
+        }
+        // set the new mode
+        State_.setMode(mode);
+        switch (mode) {
+            case Mode::MP3: {
+                break;
+            }
+            case Mode::Radio: {
+                LOG("Mode: radio");
+                Radio_.init();
+                Radio_.setMono(true);
+                Radio_.setVolume(State_.volume());
+                // TODO set frequency & stuff
+
+
+            }
+            case Mode::WalkieTalkie: {
+
+            }
+            case Mode::NightLight: {
+
+            }
+        }
+
+
+        // finally, inform the AVR of the mode change and other updates
+        Message::Send(Message::SetMode{State_});
+    }
+
+    static inline RDA5807M Radio_;
+
+    static inline AudioGeneratorMP3 MP3_;
+    static inline AudioOutputI2SNoDAC I2S_;
+    static inline AudioFileSourceSD MP3File_;
 
 /** \name Webserver
  */
@@ -170,6 +311,11 @@ private:
     static void InitializeServer() {
         Server_.onNotFound(Http404);
         Server_.serveStatic("/", LittleFS, "/index.html");
+        Server_.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
+        Server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
+        Server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
+        Server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
+        Server_.serveStatic("/lame.min.js", LittleFS, "/lame.min.js");
         IPAddress ip{10,0,0,1};
         DNSServer_.start(
             53,

@@ -1,8 +1,11 @@
 #pragma once
 
+#include "state.h"
+
 class Message {
 public:
 
+    class SetMode;
     class SetControl;
     class SetVolume;
 
@@ -20,9 +23,32 @@ protected:
     
 }; // class Message
 
-class Message::SetControl : public Message {
+class Message::SetMode : public Message {
 public:
     static constexpr uint8_t Id = 0;
+    Mode mode;
+    uint16_t control;
+    uint16_t maxControl;
+    uint8_t volume;
+    uint8_t maxVolume;
+
+    SetMode(State const & state):
+        mode{state.mode()},
+        control{state.control()},
+        maxControl{state.maxControl()},
+        volume{state.volume()},
+        maxVolume{state.maxVolume()} {
+    }
+
+    static SetMode const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetMode const *>(buffer);
+    }
+
+} __attribute__((packed)); // Message::SetMode;
+
+class Message::SetControl : public Message {
+public:
+    static constexpr uint8_t Id = 1;
     uint16_t value;
     uint16_t maxValue;
 
@@ -40,7 +66,7 @@ static_assert(sizeof(Message::SetControl) == 4);
 
 class Message::SetVolume : public Message {
 public:
-    static constexpr uint8_t Id = 1;
+    static constexpr uint8_t Id = 2;
     uint8_t value;
     uint8_t maxValue;
 

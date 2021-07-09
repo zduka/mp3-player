@@ -184,6 +184,13 @@ private:
 
 } __attribute__((packed));
 
+enum class Mode : uint8_t {
+    MP3,
+    Radio,
+    WalkieTalkie,
+    NightLight,
+}; // Mode
+
 enum class MP3Selection : uint8_t {
     Track = 0, 
     Playlist = 1,
@@ -538,6 +545,29 @@ private:
     static constexpr uint8_t CONTROL_DOWN_MASK = 1;
     static constexpr uint8_t VOLUME_DOWN_MASK = 2;
     uint8_t controlState_ = 0;
+//@}
+
+/** \name Mode and mode information. 
+ */
+//@{
+public:
+
+    Mode mode() const {
+        return static_cast<Mode>(mode_ & MODE_MASK);
+    }
+
+#if (defined ARCH_ESP8266)
+    void setMode(Mode mode) {
+        mode_ &= ~MODE_MASK;
+        mode_ |= static_cast<uint8_t>(mode);
+    }
+#endif
+
+private:
+    static constexpr uint8_t MODE_MASK = 3;
+
+    uint8_t mode_ = 0;
+
 //@}
 
 // color

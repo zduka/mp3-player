@@ -82,6 +82,14 @@ A lot more can be configured via the web interface.
 
 https://github.com/me-no-dev/EspExceptionDecoder
 
-### LittleFS Uploader
 
-https://github.com/earlephilhower/arduino-esp8266littlefs-plugin/releases
+
+Use old bootstrap because it is smaller
+
+https://getbootstrap.com/docs/3.4/customize/
+
+
+MP3 encoder - maybe
+
+https://github.com/zhuker/lamejs
+
