@@ -238,6 +238,17 @@ private:
                 State_.resetVolume(msg.value, msg.maxValue);
                 break;
             }
+
+            case Message::SetMP3Settings::Id: {
+                auto msg = Message::SetMP3Settings::At(Buffer_);
+                msg.applyTo(State_);
+                break;
+            }
+            case Message::SetRadioSettings::Id: {
+                auto msg = Message::SetRadioSettings::At(Buffer_);
+                msg.applyTo(State_);
+                break;
+            }
         }
     }
 

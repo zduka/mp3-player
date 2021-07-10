@@ -22,11 +22,6 @@
 #define MP3_PLAYLIST_COLOR Neopixel::Purple()
 #define AUDIO_COLOR AccentColor_
 
-/** The values of resistors forming the voltage divider from up to 5V to the reference voltage of 1.1V at the VCC_SENSE pin. For better accuracy.
- */
-#define VCC_DIVIDER_RES1 386
-#define VCC_DIVIDER_RES2 100
-
 /** \name Pointer-to-pointer cast
  
     Since any pointer to pointer cast can be done by two static_casts to and from `void *`, this simple template provides a shorthand for that functionality.
@@ -47,8 +42,6 @@ inline T pointer_cast(W * from) {
     return static_cast<T>(static_cast<void *>(from));
 }
 //@}
-
-
 
 /** Date & time down to a second in 4 bytes. 
  */
@@ -184,6 +177,31 @@ private:
 
 } __attribute__((packed));
 
+class Message {
+public:
+
+    class SetMode;
+    class SetControl;
+    class SetVolume;
+    class SetIdle;
+    class SetAudioLights;
+    class SetMP3Settings;
+    class SetRadioSettings;
+
+#ifdef ARCH_ESP8266
+    template<typename T>
+    static void Send(T const & msg) {
+        Wire.beginTransmission(AVR_I2C_ADDRESS);
+        Wire.write(T::Id);
+        Wire.write(pointer_cast<char const *>(& msg), sizeof(T));
+        Wire.endTransmission();
+    }
+#endif
+
+protected:
+    
+}; // class Message
+
 enum class Mode : uint8_t {
     MP3,
     Radio,
@@ -217,6 +235,8 @@ enum class RadioTuning : uint8_t {
 
  */
 class State {
+    friend class Message::SetMP3Settings;
+    friend class Message::SetRadioSettings;
 
 /** \name Events
  
@@ -564,6 +584,32 @@ public:
         return mode_ & AUDIO_LIGHTS_MASK;
     }
 
+    uint8_t mp3PlaylistId() const {
+        return (mp3_ & PLAYLIST_ID_MASK) >> 10;
+    }
+
+    uint16_t mp3TrackId() const {
+        return mp3_ & TRACK_ID_MASK;
+    }
+
+    /** When true, control knob is used to select playlist, not track id. 
+     */
+    bool mp3PlaylistSelection() const {
+        return mp3_ & PLAYLIST_SELECTION_MASK;
+    }
+
+    uint16_t radioFrequency() const {
+        return (radio_ & FREQUENCY_MASK) + RADIO_FREQUENCY_OFFSET;
+    }
+
+    uint8_t radioStation() const {
+        return (radio_ & STATION_MASK) >> 9;
+    }
+
+    bool radioManualTuning() const {
+        return radio_ & MANUAL_TUNING_MASK;
+    }
+
 #if (defined ARCH_ESP8266)
     void setMode(Mode mode) {
         mode_ &= ~MODE_MASK;
@@ -583,6 +629,27 @@ public:
         else 
             mode_ &= ~ AUDIO_LIGHTS_MASK;
     }
+
+
+
+
+
+    void setRadioFrequency(uint16_t mhzx10) {
+        radio_ &= ~ FREQUENCY_MASK;
+        radio_ |= mhzx10 - RADIO_FREQUENCY_OFFSET;
+    }
+
+    void setRadioStation(uint8_t index) {
+        radio_ &= ~ STATION_MASK;
+        radio_ |= (index << 9) & STATION_MASK;
+    }
+
+    void setRadioManualTuning(bool value) {
+        if (value)
+            radio_ |= MANUAL_TUNING_MASK;
+        else
+            radio_ &= ~MANUAL_TUNING_MASK;
+    }
 #endif
 
 private:
@@ -593,6 +660,18 @@ private:
 
     uint8_t mode_ = 0;
 
+    // TODO allow playlist change? 
+    static constexpr uint16_t PLAYLIST_SELECTION_MASK = 1 << 13;
+    static constexpr uint16_t PLAYLIST_ID_MASK = 7 << 10;
+    static constexpr uint16_t TRACK_ID_MASK = 1023;
+    uint16_t mp3_;
+
+    // TODO allow manual tuning ?
+    static constexpr uint16_t MANUAL_TUNING_MASK = 1 << 12;
+    static constexpr uint16_t STATION_MASK = 7 << 9;
+    static constexpr uint16_t FREQUENCY_MASK = 511;
+    uint16_t radio_ = 0;
+
 //@}
 
 // color
@@ -600,6 +679,145 @@ private:
 // mode backups
 
 } __attribute__((packed)); // State 
+
+
+
+
+
+
+
+
+
+// Messages ------------------------------------------------------------------------------------------------------------
+
+class Message::SetMode : public Message {
+public:
+    static constexpr uint8_t Id = 0;
+    Mode mode;
+    uint16_t control;
+    uint16_t maxControl;
+    uint8_t volume;
+    uint8_t maxVolume;
+
+    SetMode(State const & state):
+        mode{state.mode()},
+        control{state.control()},
+        maxControl{state.maxControl()},
+        volume{state.volume()},
+        maxVolume{state.maxVolume()} {
+    }
+
+    static SetMode const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetMode const *>(buffer);
+    }
+
+} __attribute__((packed)); // Message::SetMode;
+
+class Message::SetControl : public Message {
+public:
+    static constexpr uint8_t Id = 1;
+    uint16_t value;
+    uint16_t maxValue;
+
+    SetControl(uint16_t value, uint16_t maxValue):
+        value{value},
+        maxValue{maxValue} {
+    }
+
+    static SetControl const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetControl const *>(buffer);
+    }
+} __attribute__((packed)); // Message::SetControl
+
+static_assert(sizeof(Message::SetControl) == 4);
+
+class Message::SetVolume : public Message {
+public:
+    static constexpr uint8_t Id = 2;
+    uint8_t value;
+    uint8_t maxValue;
+
+    SetVolume(uint8_t value, uint8_t maxValue):
+        value{value},
+        maxValue{maxValue} {
+    }
+
+    static SetVolume const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetVolume const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetVolume
+
+static_assert(sizeof(Message::SetVolume) == 2);
+
+class Message::SetIdle : public Message {
+public:
+    static constexpr uint8_t Id = 3;
+    bool value;
+
+    SetIdle(bool value):
+        value{value} {
+    }
+
+    static SetIdle const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetIdle const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetIdle
+
+class Message::SetAudioLights : public Message {
+public:
+    static constexpr uint8_t Id = 4;
+    bool value;
+
+    SetAudioLights(bool value):
+        value{value} {
+    }
+
+    static SetAudioLights const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetAudioLights const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetAudioLights
+
+class Message::SetMP3Settings : public Message {
+public:
+    static constexpr uint8_t Id = 5;
+    uint16_t raw_;
+
+    SetMP3Settings(State const & from):
+        raw_{from.mp3_} {
+    }
+
+    void applyTo(State & state) const {
+        state.mp3_ = raw_;
+    }
+
+    static SetMP3Settings const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetMP3Settings const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetMP3Settings
+
+class Message::SetRadioSettings : public Message {
+public:
+    static constexpr uint8_t Id = 6;
+    uint16_t raw_;
+
+    SetRadioSettings(State const & from):
+        raw_{from.radio_} {
+    }
+
+    void applyTo(State & state) const {
+        state.radio_ = raw_;
+    }
+
+    static SetRadioSettings const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetRadioSettings const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetRadioSettings
+
+
+
+
+
+
 
 #ifdef HAHA
 

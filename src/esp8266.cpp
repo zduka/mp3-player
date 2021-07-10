@@ -194,7 +194,18 @@ private:
 private:
 
     static void ControlChange(uint16_t value) {
+        switch (State_.mode()) {
+            case Mode::MP3: {
 
+                break;
+            }
+            case Mode::Radio: {
+                if (State_.radioManualTuning()) 
+                    SetRadioFrequency(value + RADIO_FREQUENCY_OFFSET);
+                else 
+                    SetRadioStation(value);
+            }
+        }
     }
 
     static void ControlDown() {
@@ -206,6 +217,19 @@ private:
     }
 
     static void ControlPress() {
+        switch (State_.mode()) {
+            case Mode::MP3: {
+                break;
+            }
+            case Mode::Radio:
+                State_.setRadioManualTuning(!State_.radioManualTuning());
+                if (State_.radioManualTuning()) 
+                    State_.setControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
+                else
+                    State_.setControl(State_.radioStation(), NumRadioStations());
+                Message::Send(Message::SetRadioSettings{State_});
+                Message::Send(Message::SetControl{State_});
+        }
 
     }
 
@@ -240,7 +264,12 @@ private:
         When paused, player enters the idle mode.  
      */
     static void VolumePress() {
-
+        if (State_.idle()) 
+            Play();
+        else
+            Pause();
+        State_.setIdle(! State_.idle());
+        Message::Send(Message::SetIdle(State_.idle()));
     }
 
     /** Enables or disables the audio lights. 
@@ -261,14 +290,8 @@ private:
         if (State_.mode() != mode) {
             switch (State_.mode()) {
                 case Mode::MP3:
-                    if (MP3_.isRunning()) {
-                        MP3_.stop();
-                        I2S_.stop();
-                        MP3File_.close();
-                    }
-                    break;
                 case Mode::Radio:
-                    Radio_.term();
+                    Pause();
                     break;
                 case Mode::WalkieTalkie:
                     break;
@@ -285,12 +308,7 @@ private:
             }
             case Mode::Radio: {
                 LOG("Mode: radio");
-                Radio_.init();
-                Radio_.setMono(true);
-                Radio_.setVolume(State_.volume());
-                // TODO set frequency & stuff
-
-
+                Play();
             }
             case Mode::WalkieTalkie: {
 
@@ -305,7 +323,75 @@ private:
         Message::Send(Message::SetMode{State_});
     }
 
+    /** Resumes playback.
+     */ 
+    static void Play() {
+        switch (State_.mode()) {
+            case Mode::MP3:
+                break;
+            case Mode::Radio:
+                Radio_.init();
+                Radio_.setMono(true);
+                Radio_.setVolume(State_.volume());
+                Radio_.setBandFrequency(RADIO_BAND_FM, State_.radioFrequency() * 10);
+                break;
+            case Mode::NightLight:
+                break;
+            // don't do anything for walkie talkie ?
+        }
+    }
+
+    /** Pauses or stops playback. 
+     */
+    static void Pause() {
+        switch (State_.mode()) {
+            case Mode::MP3:
+                if (MP3_.isRunning()) {
+                    MP3_.stop();
+                    I2S_.stop();
+                    MP3File_.close();
+                }
+                break;
+            case Mode::Radio:
+                Radio_.term();
+                break;
+            case Mode::NightLight:
+                break;
+            // don't do anything for walkie talkie ?
+        }
+
+    }
+
+    static void SetRadioFrequency(uint16_t mhzx10) {
+        if (State_.mode() == Mode::Radio) {
+            Radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
+            State_.setRadioFrequency(mhzx10);
+            Message::Send(Message::SetRadioSettings{State_});
+        }
+    }
+
+    static void SetRadioStation(uint8_t index) {
+        if (State_.mode() == Mode::Radio) {
+            Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
+            State_.setRadioFrequency(RadioStations_[index]);
+            State_.setRadioStation(index);            
+            Message::Send(Message::SetRadioSettings{State_});
+        }
+    }
+
+    /** Returns the number of valid stations. 
+     */
+    static uint8_t NumRadioStations() {
+        uint8_t result = 0;
+        while (result < 8 && RadioStations_[result] != RADIO_STATION_NONE)
+            ++result;
+        return result;
+    }
+
     static inline RDA5807M Radio_;
+
+    static constexpr uint16_t RADIO_STATION_NONE = 0xffff;
+    static inline uint16_t RadioStations_[8];
 
     static inline AudioGeneratorMP3 MP3_;
     static inline AudioOutputI2SNoDAC I2S_;
