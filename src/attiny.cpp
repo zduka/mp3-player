@@ -177,7 +177,6 @@ private:
         bool tick : 1;
         bool secondTick : 1;
         uint8_t ticksCounter : 5; // 0..31
-        uint8_t sleepCountdown: 10; // 0..1023
     } Status_;
 
     inline static volatile State State_;
@@ -228,17 +227,11 @@ private:
         // TODO check that numBytes <=32
         Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
         switch (Buffer_[0]) {
-            case Message::SetControl::Id: {
-                auto msg = Message::SetControl::At(Buffer_);
-                State_.resetControl(msg.value, msg.maxValue);
+            case Message::SetMode::Id: {
+                auto msg = Message::SetMode::At(Buffer_);
+                msg.applyTo(State_);
                 break;
             }
-            case Message::SetVolume::Id: {
-                auto msg = Message::SetVolume::At(Buffer_);
-                State_.resetVolume(msg.value, msg.maxValue);
-                break;
-            }
-
             case Message::SetMP3Settings::Id: {
                 auto msg = Message::SetMP3Settings::At(Buffer_);
                 msg.applyTo(State_);

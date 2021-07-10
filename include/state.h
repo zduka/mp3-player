@@ -181,10 +181,8 @@ class Message {
 public:
 
     class SetMode;
-    class SetControl;
-    class SetVolume;
-    class SetIdle;
-    class SetAudioLights;
+    class SetControls;
+    class SetModeAndControls;
     class SetMP3Settings;
     class SetRadioSettings;
 
@@ -235,6 +233,7 @@ enum class RadioTuning : uint8_t {
 
  */
 class State {
+    friend class Message::SetMode;
     friend class Message::SetMP3Settings;
     friend class Message::SetRadioSettings;
 
@@ -576,10 +575,6 @@ public:
         return static_cast<Mode>(mode_ & MODE_MASK);
     }
 
-    bool idle() const {
-        return mode_ & IDLE_MASK;
-    }
-
     bool audioLights() const {
         return mode_ & AUDIO_LIGHTS_MASK;
     }
@@ -610,29 +605,20 @@ public:
         return radio_ & MANUAL_TUNING_MASK;
     }
 
-#if (defined ARCH_ESP8266)
-    void setMode(Mode mode) {
+#if (defined ARCH_ATTINY)
+private:
+#endif
+    void setMode(Mode mode) volatile {
         mode_ &= ~MODE_MASK;
         mode_ |= static_cast<uint8_t>(mode);
     }
 
-    void setIdle(bool value) {
-        if (value)
-            mode_ |= IDLE_MASK;
-        else 
-            mode_ &= ~ IDLE_MASK;
-    }
-    
     void setAudioLights(bool value) {
         if (value)
             mode_ |= AUDIO_LIGHTS_MASK;
         else 
             mode_ &= ~ AUDIO_LIGHTS_MASK;
     }
-
-
-
-
 
     void setRadioFrequency(uint16_t mhzx10) {
         radio_ &= ~ FREQUENCY_MASK;
@@ -650,13 +636,11 @@ public:
         else
             radio_ &= ~MANUAL_TUNING_MASK;
     }
-#endif
 
 private:
     // we really need onlky 2 bits, but using 3 gives extra space for the future 
     static constexpr uint8_t MODE_MASK = 7;
-    static constexpr uint8_t IDLE_MASK = 1 << 4;
-    static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 5;
+    static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 4;
 
     uint8_t mode_ = 0;
 
@@ -690,92 +674,34 @@ private:
 
 // Messages ------------------------------------------------------------------------------------------------------------
 
+/** Tells AVR that a mode has been set and updates the control and volume values and ranges. 
+ */ 
 class Message::SetMode : public Message {
 public:
     static constexpr uint8_t Id = 0;
-    Mode mode;
-    uint16_t control;
-    uint16_t maxControl;
-    uint8_t volume;
-    uint8_t maxVolume;
 
     SetMode(State const & state):
-        mode{state.mode()},
-        control{state.control()},
-        maxControl{state.maxControl()},
-        volume{state.volume()},
-        maxVolume{state.maxVolume()} {
+        mode_{state.mode()},
+        values_{state.controlValues_},
+        maximums_{state.controlMaximums_} {
+    }
+
+    void applyTo(State volatile & state) const {
+        state.setMode(mode_);
+        state.controlValues_ = values_;
+        state.controlMaximums_ = maximums_;
     }
 
     static SetMode const & At(uint8_t const * buffer) {
         return * pointer_cast<SetMode const *>(buffer);
     }
 
+private:
+    Mode mode_;
+    uint16_t values_;
+    uint16_t maximums_;
+
 } __attribute__((packed)); // Message::SetMode;
-
-class Message::SetControl : public Message {
-public:
-    static constexpr uint8_t Id = 1;
-    uint16_t value;
-    uint16_t maxValue;
-
-    SetControl(uint16_t value, uint16_t maxValue):
-        value{value},
-        maxValue{maxValue} {
-    }
-
-    static SetControl const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetControl const *>(buffer);
-    }
-} __attribute__((packed)); // Message::SetControl
-
-static_assert(sizeof(Message::SetControl) == 4);
-
-class Message::SetVolume : public Message {
-public:
-    static constexpr uint8_t Id = 2;
-    uint8_t value;
-    uint8_t maxValue;
-
-    SetVolume(uint8_t value, uint8_t maxValue):
-        value{value},
-        maxValue{maxValue} {
-    }
-
-    static SetVolume const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetVolume const *>(buffer + 1);
-    }
-} __attribute__((packed)); // Message::SetVolume
-
-static_assert(sizeof(Message::SetVolume) == 2);
-
-class Message::SetIdle : public Message {
-public:
-    static constexpr uint8_t Id = 3;
-    bool value;
-
-    SetIdle(bool value):
-        value{value} {
-    }
-
-    static SetIdle const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetIdle const *>(buffer + 1);
-    }
-} __attribute__((packed)); // Message::SetIdle
-
-class Message::SetAudioLights : public Message {
-public:
-    static constexpr uint8_t Id = 4;
-    bool value;
-
-    SetAudioLights(bool value):
-        value{value} {
-    }
-
-    static SetAudioLights const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetAudioLights const *>(buffer + 1);
-    }
-} __attribute__((packed)); // Message::SetAudioLights
 
 class Message::SetMP3Settings : public Message {
 public:
@@ -786,7 +712,7 @@ public:
         raw_{from.mp3_} {
     }
 
-    void applyTo(State & state) const {
+    void applyTo(State volatile & state) const {
         state.mp3_ = raw_;
     }
 
@@ -804,7 +730,7 @@ public:
         raw_{from.radio_} {
     }
 
-    void applyTo(State & state) const {
+    void applyTo(State volatile & state) const {
         state.radio_ = raw_;
     }
 

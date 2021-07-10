@@ -53,10 +53,6 @@ public:
 
      */
     static void Initialize() {
-        // first disable wifi, we only want it when needed
-        WiFi.persistent(false);
-        WiFi.mode(WIFI_OFF);
-        WiFi.forceSleepBegin();
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
         LOG("  chip id:      " + ESP.getChipId());
@@ -64,6 +60,7 @@ public:
         LOG("  core version: " + ESP.getCoreVersion());
         LOG("  SDK version:  " + ESP.getSdkVersion());
         LOG("  mac address:  " + WiFi.macAddress());
+        LOG("  wifi mode:    " + WiFi.getMode());
         // set the IRQ pin as input so that we can tell when AVR has an interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
@@ -80,24 +77,42 @@ public:
         // initialize the SD card
         InitializeSDCard();
 
+        InitializeRadioStations();
+
+        InitializeMP3Playlists();
+
+
+
+
+
+        //VolumeChange(5);
+        //SetMode(Mode::Radio);
+        //SetRadioStation(0);
+        
+
+
 
         //Message::Send(Message::SetVolume{0, 16});
         //UpdateState();
-        InitializeAP();
+        //InitializeAP();
         InitializeServer();
-        
-        
+        PreviousSecondMillis_ = millis();
+
     }
 
     static void Loop() {
+        // see if we have a second tick
+        if (millis() - PreviousSecondMillis_ >= 1000) {
+            PreviousSecondMillis_ += 1000;
+        }
+        // see if we need to update the state
+        if (Status_.irq) 
+            UpdateState();
+        // do what we have to - handle DNS, server, mp3 player, etc. 
         DNSServer_.processNextRequest();
         Server_.handleClient();
 
         // based on the mode, do the bookkeeping
-
-
-        if (Irq_) 
-            UpdateState();
     }
 
 private:
@@ -142,7 +157,6 @@ private:
             LOG("Error reading from SD card");
             Error();
         }
-        // once the SD card has been successfully initialized, read the persistent settings from it
     }
     
     static void InitializeAP() {
@@ -163,13 +177,13 @@ private:
         These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
      */
     static ICACHE_RAM_ATTR void AVRIrq() {
-        Irq_ = true;
+        Status_.irq = true;
     }
 
     /** Gets the state from ATTiny. 
      */
     static void UpdateState() {
-        Irq_ = false;
+        Status_.irq = false;
         size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
         if (n == sizeof(State)) {
             Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
@@ -184,7 +198,12 @@ private:
 
     static inline State State_;
 
-    static inline volatile bool Irq_ = false;
+    static inline volatile struct {
+        bool idle : 1;
+        bool irq : 1;
+    } Status_;
+
+    static inline unsigned long PreviousSecondMillis_;
 
 /** \name Controls
  
@@ -227,8 +246,8 @@ private:
                     State_.setControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
                 else
                     State_.setControl(State_.radioStation(), NumRadioStations());
+                Message::Send(Message::SetMode{State_});
                 Message::Send(Message::SetRadioSettings{State_});
-                Message::Send(Message::SetControl{State_});
         }
 
     }
@@ -238,6 +257,8 @@ private:
     }
 
     /** Volume knob always adjusts the volume. 
+     
+        No need to update any state here as the avr's state has been updated by the user input causing the change and esp state has been updated already - we are simply reacting to the event. 
      */
     static void VolumeChange(uint8_t value) {
         switch (State_.mode()) {
@@ -260,16 +281,12 @@ private:
     }
 
     /** Play/Pause toggle.
-
-        When paused, player enters the idle mode.  
      */
     static void VolumePress() {
-        if (State_.idle()) 
+        if (Status_.idle) 
             Play();
         else
             Pause();
-        State_.setIdle(! State_.idle());
-        Message::Send(Message::SetIdle(State_.idle()));
     }
 
     /** Enables or disables the audio lights. 
@@ -304,11 +321,13 @@ private:
         State_.setMode(mode);
         switch (mode) {
             case Mode::MP3: {
+                LOG("Mode: MP3");
                 break;
             }
             case Mode::Radio: {
                 LOG("Mode: radio");
                 Play();
+                break;
             }
             case Mode::WalkieTalkie: {
 
@@ -339,6 +358,7 @@ private:
                 break;
             // don't do anything for walkie talkie ?
         }
+        Status_.idle = false;
     }
 
     /** Pauses or stops playback. 
@@ -359,7 +379,68 @@ private:
                 break;
             // don't do anything for walkie talkie ?
         }
+        Status_.idle = true;
+    }
 
+    /** Looks at the SD card and finds valid playlists. 
+     
+        Up to 8 playlists are supported 
+     */
+    static void InitializeMP3Playlists() {
+        LOG("Initializing MP3 Playlists...");
+        for (int i = 0; i < 7; ++i)
+            MP3Playlists[i] = MP3_PLAYLIST_NONE;
+        File f = SD.open("playlists.txt", FILE_READ);
+        if (f) {
+            int i = 0;
+            while (i < 8) {
+                uint16_t id = static_cast<uint16_t>(f.parseInt());
+                if (id == 0 || id > 8) {
+                    LOG("  corrupted playlist id found: " + id);
+                    break;
+                }
+                MP3Playlists[i] = id;
+                ++i;
+                // TODO check the playlist names and see how many files we have in there
+            }
+        } else {
+            LOG("  playlists.txt file not found");
+        }
+
+
+
+    }
+
+    static inline AudioGeneratorMP3 MP3_;
+    static inline AudioOutputI2SNoDAC I2S_;
+    static inline AudioFileSourceSD MP3File_;
+
+    static constexpr uint8_t MP3_PLAYLIST_NONE = 0xff;
+    static inline uint8_t MP3Playlists[8];
+
+    /** Initializes the predefined radio stations from the SD card. 
+     
+        The stations are defined in the `stations.txt` file, one station per line, first the frequency and then optional name separated by a new line. 
+     */
+    static void InitializeRadioStations() {
+        LOG("Initializing radio stations...");
+        for (int i = 0; i < 7; ++i)
+            RadioStations_[i] = RADIO_STATION_NONE;
+        File f = SD.open("stations.txt", FILE_READ);
+        if (f) {
+            int i = 0;
+            while (i < 8) {
+                uint16_t freq = static_cast<uint16_t>(f.parseInt());
+                if (freq == 0)
+                    break;
+                String name = f.readStringUntil('\n');
+                RadioStations_[i] = freq;
+                ++i;
+                LOG("  " + name + ": " + freq);
+            }
+        } else {
+            LOG("  stations.txt file not found");
+        }
     }
 
     static void SetRadioFrequency(uint16_t mhzx10) {
@@ -393,9 +474,6 @@ private:
     static constexpr uint16_t RADIO_STATION_NONE = 0xffff;
     static inline uint16_t RadioStations_[8];
 
-    static inline AudioGeneratorMP3 MP3_;
-    static inline AudioOutputI2SNoDAC I2S_;
-    static inline AudioFileSourceSD MP3File_;
 
 /** \name Webserver
  */
@@ -410,6 +488,7 @@ private:
         Server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         Server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
         Server_.serveStatic("/lame.min.js", LittleFS, "/lame.min.js");
+        Server_.on("/download", HttpDownload);
         IPAddress ip{10,0,0,1};
         DNSServer_.start(
             53,
@@ -421,6 +500,14 @@ private:
 
     static void Http404() {
         Server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + Server_.uri() + "\" }");
+    }
+
+    static void HttpDownload() {
+        String const & path = Server_.arg("path");
+        if (path.isEmpty())
+            return Http404();
+        
+            
     }
 
     static inline ESP8266WebServer Server_{80};

@@ -13,4 +13,8 @@
 
 # ESP
 
+- add playlists.txt to the SD card and determine how playlists are organized
+- stream files from the server, when streaming, pause mp3 playback
+- then read playlists & tracks and check TPA311 works
+- seems even if wifi is not on by default, it still eats power
 

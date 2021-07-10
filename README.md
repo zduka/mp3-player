@@ -16,6 +16,36 @@ To be able to upload to ATTiny via UPDI, run the following:
 
 Tested on ubuntu 20.04. 
 
+## SD Card
+
+The SD card contains the following files:
+
+#### `wifi.txt` 
+
+Contains wifi networks and passwords the player will try to connect to when wifi is on. Each network occupies two lines, first line is network name, second line is network password. Leave the line blank for public networks:
+
+    NetworkName1
+    Passphrase1
+    NetworkName2
+    Passphrase2
+
+When WiFi is activated, the networs are tried in order, first successful network on the list will be used. 
+
+#### `ap.txt`
+
+Contains the SSID and password, each on separate line for the access point the player will create if none of the networks in the `wifi.txt` file can be found:
+
+    PlayerAPSSID
+    PlayerAPPassword
+
+#### `stations.txt`
+
+Contains up to 8 predefined radio stations, one station per line. The line always starts with the station's frequency `[Mhzx10]`, followed by optional space and name of the station:
+
+    1021 First Station 102.1 Mhz
+    950 Second Station
+
+
 ## Basic Design
 
 The player contains two chips, ATTiny3216 and ESP8266:
