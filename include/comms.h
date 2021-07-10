@@ -8,6 +8,8 @@ public:
     class SetMode;
     class SetControl;
     class SetVolume;
+    class SetIdle;
+    class SetAudioLights;
 
 #ifdef ARCH_ESP8266
     template<typename T>
@@ -81,3 +83,33 @@ public:
 } __attribute__((packed)); // Message::SetVolume
 
 static_assert(sizeof(Message::SetVolume) == 2);
+
+class Message::SetIdle : public Message {
+public:
+    static constexpr uint8_t Id = 3;
+    bool value;
+
+    SetIdle(bool value):
+        value{value} {
+    }
+
+    static SetIdle const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetIdle const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetIdle
+
+class Message::SetAudioLights : public Message {
+public:
+    static constexpr uint8_t Id = 4;
+    bool value;
+
+    SetAudioLights(bool value):
+        value{value} {
+    }
+
+    static SetAudioLights const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetIdle const *>(buffer + 1);
+    }
+} __attribute__((packed)); // Message::SetAudioLights
+
+

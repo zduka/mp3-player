@@ -213,6 +213,8 @@ private:
 
     }
 
+    /** Volume knob always adjusts the volume. 
+     */
     static void VolumeChange(uint8_t value) {
         switch (State_.mode()) {
             case Mode::MP3:
@@ -233,10 +235,16 @@ private:
 
     }
 
+    /** Play/Pause toggle.
+
+        When paused, player enters the idle mode.  
+     */
     static void VolumePress() {
 
     }
 
+    /** Enables or disables the audio lights. 
+     */
     static void VolumeLongPress() {
 
     }

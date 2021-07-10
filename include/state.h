@@ -556,15 +556,40 @@ public:
         return static_cast<Mode>(mode_ & MODE_MASK);
     }
 
+    bool idle() const {
+        return mode_ & IDLE_MASK;
+    }
+
+    bool audioLights() const {
+        return mode_ & AUDIO_LIGHTS_MASK;
+    }
+
 #if (defined ARCH_ESP8266)
     void setMode(Mode mode) {
         mode_ &= ~MODE_MASK;
         mode_ |= static_cast<uint8_t>(mode);
     }
+
+    void setIdle(bool value) {
+        if (value)
+            mode_ |= IDLE_MASK;
+        else 
+            mode_ &= ~ IDLE_MASK;
+    }
+    
+    void setAudioLights(bool value) {
+        if (value)
+            mode_ |= AUDIO_LIGHTS_MASK;
+        else 
+            mode_ &= ~ AUDIO_LIGHTS_MASK;
+    }
 #endif
 
 private:
-    static constexpr uint8_t MODE_MASK = 3;
+    // we really need onlky 2 bits, but using 3 gives extra space for the future 
+    static constexpr uint8_t MODE_MASK = 7;
+    static constexpr uint8_t IDLE_MASK = 1 << 4;
+    static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 5;
 
     uint8_t mode_ = 0;
 
