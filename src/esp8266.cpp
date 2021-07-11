@@ -53,6 +53,7 @@ public:
 
      */
     static void Initialize() {
+        delay(1); // force delay so that wifi has chance to go to sleep
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
         LOG("  chip id:      " + ESP.getChipId());
@@ -517,6 +518,16 @@ private:
 
 }; // Player
 
+RF_PRE_INIT() {
+    system_phy_set_powerup_opotion(2);
+}
+
+void preinit() {
+    wifi_set_opmode_current(NULL_MODE);
+    wifi_fpm_set_sleep_type(MODEM_SLEEP_T);
+    wifi_fpm_open();
+    wifi_fpm_do_sleep(0xffffffff);
+}
 
 
 void setup() {
