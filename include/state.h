@@ -5,7 +5,7 @@
 #define AVR_I2C_ADDRESS 42
 
 
-#define ESP_VOLUME_STEP 0.2
+#define ESP_VOLUME_STEP 0.1
 
 #define BUTTON_LONG_PRESS_TICKS 64
 #define SPECIAL_LIGHTS_TIMEOUT 32
@@ -21,6 +21,9 @@
 #define MP3_TRACK_COLOR Neopixel::Blue()
 #define MP3_PLAYLIST_COLOR Neopixel::Purple()
 #define AUDIO_COLOR AccentColor_
+
+#define DEFAULT_AP_SSID "mp3-player"
+#define DEFAULT_AP_PASSWORD "mp3-player"
 
 /** \name Pointer-to-pointer cast
  
@@ -618,6 +621,11 @@ private:
             mode_ |= AUDIO_LIGHTS_MASK;
         else 
             mode_ &= ~ AUDIO_LIGHTS_MASK;
+    }
+
+    void setMP3PlaylistId(uint8_t value) {
+        mp3_ &= ~ PLAYLIST_ID_MASK;
+        mp3_ |= (value << 10) & PLAYLIST_ID_MASK;
     }
 
     void setRadioFrequency(uint16_t mhzx10) {

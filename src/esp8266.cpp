@@ -53,7 +53,6 @@ public:
 
      */
     static void Initialize() {
-        delay(1); // force delay so that wifi has chance to go to sleep
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
         LOG("  chip id:      " + ESP.getChipId());
@@ -83,21 +82,24 @@ public:
         InitializeMP3Playlists();
 
 
-
-
-
-        //VolumeChange(5);
         //SetMode(Mode::Radio);
         //SetRadioStation(0);
-        
-
-
+        //VolumeChange(3);
 
         //Message::Send(Message::SetVolume{0, 16});
         //UpdateState();
         //InitializeAP();
+        InitializeWiFi();
         InitializeServer();
         PreviousSecondMillis_ = millis();
+        LOG("Initialization done.");
+
+
+        WiFiConnect();
+        //SetMode(Mode::MP3);
+        //VolumeChange(4);
+        //SetPlaylist(0);
+        //SetTrack(0);
 
     }
 
@@ -114,6 +116,13 @@ public:
         Server_.handleClient();
 
         // based on the mode, do the bookkeeping
+        if (MP3_.isRunning()) {
+            if (!MP3_.loop()) {
+                MP3_.stop();
+                LOG("MP3 playback done");
+                // TODO set next track if we are in mp3 mode
+            }
+        }
     }
 
 private:
@@ -160,19 +169,6 @@ private:
         }
     }
     
-    static void InitializeAP() {
-        String ssid = "mp3-player";
-        String pass = "mp3-player";
-        LOG("Initializing soft AP, ssid " + ssid + ", password " + pass);
-        LOG("    own ip: 10.0.0.1");
-        LOG("    subnet: 255.255.255.0");
-        IPAddress ip{10,0,0,1};
-        IPAddress subnet{255, 255, 255, 0};
-        WiFi.softAPConfig(ip, ip, subnet);
-        if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
-            Error();            
-    }
-
     /** Handler for the state update requests.
 
         These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
@@ -262,6 +258,7 @@ private:
         No need to update any state here as the avr's state has been updated by the user input causing the change and esp state has been updated already - we are simply reacting to the event. 
      */
     static void VolumeChange(uint8_t value) {
+        LOG("Volume: " + value);
         switch (State_.mode()) {
             case Mode::MP3:
             case Mode::WalkieTalkie:
@@ -270,6 +267,7 @@ private:
                 break;
             case Mode::Radio:
                 Radio_.setVolume(value);
+                break;
         }
     }
 
@@ -385,39 +383,130 @@ private:
 
     /** Looks at the SD card and finds valid playlists. 
      
-        Up to 8 playlists are supported 
+        Up to 8 playlists are supported, which can be found in directories labelled 1..8. If the directory contains file `playlist.txt`, then it is a valid playlist. The file contains whether the playlist is enabled (1) or hidden (0) followed by the optional name of the playlist. 
      */
     static void InitializeMP3Playlists() {
         LOG("Initializing MP3 Playlists...");
-        for (int i = 0; i < 7; ++i)
-            MP3Playlists[i] = MP3_PLAYLIST_NONE;
-        File f = SD.open("playlists.txt", FILE_READ);
-        if (f) {
-            int i = 0;
-            while (i < 8) {
-                uint16_t id = static_cast<uint16_t>(f.parseInt());
-                if (id == 0 || id > 8) {
-                    LOG("  corrupted playlist id found: " + id);
-                    break;
+        int pi = 0;
+        for (uint8_t i = 1; i <= 8; ++i) {
+            File f = SD.open(STR(i + "/playlist.txt"), FILE_READ);
+            if (f) {
+                int enabled = f.parseInt();
+                f.read(); // skip the space (assuming it is space...)
+                String name = f.readStringUntil('\n');
+                if (enabled) {
+                    uint16_t numTracks = GetPlaylistTracks(i);
+                    MP3Playlists_[pi] = PlaylistInfo{i, numTracks};
+                    ++pi;
+                    LOG("  " + i + ": " + name + " (" + numTracks + " tracks)");
+                } else {
+                    LOG("  " + i + ": " + name + " (disabled)");
                 }
-                MP3Playlists[i] = id;
-                ++i;
-                // TODO check the playlist names and see how many files we have in there
             }
-        } else {
-            LOG("  playlists.txt file not found");
+        }
+        for (; pi < 8; ++pi)
+            MP3Playlists_[pi].invalidate();
+    }
+
+    /** Returns the number of tracks available for given playlist. 
+     
+        Assumes the playlist is valid. 
+     */
+    static uint16_t GetPlaylistTracks(uint8_t playlist) {
+        uint16_t result = 0;
+        File d = SD.open(STR(playlist));
+        while (true) {
+            File f = d.openNextFile();
+            if (!f)
+                break;
+            // this should not happen, but let's be sure
+            if (f.isDirectory())
+                continue;
+            if (String{f.name()}.endsWith(".mp3")) 
+                ++result;
+        }
+        if (result > 1023) {
+            LOG("Error: Playlist " + playlist + " has " + result + " tracks where only 1023 is allowed");
+            result = 1023;
+        }
+        d.close();
+        return result;
+    }
+
+    /** Sets the playlist with given index and starts playint its first track. 
+
+        The index is the index to the runtime playlist table, not the id of the playlist on the SD card.  
+     */
+    static void SetPlaylist(uint8_t index) {
+        LOG("Opening playlist " + index + " id: " + MP3Playlists_[index].id);
+        CurrentPlaylist_.close();
+        CurrentPlaylist_ = SD.open(STR(MP3Playlists_[index].id));
+        State_.setMP3PlaylistId(index);
+        SetTrack(0);
+    }
+
+    /** Starts playing the given track id within the current playlist. 
+     */
+    static void SetTrack(uint16_t index) {
+        uint16_t lastTrack = State_.mp3TrackId();
+        if (index <= lastTrack) {
+            lastTrack = 0;
+            CurrentPlaylist_.rewindDirectory();
+        }
+        if (MP3_.isRunning()) {
+            MP3_.stop();
+            I2S_.stop();
+            MP3File_.close();
+        }
+        while (true) {
+            File f = CurrentPlaylist_.openNextFile();
+            if (String(f.name()).endsWith(".mp3")) {
+                if (index == lastTrack) {
+                    String filename{STR(MP3Playlists_[State_.mp3PlaylistId()].id + "/" + f.name())};
+                    f.close();
+                    MP3File_.open(filename.c_str());
+                    //I2S_.SetGain(State_.volume() * ESP_VOLUME_STEP);
+                    I2S_.SetGain(1);
+                    MP3_.begin(& MP3File_, & I2S_);
+                    LOG("Opening track " + index + ", file: " + filename);
+                    return;
+                }
+                ++lastTrack;
+            }
+            f.close();
+        }
+        // TODO error
+    }
+
+    struct PlaylistInfo {
+        unsigned id : 4;
+        unsigned numTracks : 10;
+
+        PlaylistInfo():
+            id{0},
+            numTracks{0} {
         }
 
+        PlaylistInfo(uint8_t id, uint16_t numTracks):
+            id{id},
+            numTracks{numTracks} {
+        }
 
+        bool isValid() const {
+            return id != 0;
+        }
 
-    }
+        void invalidate() {
+            id = 0;
+        }
+    }; // 
 
     static inline AudioGeneratorMP3 MP3_;
     static inline AudioOutputI2SNoDAC I2S_;
     static inline AudioFileSourceSD MP3File_;
+    static inline PlaylistInfo MP3Playlists_[8];
 
-    static constexpr uint8_t MP3_PLAYLIST_NONE = 0xff;
-    static inline uint8_t MP3Playlists[8];
+    static inline File CurrentPlaylist_;
 
     /** Initializes the predefined radio stations from the SD card. 
      
@@ -434,11 +523,13 @@ private:
                 uint16_t freq = static_cast<uint16_t>(f.parseInt());
                 if (freq == 0)
                     break;
+                f.read(); // skip the space (assuming it is space...)
                 String name = f.readStringUntil('\n');
                 RadioStations_[i] = freq;
                 ++i;
                 LOG("  " + name + ": " + freq);
             }
+            f.close();
         } else {
             LOG("  stations.txt file not found");
         }
@@ -481,6 +572,85 @@ private:
 //@{
 private:
 
+    static void InitializeWiFi() {
+        WiFiConnectedHandler_ = WiFi.onStationModeConnected(OnWiFiConnected);
+        WiFiDisconnectedHandler_ = WiFi.onStationModeDisconnected(OnWiFiDisconnected);
+    }
+
+    static void WiFiConnect() {
+        LOG("WiFi: Scanning networks...");
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect();
+        WiFi.scanNetworksAsync([](int n) {
+            LOG("WiFi: Networks found: " + n);
+            File f = SD.open("networks.txt", FILE_READ);
+            if (f) {
+                while (f.available()) {
+                    String ssid = f.readStringUntil('\n');
+                    String pass = f.readStringUntil('\n');
+                    if (ssid.isEmpty())
+                        break;
+                    for (int i = 0; i < n; ++i) {
+                        if (WiFi.SSID(i) == ssid) {
+                            LOG("WiFi: connecting to " + ssid + ", rssi: " + WiFi.RSSI(i) + ", channel " + WiFi.channel(i));
+                            WiFi.begin(ssid, pass);
+                            WiFi.scanDelete();
+                            // so that we do not start the access point just yet
+                            return;
+                        }
+                    }
+                }
+                f.close();
+            } else {
+                LOG("WiFi: No networks.txt found");
+            }
+            WiFi.scanDelete();
+            WiFiStartAP();
+        });
+    }
+
+    static void WiFiStartAP() {
+        File f = SD.open("ap.txt", FILE_READ);
+        String ssid;
+        String pass;
+        if (f) {
+            ssid = f.readStringUntil('\n');
+            pass = f.readStringUntil('\n');
+            f.close();
+        } else {
+            LOG("WiFi: No ap.txt found");
+        }
+        if (ssid.isEmpty()) {
+            ssid = DEFAULT_AP_SSID;
+            if (pass.isEmpty())
+                pass = DEFAULT_AP_PASSWORD;
+        }
+        LOG("Initializing soft AP, ssid " + ssid + ", password " + pass);
+        LOG("    own ip: 10.0.0.1");
+        LOG("    subnet: 255.255.255.0");
+        IPAddress ip{10,0,0,1};
+        IPAddress subnet{255, 255, 255, 0};
+        WiFi.softAPConfig(ip, ip, subnet);
+        if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
+            Error();            
+    }
+
+    static void WiFiDisconnect() {
+        LOG("WiFi: Disconnecting");
+        WiFi.mode(WIFI_OFF);
+        WiFi.forceSleepBegin();
+        yield();
+    }
+
+    static void OnWiFiConnected(WiFiEventStationModeConnected const & e) {
+        LOG("WiFi: connected to " + e.ssid + ", channel " + e.channel);
+        LOG("WiFi: IP " + WiFi.localIP().toString());
+    }
+
+    static void OnWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
+        LOG("WiFi: disconnected, reason: " + e.reason);
+    }
+
     static void InitializeServer() {
         Server_.onNotFound(Http404);
         Server_.serveStatic("/", LittleFS, "/index.html");
@@ -489,7 +659,10 @@ private:
         Server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         Server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
         Server_.serveStatic("/lame.min.js", LittleFS, "/lame.min.js");
-        Server_.on("/download", HttpDownload);
+        Server_.on("/status", HttpStatus);
+        Server_.on("/cmd", HttpCommand);
+        Server_.on("/sd", HttpSDCardDownload);
+        Server_.on("/sdls", HttpSDCardLs);
         IPAddress ip{10,0,0,1};
         DNSServer_.start(
             53,
@@ -503,34 +676,118 @@ private:
         Server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + Server_.uri() + "\" }");
     }
 
-    static void HttpDownload() {
-        String const & path = Server_.arg("path");
-        if (path.isEmpty())
-            return Http404();
-        
-            
+    /** Returns the status of the player. 
+     */
+    static void HttpStatus() {
+        Server_.send(200, "text/json", STR(PSTR("{") +
+            PSTR("\"millis\":") + millis() + 
+            PSTR(",\"rssi\":") + WiFi.RSSI() +
+            PSTR(",\"headphones\":") + State_.headphones() +
+            PSTR(",\"charging\":") + State_.charging() +
+            PSTR(",\"voltage\":") + State_.voltage() +
+            PSTR(",\"temp\":") + State_.temp() + 
+            PSTR(",\"control\":") + State_.control() +
+            PSTR(",\"maxControl\":") + State_.maxControl() +
+            PSTR(",\"volume\":") + State_.volume() +
+            PSTR(",\"maxVolume\":") + State_.maxVolume() +
+            PSTR(",\"mode\":") + static_cast<uint8_t>(State_.mode()) +
+            PSTR(",\"audioLights\":") + State_.audioLights() +
+            PSTR(",\"mp3PlaylistId\":") + State_.mp3PlaylistId() +
+            PSTR(",\"mp3TrackId\":") + State_.mp3TrackId() +
+            PSTR(",\"mp3PlaylistSelection\":") + State_.mp3PlaylistSelection() +
+            PSTR(",\"radioFrequency\":") + State_.radioFrequency() + 
+            PSTR(",\"radioStation\":") + State_.radioStation() +
+            PSTR(",\"radioManualTuning\":") + State_.radioManualTuning() +
+        PSTR("}")));
     }
+
+    static void HttpCommand() {
+        String const & cmd = Server_.arg("cmd");
+        if (cmd == "wifi_off") {
+            Server_.send(200, "text/json","{\"response\":200}");
+            WiFiDisconnect();
+            return;
+        } else {
+            Server_.send(404, "text/json","{ \"response\": 404, \"unknownCommand\": \"" + cmd + "\" }");
+        }
+        LOG("Cmd: " + cmd);
+        Server_.send(200, "text/json","{\"response\":200}");
+    }
+
+    /** Returns any given file on the SD card. 
+     */
+    static void HttpSDCardDownload() {
+        String const & path = Server_.arg("path");
+        File f = SD.open(path.c_str(), FILE_READ);
+        if (!f || !f.isFile())
+            return Http404();
+        String ctype = "text/plain";
+        if (path.endsWith("mp3"))
+            ctype = "audio/mp3";
+        LOG("WebServer: Serving file " + path);
+        Server_.streamFile(f, ctype);
+        f.close();
+    }
+
+    /** Lists a directory on the SD card and returns its contents in a JSON format. 
+     */
+    static void HttpSDCardLs() {
+        String const & path = Server_.arg("path");
+        File d = SD.open(path.c_str());
+        if (!d || !d.isDirectory())
+            return Http404();
+        LOG("WebServer: Listing directory " + path);
+        String r{"["};
+        int n = 0;
+        while(true) {
+            File f = d.openNextFile();
+            if (!f)
+                break;
+            if (n++ > 0)
+                r += ",";
+            r = r + "{\"name\":\"" + f.name() + "\", \"size\":";
+            if (f.isDirectory())
+                r += "\"dir\"}";
+            else 
+                r = r + f.size() + "}";
+        } 
+        r += "]";
+        Server_.send(200, "text/json", r);
+    }
+
+    static inline WiFiEventHandler WiFiConnectedHandler_;
+    static inline WiFiEventHandler WiFiDisconnectedHandler_;
 
     static inline ESP8266WebServer Server_{80};
     static inline DNSServer DNSServer_;
+
+
 
 //@}
 
 }; // Player
 
+/** Disable wifi at startup. 
+ 
+    From: https://github.com/esp8266/Arduino/issues/6642#issuecomment-578462867
+    and:  https://github.com/esp8266/Arduino/tree/master/libraries/esp8266/examples/LowPowerDemo
+
+    TL;DR; DO as much as possible as soon as possible and start setup() with a delay as the delay is really the thing that makes esp enter the sleep mode. 
+ */
+
 RF_PRE_INIT() {
-    system_phy_set_powerup_opotion(2);
+    system_phy_set_powerup_option(2);  // shut the RFCAL at boot
+    wifi_set_opmode_current(NULL_MODE);  // set Wi-Fi working mode to unconfigured, don't save to flash
+    wifi_fpm_set_sleep_type(MODEM_SLEEP_T);  // set the sleep type to modem sleep
 }
 
 void preinit() {
-    wifi_set_opmode_current(NULL_MODE);
-    wifi_fpm_set_sleep_type(MODEM_SLEEP_T);
     wifi_fpm_open();
     wifi_fpm_do_sleep(0xffffffff);
 }
 
-
 void setup() {
+    delay(1);
     Player::Initialize();
 }
 

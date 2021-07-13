@@ -20,7 +20,7 @@ Tested on ubuntu 20.04.
 
 The SD card contains the following files:
 
-#### `wifi.txt` 
+#### `networks.txt` 
 
 Contains wifi networks and passwords the player will try to connect to when wifi is on. Each network occupies two lines, first line is network name, second line is network password. Leave the line blank for public networks:
 
