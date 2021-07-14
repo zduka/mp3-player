@@ -188,6 +188,7 @@ public:
     class SetModeAndControls;
     class SetMP3Settings;
     class SetRadioSettings;
+    class SetWiFiStatus;
 
 #ifdef ARCH_ESP8266
     template<typename T>
@@ -209,6 +210,18 @@ enum class Mode : uint8_t {
     WalkieTalkie,
     NightLight,
 }; // Mode
+
+enum class AudioSource : uint8_t {
+    ESP = 0,
+    Radio = 1
+}; // AudioSource
+
+enum class WiFiStatus : uint8_t {
+    Off = 0,
+    Connecting = 1,
+    Connected = 2,
+    SoftAP = 3
+}; // WiFiStatus
 
 enum class MP3Selection : uint8_t {
     Track = 0, 
@@ -239,6 +252,7 @@ class State {
     friend class Message::SetMode;
     friend class Message::SetMP3Settings;
     friend class Message::SetRadioSettings;
+    friend class Message::SetWiFiStatus;
 
 /** \name Events
  
@@ -582,6 +596,14 @@ public:
         return mode_ & AUDIO_LIGHTS_MASK;
     }
 
+    AudioSource audioSource() const {
+        return static_cast<AudioSource>((mode_ & AUDIO_SOURCE_MASK) >> 5);
+    }
+
+    WiFiStatus wifiStatus() const {
+        return static_cast<WiFiStatus>((mode_ & WIFI_STATUS_MASK) >> 6);
+    }
+
     uint8_t mp3PlaylistId() const {
         return (mp3_ & PLAYLIST_ID_MASK) >> 10;
     }
@@ -623,6 +645,11 @@ private:
             mode_ &= ~ AUDIO_LIGHTS_MASK;
     }
 
+    void setWiFiStatus(WiFiStatus value) volatile {
+        mode_ &= ~WIFI_STATUS_MASK;
+        mode_ |= (static_cast<uint8_t>(value) << 6) & WIFI_STATUS_MASK;
+    }
+
     void setMP3PlaylistId(uint8_t value) {
         mp3_ &= ~ PLAYLIST_ID_MASK;
         mp3_ |= (value << 10) & PLAYLIST_ID_MASK;
@@ -646,9 +673,11 @@ private:
     }
 
 private:
-    // we really need onlky 2 bits, but using 3 gives extra space for the future 
+    // we really need only 2 bits, but using 3 gives extra space for the future 
     static constexpr uint8_t MODE_MASK = 7;
     static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 4;
+    static constexpr uint8_t AUDIO_SOURCE_MASK = 1 << 5;
+    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
 
     uint8_t mode_ = 0;
 
@@ -745,6 +774,25 @@ public:
     static SetRadioSettings const & At(uint8_t const * buffer) {
         return * pointer_cast<SetRadioSettings const *>(buffer + 1);
     }
+} __attribute__((packed)); // Message::SetRadioSettings
+
+class Message::SetWiFiStatus : public Message {
+public:
+    static constexpr uint8_t Id = 6;
+
+    SetWiFiStatus(State const & from):
+        status_{from.wifiStatus()} {
+    }
+
+    void applyTo(State volatile & state) const {
+        state.setWiFiStatus(status_);
+    }
+
+    static SetWiFiStatus const & At(uint8_t const * buffer) {
+        return * pointer_cast<SetWiFiStatus const *>(buffer + 1);
+    }
+private:
+    WiFiStatus status_;
 } __attribute__((packed)); // Message::SetRadioSettings
 
 

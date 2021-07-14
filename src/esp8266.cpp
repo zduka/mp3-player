@@ -35,9 +35,6 @@ inline void Log_(String const & str) {
     MOSI -- 13       down  15 -- I2S_SCK
          -- VCC           GND --
  
-   TODO: Add AUDIO_SRC
-   TODO: Add TPA311 power
-
  */
 
 #define I2C_SCL 5
@@ -101,6 +98,9 @@ public:
         //SetPlaylist(0);
         //SetTrack(0);
 
+        SetMode(Mode::Radio);
+        SetRadioStation(0);
+        VolumeChange(3);
     }
 
     static void Loop() {
@@ -173,7 +173,7 @@ private:
 
         These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
      */
-    static ICACHE_RAM_ATTR void AVRIrq() {
+    static IRAM_ATTR void AVRIrq() {
         Status_.irq = true;
     }
 
@@ -574,6 +574,7 @@ private:
 
     static void InitializeWiFi() {
         WiFiConnectedHandler_ = WiFi.onStationModeConnected(OnWiFiConnected);
+        WiFiIPAssignedHandler_ = WiFi.onStationModeGotIP(OnWiFiIPAssigned);
         WiFiDisconnectedHandler_ = WiFi.onStationModeDisconnected(OnWiFiDisconnected);
     }
 
@@ -593,6 +594,8 @@ private:
                     for (int i = 0; i < n; ++i) {
                         if (WiFi.SSID(i) == ssid) {
                             LOG("WiFi: connecting to " + ssid + ", rssi: " + WiFi.RSSI(i) + ", channel " + WiFi.channel(i));
+                            State_.setWiFiStatus(WiFiStatus::Connecting);
+                            Message::Send(Message::SetWiFiStatus{State_});
                             WiFi.begin(ssid, pass);
                             WiFi.scanDelete();
                             // so that we do not start the access point just yet
@@ -632,7 +635,9 @@ private:
         IPAddress subnet{255, 255, 255, 0};
         WiFi.softAPConfig(ip, ip, subnet);
         if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
-            Error();            
+            return Error();            
+        State_.setWiFiStatus(WiFiStatus::SoftAP);
+        Message::Send(Message::SetWiFiStatus{State_});
     }
 
     static void WiFiDisconnect() {
@@ -640,13 +645,22 @@ private:
         WiFi.mode(WIFI_OFF);
         WiFi.forceSleepBegin();
         yield();
+        State_.setWiFiStatus(WiFiStatus::Off);
+        Message::Send(Message::SetWiFiStatus{State_});
     }
 
     static void OnWiFiConnected(WiFiEventStationModeConnected const & e) {
         LOG("WiFi: connected to " + e.ssid + ", channel " + e.channel);
-        LOG("WiFi: IP " + WiFi.localIP().toString());
     }
 
+    static void OnWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
+        LOG("WiFi: IP assigned: " + e.ip.toString() + ", gateway " + e.gw.toString());
+        State_.setWiFiStatus(WiFiStatus::Connected);
+        Message::Send(Message::SetWiFiStatus{State_});
+    }
+
+    /** TODO what to do when the wifi disconnects, but we did not initiate it? 
+     */
     static void OnWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
         LOG("WiFi: disconnected, reason: " + e.reason);
     }
@@ -692,6 +706,8 @@ private:
             PSTR(",\"maxVolume\":") + State_.maxVolume() +
             PSTR(",\"mode\":") + static_cast<uint8_t>(State_.mode()) +
             PSTR(",\"audioLights\":") + State_.audioLights() +
+            PSTR(",\"audioSource\":") + static_cast<uint8_t>(State_.audioSource()) +
+            PSTR(",\"wifiStatus\":") + static_cast<uint8_t>(State_.wifiStatus()) +
             PSTR(",\"mp3PlaylistId\":") + State_.mp3PlaylistId() +
             PSTR(",\"mp3TrackId\":") + State_.mp3TrackId() +
             PSTR(",\"mp3PlaylistSelection\":") + State_.mp3PlaylistSelection() +
@@ -756,6 +772,7 @@ private:
     }
 
     static inline WiFiEventHandler WiFiConnectedHandler_;
+    static inline WiFiEventHandler WiFiIPAssignedHandler_;
     static inline WiFiEventHandler WiFiDisconnectedHandler_;
 
     static inline ESP8266WebServer Server_{80};

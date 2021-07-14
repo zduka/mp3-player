@@ -13,7 +13,6 @@
 
 # ESP
 
-- local ip not displayed when connected
 - change strings to PSTR
 - wifi_off does not inform about success
 
