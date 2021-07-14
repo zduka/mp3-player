@@ -242,6 +242,11 @@ private:
                 msg.applyTo(State_);
                 break;
             }
+            case Message::SetWiFiStatus::Id: {
+                auto msg = Message::SetWiFiStatus::At(Buffer_);
+                msg.applyTo(State_);
+                break;
+            }
         }
     }
 
@@ -252,7 +257,7 @@ private:
     static_assert(IRQ_MAX_DELAY < 128);
     inline volatile static struct {
         bool enabled : 1;
-        bool timer : 7; // 0..127
+        uint8_t timer : 7; // 0..127
     } Irq_;
 
     inline static I2CSource I2CSource_ = I2CSource::State;
@@ -280,12 +285,16 @@ private:
         Control_.poll();
         State_.setControl(Control_.value());
         SetIrq();
+        LightsMode_ = LightsMode::ControlValue;
+        LightsCounter_ = SPECIAL_LIGHTS_TIMEOUT;
     }   
 
     static void VolumeValueChanged() {
         Volume_.poll();
         State_.setVolume(Volume_.value());
         SetIrq();
+        LightsMode_ = LightsMode::VolumeValue;
+        LightsCounter_ = SPECIAL_LIGHTS_TIMEOUT;
     } 
 
     static void ControlButtonChanged() {
@@ -348,16 +357,59 @@ private:
  */
 //@{
 
+    /** Determines what to show with the lights. 
+     
+     */ 
     static void LightsTick() {
-
-
-
-
+        // when a button is down, the highest priority is the long press bar
+        if (State_.volumeDown() || State_.controlDown()) {
+            uint8_t v = BUTTON_LONG_PRESS_TICKS - max(VolumeBtnCounter_, ControlBtnCounter_);
+            if (v == BUTTON_LONG_PRESS_TICKS)
+                Neopixels_.setAll(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+            else
+                Neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+        // if special counter is not 0, we are showing the special effect in question
+        } else if (LightsCounter_ > 0) {
+            --LightsCounter_;
+            switch (LightsMode_) {
+                case LightsMode::ControlValue:
+                    Neopixels_.showPoint(State_.control(), State_.maxControl() - 1, ControlColor_);
+                    break;
+                case LightsMode::VolumeValue:
+                    Neopixels_.showBar(State_.volume(), State_.maxVolume() - 1, VolumeColor_);
+                    break;
+            }
+        // if the wifi is currently connecting, show the connection increaser
+        } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
+            EffectCounter_ = (EffectCounter_ + 1) % 64;
+            Neopixels_.showCenteredBar(EffectCounter_, 64, Neopixel::Blue().withBrightness(MaxBrightness_));
+            Neopixels_.reversedSync();
+        // if there is nothing to show, set all neopixels black
+        } else {
+            Neopixels_.setAll(Neopixel::Black());
+        }
+        if (Time_.second() % 2) {
+            if (State_.wifiStatus() == WiFiStatus::Connected || State_.wifiStatus() == WiFiStatus::SoftAP)
+                Neopixels_.addColor(7, Neopixel::Blue().withBrightness(MaxBrightness_));
+        }
+        //    Neopixels_.
+        Neopixels_.reversedTick(max(MaxBrightness_ / 16, 1));
+        Neopixels_.update();
     }
+
+    enum class LightsMode : uint8_t {
+        ControlValue,
+        VolumeValue,
+    }; // SpecialLightsMode
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static Neopixel AccentColor_ = Neopixel::White();
+    inline static Neopixel ControlColor_ = Neopixel::Green();
+    inline static Neopixel VolumeColor_ = Neopixel::Yellow();
     inline static uint8_t MaxBrightness_ = 255;
+    inline static uint8_t EffectCounter_ = 0;
+    inline static uint8_t LightsCounter_ = 0;
+    inline static LightsMode LightsMode_;
 
 //@}
 

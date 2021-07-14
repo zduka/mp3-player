@@ -6,6 +6,7 @@
 - add LEDs to the attiny & serial port (they can either go to the led strip kind of, or be behind the buttons)
 - esp8266 PWM needs jumper to be either RX, or PWM
 - headphones signal is inverted for TPA311 (!!)
+- determine if the antenna can be connected to ground directly
 
 # ATTiny
 

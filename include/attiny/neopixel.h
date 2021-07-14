@@ -38,6 +38,12 @@ public:
         return result;
     }
 
+    void add(Neopixel const & color) {
+        r = (255 - color.r < r) ? 255 : r + color.r;
+        g = (255 - color.g < g) ? 255 : g + color.g;
+        b = (255 - color.b < b) ? 255 : b + color.b;
+    }
+
     Neopixel withBrightness(uint8_t brightness) const {
         switch (brightness) {
             case 255:
@@ -98,6 +104,11 @@ public:
         updated_ = true;
     }
 
+    void addColor(uint8_t index, Neopixel const & color) {
+        target_[index].add(color);
+        updated_ = true;
+    }
+
     /** Shows point at given offset. 
      */
     void showPoint(uint16_t value, uint16_t max, Neopixel const & color) {
@@ -152,26 +163,32 @@ public:
     }
 
     void tick(uint8_t step = 16) {
-        if (updated_) {
-            updated_ = false;
-            for (uint8_t i = 0; i < SIZE; ++i)
-                updated_ = current_[i].moveTowards(target_[i], step) || updated_;
-            if (updated_)
-                update();
-        }
+        for (uint8_t i = 0; i < SIZE; ++i)
+            updated_ = current_[i].moveTowards(target_[i], step) || updated_;
     }
 
-    void update() {
-        leds_.show();
+    /** Identical to tick, but reverses the order of the visible pixels. 
+     */
+    void reversedTick(uint8_t step = 16) {
+        for (uint8_t i = 0; i < SIZE; ++i)
+            updated_ = current_[i].moveTowards(target_[SIZE - 1 - i], step) || updated_;
+    }
+
+    void update(bool force = false) {
+        if (updated_ || force) {
+            updated_ = false;
+            leds_.show();
+        }
     }
 
     void sync() {
-        if (updated_) {
-            for (uint8_t i = 0; i < SIZE; ++i)
-                current_[i] = target_[i];
-            updated_ = false;
-            update();
-        }
+        for (uint8_t i = 0; i < SIZE; ++i)
+            current_[i] = target_[i];
+    }
+
+    void reversedSync() {
+        for (uint8_t i = 0; i < SIZE; ++i)
+            current_[i] = target_[SIZE - 1 - i];
     }
     
     Neopixel & operator[](unsigned index) {

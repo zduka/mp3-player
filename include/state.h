@@ -1,6 +1,6 @@
 #pragma once
 
-#include <assert.h>
+#define assert(...) 
 
 #define AVR_I2C_ADDRESS 42
 
@@ -479,19 +479,19 @@ public:
      
         Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
      */
-    uint16_t control() const {
+    uint16_t control() const volatile {
         return controlValues_ & CONTROL_MASK;
     }
 
     /** Maximum value (inclusive) the control knob can have, values up to 1023 are allowed. The minimum value is always 0. 
      */
-    uint16_t maxControl() const {
+    uint16_t maxControl() const volatile {
         return controlMaximums_ & CONTROL_MASK;
     }
 
     /** Determines if the control knob is currently pressed. 
      */
-    bool controlDown() const {
+    bool controlDown() const volatile {
         return controlState_ & CONTROL_DOWN_MASK;
     }
 
@@ -499,7 +499,7 @@ public:
      
         Can be anywhere between 0 and maxVolume() value which may not exceed 63. 
      */
-    uint8_t volume() const {
+    uint8_t volume() const volatile {
         return (controlValues_ >> 10) & 63;
     }
 
@@ -507,13 +507,13 @@ public:
      
         Can be up to 63. Min value is always 0. 
      */
-    uint8_t maxVolume() const {
+    uint8_t maxVolume() const volatile {
         return (controlMaximums_ >> 10) & 63;
     }
 
     /** Determines if the volume knob is currently pressed. 
      */
-    bool volumeDown() const {
+    bool volumeDown() const volatile {
         return controlState_ & CONTROL_DOWN_MASK;
     }
 
@@ -778,7 +778,7 @@ public:
 
 class Message::SetWiFiStatus : public Message {
 public:
-    static constexpr uint8_t Id = 6;
+    static constexpr uint8_t Id = 7;
 
     SetWiFiStatus(State const & from):
         status_{from.wifiStatus()} {
