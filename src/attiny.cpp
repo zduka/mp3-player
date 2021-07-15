@@ -10,7 +10,7 @@
 #include <Wire.h>
 
 #include "state.h"
-#include "comms.h"
+#include "messages.h"
 #include "attiny/inputs.h"
 #include "attiny/neopixel.h"
 
@@ -179,7 +179,7 @@ private:
         uint8_t ticksCounter : 5; // 0..31
     } Status_;
 
-    inline static volatile State State_;
+    inline static State State_;
 
     inline static volatile DateTime Time_;
 
@@ -227,23 +227,28 @@ private:
         // TODO check that numBytes <=32
         Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
         switch (Buffer_[0]) {
-            case Message::SetMode::Id: {
-                auto msg = Message::SetMode::At(Buffer_);
+            case msg::SetMode::Id: {
+                auto msg = msg::At<msg::SetMode>(Buffer_);
                 msg.applyTo(State_);
                 break;
             }
-            case Message::SetMP3Settings::Id: {
-                auto msg = Message::SetMP3Settings::At(Buffer_);
+            case msg::SetWiFiStatus::Id: {
+                auto msg = msg::At<msg::SetWiFiStatus>(Buffer_);
                 msg.applyTo(State_);
                 break;
             }
-            case Message::SetRadioSettings::Id: {
-                auto msg = Message::SetRadioSettings::At(Buffer_);
+            case msg::SetAudioSource::Id: {
+                auto msg = msg::At<msg::SetAudioSource>(Buffer_);
                 msg.applyTo(State_);
                 break;
             }
-            case Message::SetWiFiStatus::Id: {
-                auto msg = Message::SetWiFiStatus::At(Buffer_);
+            case msg::SetMP3Settings::Id: {
+                auto msg = msg::At<msg::SetMP3Settings>(Buffer_);
+                msg.applyTo(State_);
+                break;
+            }
+            case msg::SetRadioSettings::Id: {
+                auto msg = msg::At<msg::SetRadioSettings>(Buffer_);
                 msg.applyTo(State_);
                 break;
             }
@@ -373,24 +378,24 @@ private:
             --LightsCounter_;
             switch (LightsMode_) {
                 case LightsMode::ControlValue:
-                    Neopixels_.showPoint(State_.control(), State_.maxControl() - 1, ControlColor_);
+                    Neopixels_.showPoint(State_.control(), State_.maxControl() - 1, State_.controlColor());
                     break;
                 case LightsMode::VolumeValue:
-                    Neopixels_.showBar(State_.volume(), State_.maxVolume() - 1, VolumeColor_);
+                    Neopixels_.showBar(State_.volume(), State_.maxVolume() - 1, State_.volumeColor());
                     break;
             }
         // if the wifi is currently connecting, show the connection increaser
         } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
             EffectCounter_ = (EffectCounter_ + 1) % 64;
-            Neopixels_.showCenteredBar(EffectCounter_, 64, Neopixel::Blue().withBrightness(MaxBrightness_));
+            Neopixels_.showCenteredBar(EffectCounter_, 64, Color::Blue().withBrightness(MaxBrightness_));
             Neopixels_.reversedSync();
         // if there is nothing to show, set all neopixels black
         } else {
-            Neopixels_.setAll(Neopixel::Black());
+            Neopixels_.setAll(Color::Black());
         }
         if (Time_.second() % 2) {
             if (State_.wifiStatus() == WiFiStatus::Connected || State_.wifiStatus() == WiFiStatus::SoftAP)
-                Neopixels_.addColor(7, Neopixel::Blue().withBrightness(MaxBrightness_));
+                Neopixels_.addColor(7, Color::Blue().withBrightness(MaxBrightness_));
         }
         //    Neopixels_.
         Neopixels_.reversedTick(max(MaxBrightness_ / 16, 1));
@@ -403,9 +408,6 @@ private:
     }; // SpecialLightsMode
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
-    inline static Neopixel AccentColor_ = Neopixel::White();
-    inline static Neopixel ControlColor_ = Neopixel::Green();
-    inline static Neopixel VolumeColor_ = Neopixel::Yellow();
     inline static uint8_t MaxBrightness_ = 255;
     inline static uint8_t EffectCounter_ = 0;
     inline static uint8_t LightsCounter_ = 0;
@@ -451,7 +453,7 @@ private:
     static void UpdateAudioLights() {
         uint8_t v = AudioMax_ - AudioMin_;
         v = v < 32 ? 0 : v - 32;
-        Neopixels_.showCenteredBar(v, 128, AUDIO_COLOR.withBrightness(MaxBrightness_));
+        Neopixels_.showCenteredBar(v, 128, State_.accentColor());
         AudioMin_ = 255;
         AudioMax_ = 0;
     }
@@ -653,10 +655,10 @@ private:
         
      */
     void sleep() {
-        neopixels_.showBar(8,8,Neopixel::Red());
+        neopixels_.showBar(8,8,Color::Red());
         neopixels_.sync();
         delay(300);
-        neopixels_.setAll(Neopixel::Black());
+        neopixels_.setAll(Color::Black());
         neopixels_.sync();
         // set audio src to 0 so that we don't bleed voltage
         digitalWrite(AUDIO_SRC, LOW);
@@ -688,10 +690,10 @@ private:
         else
             digitalWrite(AUDIO_SRC, AUDIO_ESP);
         delay(100);
-        neopixels_.showBar(8,8,Neopixel::Green());
+        neopixels_.showBar(8,8,Color::Green());
         neopixels_.sync();
         delay(300);
-        neopixels_.setAll(Neopixel::Black());
+        neopixels_.setAll(Color::Black());
         neopixels_.sync();
     }
 
@@ -766,10 +768,10 @@ private:
      */
     void resetEsp() {
         clearIrq();
-        neopixels_.setAll(Neopixel::Red());
+        neopixels_.setAll(Color::Red());
         neopixels_.sync();
         delay(100);
-        neopixels_.setAll(Neopixel::Black());
+        neopixels_.setAll(Color::Black());
         neopixels_.sync();
         pinMode(DCDC_PWR,INPUT);
         delay(500);
@@ -834,7 +836,7 @@ private:
     //@{
     NeopixelStrip<NEOPIXEL, 8> neopixels_;
     uint8_t specialLights_ = 0;
-    Neopixel accentColor_ = Neopixel::White();
+    Neopixel accentColor_ = Color::White();
     Neopixel controlColor_;
     /** Maximum brightness of the strip. 
      */
@@ -852,7 +854,7 @@ private:
                 if (state_.audioLights())
                     updateAudioBar();
             } else if (--specialLights_ == 0) {
-                neopixels_.setAll(Neopixel::Black());
+                neopixels_.setAll(Color::Black());
             }
         }
         neopixels_.tick(max(brightness_ / 16, 1));
@@ -905,7 +907,7 @@ private:
                 return;
             }
             state_.events_ |= (volBtnDownTicks_ == 0) ? State::EVENT_VOL_LONG_PRESS : State::EVENT_VOL_PRESS;
-            neopixels_.setAll(Neopixel::Black());
+            neopixels_.setAll(Color::Black());
             setIrq();
         }
     }
@@ -931,7 +933,7 @@ private:
                 return;
             }
             state_.events_ |= (ctrlBtnDownTicks_ == 0) ? State::EVENT_CTRL_LONG_PRESS : State::EVENT_CTRL_PRESS;
-            neopixels_.setAll(Neopixel::Black());
+            neopixels_.setAll(Color::Black());
             setIrq();
         }
     }
@@ -998,7 +1000,7 @@ private:
             case Command::SetAudioLights::Id: {
                 Command::SetAudioLights * cmd = pointer_cast<Command::SetAudioLights*>(& cmdBuffer_[1]);
                 state_.setAudioLights(cmd->on);
-                neopixels_.setAll(Neopixel::Black());
+                neopixels_.setAll(Color::Black());
                 break;
             }
             case Command::SetBrightness::Id: {

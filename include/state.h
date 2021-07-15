@@ -13,196 +13,31 @@
 #define RADIO_FREQUENCY_OFFSET 760
 #define RADIO_FREQUENCY_MAX 320
 
-#define BUTTONS_COLOR Neopixel::DarkRed()
-#define BUTTONS_LONG_PRESS_COLOR Neopixel::Red()
-#define VOLUME_COLOR Neopixel::Yellow()
-#define RADIO_STATION_COLOR Neopixel::Green()
-#define RADIO_FREQUENCY_COLOR Neopixel::Cyan()
-#define MP3_TRACK_COLOR Neopixel::Blue()
-#define MP3_PLAYLIST_COLOR Neopixel::Purple()
-#define AUDIO_COLOR AccentColor_
+#define DEFAULT_ACCENT_COLOR Color::White()
+#define BUTTONS_COLOR Color::DarkRed()
+#define BUTTONS_LONG_PRESS_COLOR Color::Red()
+#define DEFAULT_VOLUME_COLOR Color::Yellow()
+#define RADIO_STATION_COLOR Color::Green()
+#define RADIO_FREQUENCY_COLOR Color::Cyan()
+#define MP3_TRACK_COLOR Color::Blue()
+#define MP3_PLAYLIST_COLOR Color::Purple()
 
 #define DEFAULT_AP_SSID "mp3-player"
 #define DEFAULT_AP_PASSWORD "mp3-player"
 
-/** \name Pointer-to-pointer cast
- 
-    Since any pointer to pointer cast can be done by two static_casts to and from `void *`, this simple template provides a shorthand for that functionality.
- */
-//@{
-template<typename T, typename W>
-inline T pointer_cast(W const * from) {
-    return static_cast<T>(static_cast<void const *>(from));
-}
 
-template<typename T, typename W>
-inline T pointer_cast(W volatile * from) {
-    return static_cast<T>(static_cast<void *>(const_cast<W*>(from)));
-}
+#include "helpers.h"
+#include "color.h"
+#include "datetime.h"
 
-template<typename T, typename W>
-inline T pointer_cast(W * from) {
-    return static_cast<T>(static_cast<void *>(from));
-}
-//@}
 
-/** Date & time down to a second in 4 bytes. 
- */
-class DateTime {
-public:
-
-    DateTime() {
-        setMonth(1);
-        setDay(1);
-    }
-
-    uint16_t year() const { // 2021..2084 => 6
-        return ((raw_ & YEAR_MASK) >> 26) + 2021;
-    }
-
-    uint8_t month() const { // 1..12 => 4
-        return (raw_ & MONTH_MASK) >> 22;
-    }
-
-    uint8_t day() const { // 1..31 => 5
-        return (raw_ & DAY_MASK) >> 17;
-    }
-
-    uint8_t hour() const { // 0..23 => 5
-        return (raw_ & HOUR_MASK) >> 12;
-    }
-
-    uint8_t minute() const { // 0..59 => 6
-        return (raw_ & MINUTE_MASK) >> 6;
-    }
-
-    uint8_t second() const { // 0..59 => 6
-        return raw_ & SECOND_MASK;
-    }
-
-    void setYear(uint16_t year) {
-        assert(year >= 2021 && year <= 2084);
-        raw_ &= ~YEAR_MASK;
-        raw_ += (year - 2021) << 26;
-    }
-
-    void setMonth(uint8_t month) {
-        assert(month >= 1 && month <= 12);
-        raw_ &= ~MONTH_MASK;
-        raw_ += month << 22;
-    }
-
-    void setDay(uint8_t day) {
-        assert(day >= 1 && day <= 31);
-        raw_ &= ~DAY_MASK;
-        raw_ += day << 17;
-    }
-
-    void setHour(uint8_t hour) {
-        assert(hour >= 0 && hour <= 23);
-        raw_ &= ~HOUR_MASK;
-        raw_ += hour << 12;
-    }
-
-    void setMinute(uint8_t m) {
-        assert(m >= 0 && m <= 59);
-        raw_ &= ~MINUTE_MASK;
-        raw_ += m << 6;
-    }
-
-    void setSecond(uint8_t s) {
-        assert(s >= 0 && s <= 59);
-        raw_ &= ~SECOND_MASK;
-        raw_ += s;
-    }
-
-    void secondTick() {
-        if (second() == 59) {
-            setSecond(0);
-            if (minute() == 59) {
-                setMinute(0);
-                if (hour() == 23) {
-                    setHour(0);
-                    if (day() == DaysInMonth(year(), month())) {
-                        setDay(1);
-                        if (month() == 12) {
-                            setMonth(0);
-                            // years can overflow
-                            setYear(year() + 1 == 2085 ? 2021 : year() + 1);
-                        } else {
-                            setMonth(month() + 1);
-                        }
-                    } else {
-                        setDay(day() + 1);
-                    }
-                } else {
-                    setHour(hour() + 1);
-                }
-            } else {
-                setMinute(minute() + 1);
-            }
-        } else {
-            setSecond(second() + 1);
-        }
-    }
-
-    static uint8_t DaysInMonth(uint16_t year, uint8_t month) {
-        switch (month) {
-            case 1: // Jan
-            case 3: // Mar
-            case 5: // May
-            case 7: // Jul
-            case 8: // Aug
-            case 10: // Oct
-            case 12: // Dec
-                return 31;
-            case 2 : // Feb
-                // I'm ignoring the every 100 years leap year skip as the code will hopefully not be around for that long:)
-                return (year % 4 == 0) ? 29 : 28;
-            case 4:
-            case 6:
-            case 9:
-            case 11:
-            default: // whatever
-                return 30;
-        }
-    }
-
-private:
-    static constexpr uint32_t YEAR_MASK = 63 << 26;
-    static constexpr uint32_t MONTH_MASK = 16 << 22;
-    static constexpr uint32_t DAY_MASK = 31 << 17;
-    static constexpr uint32_t HOUR_MASK = 31 << 12;
-    static constexpr uint32_t MINUTE_MASK = 63 << 6;
-    static constexpr uint32_t SECOND_MASK = 63;
-
-    uint32_t raw_ = 0;
-
-} __attribute__((packed));
-
-class Message {
-public:
-
+namespace msg {
     class SetMode;
-    class SetControls;
-    class SetModeAndControls;
+    class SetWiFiStatus;
+    class SetAudioSource;
     class SetMP3Settings;
     class SetRadioSettings;
-    class SetWiFiStatus;
-
-#ifdef ARCH_ESP8266
-    template<typename T>
-    static void Send(T const & msg) {
-        Wire.beginTransmission(AVR_I2C_ADDRESS);
-        Wire.write(T::Id);
-        Wire.write(pointer_cast<char const *>(& msg), sizeof(T));
-        Wire.endTransmission();
-    }
-#endif
-
-protected:
-    
-}; // class Message
+ } // namespace msg forward declarations
 
 enum class Mode : uint8_t {
     MP3,
@@ -249,10 +84,11 @@ enum class RadioTuning : uint8_t {
 
  */
 class State {
-    friend class Message::SetMode;
-    friend class Message::SetMP3Settings;
-    friend class Message::SetRadioSettings;
-    friend class Message::SetWiFiStatus;
+    friend class msg::SetMode;
+    friend class msg::SetWiFiStatus;
+    friend class msg::SetAudioSource;
+    friend class msg::SetMP3Settings;
+    friend class msg::SetRadioSettings;
 
 /** \name Events
  
@@ -353,7 +189,7 @@ private:
     static constexpr uint16_t VOLUME_LONG_PRESS_MASK = 1 << 9;
     static constexpr uint16_t ALARM_MASK = 1 << 10;
 
-    uint16_t events_;    
+    volatile uint16_t events_;    
 
 //@}
 
@@ -463,7 +299,7 @@ private:
     static const uint16_t VOLTAGE_MASK = 0x3f << 8;
     static const uint16_t TEMP_MASK = 0xff;
 
-    uint16_t peripherals_ = 0;
+    volatile uint16_t peripherals_ = 0;
 
 //@}
 
@@ -479,19 +315,19 @@ public:
      
         Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
      */
-    uint16_t control() const volatile {
+    uint16_t control() const {
         return controlValues_ & CONTROL_MASK;
     }
 
     /** Maximum value (inclusive) the control knob can have, values up to 1023 are allowed. The minimum value is always 0. 
      */
-    uint16_t maxControl() const volatile {
+    uint16_t maxControl() const {
         return controlMaximums_ & CONTROL_MASK;
     }
 
     /** Determines if the control knob is currently pressed. 
      */
-    bool controlDown() const volatile {
+    bool controlDown() const {
         return controlState_ & CONTROL_DOWN_MASK;
     }
 
@@ -499,7 +335,7 @@ public:
      
         Can be anywhere between 0 and maxVolume() value which may not exceed 63. 
      */
-    uint8_t volume() const volatile {
+    uint8_t volume() const {
         return (controlValues_ >> 10) & 63;
     }
 
@@ -507,17 +343,15 @@ public:
      
         Can be up to 63. Min value is always 0. 
      */
-    uint8_t maxVolume() const volatile {
+    uint8_t maxVolume() const {
         return (controlMaximums_ >> 10) & 63;
     }
 
     /** Determines if the volume knob is currently pressed. 
      */
-    bool volumeDown() const volatile {
+    bool volumeDown() const {
         return controlState_ & CONTROL_DOWN_MASK;
     }
-
-#if (defined ARCH_ATTINY) 
 
     void resetControl(uint16_t value, uint16_t maxValue) {
         controlValues_ &= ~CONTROL_MASK;
@@ -563,25 +397,17 @@ public:
         events_ |= VOLUME_BUTTON_CHANGE_MASK;
     }
 
-#elif (defined ARCH_ESP8266)
-    /** Sets the control value & maximum value. 
-     
-        And informs AtTiny of the change. 
-     */
-    void setControl(uint16_t value, uint16_t maxValue) {
-
-    }
-#endif
-
 private:
     static constexpr uint16_t CONTROL_MASK = 1023;
     static constexpr uint16_t VOLUME_MASK = 63 << 10;
-    uint16_t controlValues_ = 0;
-    uint16_t controlMaximums_ = 0;
+    volatile uint16_t controlValues_ = 0;
+    volatile uint16_t controlMaximums_ = 0;
     static constexpr uint8_t CONTROL_DOWN_MASK = 1;
     static constexpr uint8_t VOLUME_DOWN_MASK = 2;
-    uint8_t controlState_ = 0;
+    volatile uint8_t controlState_ = 0;
 //@}
+
+
 
 /** \name Mode and mode information. 
  */
@@ -630,10 +456,7 @@ public:
         return radio_ & MANUAL_TUNING_MASK;
     }
 
-#if (defined ARCH_ATTINY)
-private:
-#endif
-    void setMode(Mode mode) volatile {
+    void setMode(Mode mode) {
         mode_ &= ~MODE_MASK;
         mode_ |= static_cast<uint8_t>(mode);
     }
@@ -645,7 +468,12 @@ private:
             mode_ &= ~ AUDIO_LIGHTS_MASK;
     }
 
-    void setWiFiStatus(WiFiStatus value) volatile {
+    void setAudioSource(AudioSource value) {
+        mode_ &= ~AUDIO_SOURCE_MASK;
+        mode_ |= (static_cast<uint8_t>(value) << 5) & AUDIO_SOURCE_MASK;
+    }
+
+    void setWiFiStatus(WiFiStatus value) {
         mode_ &= ~WIFI_STATUS_MASK;
         mode_ |= (static_cast<uint8_t>(value) << 6) & WIFI_STATUS_MASK;
     }
@@ -679,122 +507,60 @@ private:
     static constexpr uint8_t AUDIO_SOURCE_MASK = 1 << 5;
     static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
 
-    uint8_t mode_ = 0;
+    volatile uint8_t mode_ = 0;
 
     // TODO allow playlist change? 
     static constexpr uint16_t PLAYLIST_SELECTION_MASK = 1 << 13;
     static constexpr uint16_t PLAYLIST_ID_MASK = 7 << 10;
     static constexpr uint16_t TRACK_ID_MASK = 1023;
-    uint16_t mp3_;
+    volatile uint16_t mp3_;
 
     // TODO allow manual tuning ?
     static constexpr uint16_t MANUAL_TUNING_MASK = 1 << 12;
     static constexpr uint16_t STATION_MASK = 7 << 9;
     static constexpr uint16_t FREQUENCY_MASK = 511;
-    uint16_t radio_ = 0;
+    volatile uint16_t radio_ = 0;
 
 //@}
 
-// color
+// colors
+
+public:
+
+    Color accentColor() const {
+        return accentColor_;
+    }
+
+    void setAccentColor(Color const & value) {
+        accentColor_ = value;
+    }
+
+    Color controlColor() const {
+        return controlColor_;
+    }
+
+    void setControlColor(Color const & value) {
+        controlColor_ = value;
+    }
+
+    Color volumeColor() const {
+        return volumeColor_;
+    }
+
+    void setVolumeColor(Color const & value) {
+        volumeColor_ = value;
+    }
+
+private:
+    volatile Color accentColor_ = DEFAULT_ACCENT_COLOR;
+    volatile Color controlColor_ = MP3_TRACK_COLOR;
+    volatile Color volumeColor_ = DEFAULT_VOLUME_COLOR;
 
 // mode backups
 
+
+
 } __attribute__((packed)); // State 
-
-
-
-
-
-
-
-
-
-// Messages ------------------------------------------------------------------------------------------------------------
-
-/** Tells AVR that a mode has been set and updates the control and volume values and ranges. 
- */ 
-class Message::SetMode : public Message {
-public:
-    static constexpr uint8_t Id = 0;
-
-    SetMode(State const & state):
-        mode_{state.mode()},
-        values_{state.controlValues_},
-        maximums_{state.controlMaximums_} {
-    }
-
-    void applyTo(State volatile & state) const {
-        state.setMode(mode_);
-        state.controlValues_ = values_;
-        state.controlMaximums_ = maximums_;
-    }
-
-    static SetMode const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetMode const *>(buffer);
-    }
-
-private:
-    Mode mode_;
-    uint16_t values_;
-    uint16_t maximums_;
-
-} __attribute__((packed)); // Message::SetMode;
-
-class Message::SetMP3Settings : public Message {
-public:
-    static constexpr uint8_t Id = 5;
-    uint16_t raw_;
-
-    SetMP3Settings(State const & from):
-        raw_{from.mp3_} {
-    }
-
-    void applyTo(State volatile & state) const {
-        state.mp3_ = raw_;
-    }
-
-    static SetMP3Settings const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetMP3Settings const *>(buffer + 1);
-    }
-} __attribute__((packed)); // Message::SetMP3Settings
-
-class Message::SetRadioSettings : public Message {
-public:
-    static constexpr uint8_t Id = 6;
-    uint16_t raw_;
-
-    SetRadioSettings(State const & from):
-        raw_{from.radio_} {
-    }
-
-    void applyTo(State volatile & state) const {
-        state.radio_ = raw_;
-    }
-
-    static SetRadioSettings const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetRadioSettings const *>(buffer + 1);
-    }
-} __attribute__((packed)); // Message::SetRadioSettings
-
-class Message::SetWiFiStatus : public Message {
-public:
-    static constexpr uint8_t Id = 7;
-
-    SetWiFiStatus(State const & from):
-        status_{from.wifiStatus()} {
-    }
-
-    void applyTo(State volatile & state) const {
-        state.setWiFiStatus(status_);
-    }
-
-    static SetWiFiStatus const & At(uint8_t const * buffer) {
-        return * pointer_cast<SetWiFiStatus const *>(buffer + 1);
-    }
-private:
-    WiFiStatus status_;
-} __attribute__((packed)); // Message::SetRadioSettings
-
 
 
 

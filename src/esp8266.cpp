@@ -14,7 +14,7 @@
 #include <AudioOutputI2SNoDAC.h>
 
 #include "state.h"
-#include "comms.h"
+#include "messages.h"
 
 #define LOG(...) Log_(String("") + __VA_ARGS__)
 #define STR(...) (String("") + __VA_ARGS__)
@@ -74,6 +74,8 @@ public:
         // initialize the SD card
         InitializeSDCard();
 
+        InitializeSettings();
+
         InitializeRadioStations();
 
         InitializeMP3Playlists();
@@ -100,7 +102,6 @@ public:
 
         SetMode(Mode::Radio);
         SetRadioStation(0);
-        VolumeChange(3);
     }
 
     static void Loop() {
@@ -169,6 +170,11 @@ private:
         }
     }
     
+    static void InitializeSettings() {
+        // TODO actually read this from the SD card & stuff, only upon first round
+        State_.resetVolume(3, 16);
+    }
+
     /** Handler for the state update requests.
 
         These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
@@ -239,12 +245,15 @@ private:
             }
             case Mode::Radio:
                 State_.setRadioManualTuning(!State_.radioManualTuning());
-                if (State_.radioManualTuning()) 
-                    State_.setControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
-                else
-                    State_.setControl(State_.radioStation(), NumRadioStations());
-                Message::Send(Message::SetMode{State_});
-                Message::Send(Message::SetRadioSettings{State_});
+                if (State_.radioManualTuning()) { 
+                    State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
+                    State_.setControlColor(RADIO_FREQUENCY_COLOR);
+                } else {
+                    State_.resetControl(State_.radioStation(), NumRadioStations());
+                    State_.setControlColor(RADIO_STATION_COLOR);
+                }
+                msg::Send(msg::SetMode{State_});
+                msg::Send(msg::SetRadioSettings{State_});
         }
 
     }
@@ -338,7 +347,7 @@ private:
 
 
         // finally, inform the AVR of the mode change and other updates
-        Message::Send(Message::SetMode{State_});
+        msg::Send(msg::SetMode{State_});
     }
 
     /** Resumes playback.
@@ -539,7 +548,7 @@ private:
         if (State_.mode() == Mode::Radio) {
             Radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
             State_.setRadioFrequency(mhzx10);
-            Message::Send(Message::SetRadioSettings{State_});
+            msg::Send(msg::SetRadioSettings{State_});
         }
     }
 
@@ -548,7 +557,7 @@ private:
             Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
             State_.setRadioFrequency(RadioStations_[index]);
             State_.setRadioStation(index);            
-            Message::Send(Message::SetRadioSettings{State_});
+            msg::Send(msg::SetRadioSettings{State_});
         }
     }
 
@@ -595,7 +604,7 @@ private:
                         if (WiFi.SSID(i) == ssid) {
                             LOG("WiFi: connecting to " + ssid + ", rssi: " + WiFi.RSSI(i) + ", channel " + WiFi.channel(i));
                             State_.setWiFiStatus(WiFiStatus::Connecting);
-                            Message::Send(Message::SetWiFiStatus{State_});
+                            msg::Send(msg::SetWiFiStatus{State_});
                             WiFi.begin(ssid, pass);
                             WiFi.scanDelete();
                             // so that we do not start the access point just yet
@@ -637,7 +646,7 @@ private:
         if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
             return Error();            
         State_.setWiFiStatus(WiFiStatus::SoftAP);
-        Message::Send(Message::SetWiFiStatus{State_});
+        msg::Send(msg::SetWiFiStatus{State_});
     }
 
     static void WiFiDisconnect() {
@@ -646,7 +655,7 @@ private:
         WiFi.forceSleepBegin();
         yield();
         State_.setWiFiStatus(WiFiStatus::Off);
-        Message::Send(Message::SetWiFiStatus{State_});
+        msg::Send(msg::SetWiFiStatus{State_});
     }
 
     static void OnWiFiConnected(WiFiEventStationModeConnected const & e) {
@@ -656,7 +665,7 @@ private:
     static void OnWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
         LOG("WiFi: IP assigned: " + e.ip.toString() + ", gateway " + e.gw.toString());
         State_.setWiFiStatus(WiFiStatus::Connected);
-        Message::Send(Message::SetWiFiStatus{State_});
+        msg::Send(msg::SetWiFiStatus{State_});
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
