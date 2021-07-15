@@ -6,6 +6,7 @@
  */
 #include <tinyNeoPixel_Static.h>
 
+#include "color.h"
 
 /** Single neopixel. 
  */
