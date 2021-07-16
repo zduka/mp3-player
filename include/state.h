@@ -4,6 +4,10 @@
 
 #define AVR_I2C_ADDRESS 42
 
+/** Brightness for notifications such as wifi connection, or low battery.
+ */
+#define NOTIFICATION_BRIGHTNESS 16
+
 
 #define ESP_VOLUME_STEP 0.1
 
@@ -238,7 +242,6 @@ public:
         result = result * 10 / 4;
         return -100 + result;
     }
-
 
 #if (defined ARCH_ATTINY)
     /** Sets the voltage. 

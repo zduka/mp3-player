@@ -393,9 +393,14 @@ private:
         } else {
             Neopixels_.setAll(Color::Black());
         }
+        // after done, the bar as such, graft on it any notification LEDs with have
         if (Time_.second() % 2) {
             if (State_.wifiStatus() == WiFiStatus::Connected || State_.wifiStatus() == WiFiStatus::SoftAP)
-                Neopixels_.addColor(7, Color::Blue().withBrightness(MaxBrightness_));
+                Neopixels_.addColor(7, Color::Blue().withBrightness(NOTIFICATION_BRIGHTNESS));
+        // the low battery warning blinks out of sync with the other notifications
+        } else {
+            if (State_.voltage() <= 340)
+                Neopixels_.addColor(0, Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS))
         }
         //    Neopixels_.
         Neopixels_.reversedTick(max(MaxBrightness_ / 16, 1));
@@ -408,7 +413,7 @@ private:
     }; // SpecialLightsMode
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
-    inline static uint8_t MaxBrightness_ = 255;
+    inline static uint8_t MaxBrightness_ = 32;
     inline static uint8_t EffectCounter_ = 0;
     inline static uint8_t LightsCounter_ = 0;
     inline static LightsMode LightsMode_;
