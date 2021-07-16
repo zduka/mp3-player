@@ -48,8 +48,15 @@ class Player {
 public:
     /** Initializes the player. 
 
+        Goes to deep sleep immediately if SCL and SDL are both pulled low at startup, which attiny uses when it detects there is not enough battery to run properly. 
      */
     static void Initialize() {
+        // before we do anything, check if we should go to deep sleep immediately conserving power
+        pinMode(I2C_SCL, INPUT);
+        pinMode(I2C_SDA, INPUT);
+        if (!digitalRead(I2C_SCL) && !digitalRead(I2C_SDA))
+            Core.DeepSleep();
+        // continue with normal initialization
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
         LOG("  chip id:      " + ESP.getChipId());
@@ -813,7 +820,7 @@ void preinit() {
 }
 
 void setup() {
-    delay(1);
+    yield(); // delay(1); TODO check that yield is enough
     Player::Initialize();
 }
 
