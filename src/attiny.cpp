@@ -23,11 +23,12 @@
       DCDC_PWR -- (03) PA7   PA0 (17) -- UPDI
                -- (04) PB5   PC3 (13) -- CTRL_B
       CHARGING -- (05) PB4   PC2 (12) -- AUDIO_ADC
-      NEOPIXEL -- (06) PB3   PC1 (11) -- 
+      NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC ????? was it here? 
        AVR_IRQ -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
 
 TODO change AVR_IRQ to PB5 and set PB2 for TX for serial, this would make debugging less painful
+but we actually need audio_src
  */
 
 #define DCDC_PWR 3
@@ -48,8 +49,7 @@ extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
-
-/** ATTiny part of the player. 
+/** ATTiny part of the player.     
     
  */
 class Player {
@@ -65,6 +65,9 @@ public:
         pinMode(AVR_IRQ, INPUT);
         // headphones are input pin as well
         pinMode(HEADPHONES, INPUT);
+        // audio source is output, set it low by default
+        pinMode(AUDIO_SRC, OUTPUT);
+        digitalWrite(AUDIO_SRC, LOW);
         // configure the real time clock
         RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
         RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
@@ -166,6 +169,37 @@ private:
         // if we are not longer sleeping, wakeup
         Wakeup();
     }
+
+    /** Flashes the strip three times and the puts the avr back to sleep. 
+
+        TODO actually put to sleep, maybe put this to lights and then deal with it in a loop in wakeup? 
+     */
+    static void CriticalBattery() {
+        Neopixels_.setAll(Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS));
+        Neopixels_.sync();
+        Neopixels_.update();
+        delay(50);
+        Neopixels_.setAll(Color::Black());
+        Neopixels_.sync();
+        Neopixels_.update();
+        delay(100);
+        Neopixels_.setAll(Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS));
+        Neopixels_.sync();
+        Neopixels_.update();
+        delay(50);
+        Neopixels_.setAll(Color::Black());
+        Neopixels_.sync();
+        Neopixels_.update();
+        delay(100);
+        Neopixels_.setAll(Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS));
+        Neopixels_.sync();
+        Neopixels_.update();
+        delay(50);
+        Neopixels_.setAll(Color::Black());
+        Neopixels_.sync();
+        Neopixels_.update();
+    }
+
 
     friend void ::RTC_PIT_vect();
 
