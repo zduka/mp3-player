@@ -123,6 +123,11 @@ public:
             value_ = maxValue_ - 1;
     }
 
+    void setValues(uint16_t value, uint16_t max) {
+        value_ = value;
+        maxValue_ = max;
+    }
+
 private:
 
     uint8_t a_;

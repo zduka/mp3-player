@@ -25,12 +25,14 @@ namespace msg {
             Wire.beginTransmission(AVR_I2C_ADDRESS);
             Wire.write(pointer_cast<char const *>(& msg), sizeof(T));
             Wire.endTransmission();
+            /*
             Serial.print("I2C command sent:");
             for (unsigned i = 0; i < sizeof(T); ++i) {
                 Serial.print(" ");
                 Serial.print(pointer_cast<char const *>(& msg)[i], HEX);
             }
             Serial.println("");
+            */
         }
     #endif
 
@@ -140,27 +142,6 @@ namespace msg {
         uint16_t raw_;
 
     } __attribute__((packed));
-
-    /** Sets the mode and updates control & value ranges and colors. 
-     */
-    class SetAudioSource : public Message {
-    public:
-        static constexpr uint8_t Id = 5;
-
-        SetAudioSource(State const & from):
-            Message{Id},
-            audioSource_{from.audioSource()} {
-        }
-
-        void applyTo(State & state) {
-            state.setAudioSource(audioSource_);
-        }
-
-    private:
-        AudioSource audioSource_;
-
-    } __attribute__((packed)); // msg::SetMode
-
 
 } // namespace msg
 

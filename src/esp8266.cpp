@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
 #include <LittleFS.h>
 #include <SPI.h>
 #include <SD.h>
@@ -50,7 +51,7 @@ public:
 
         Goes to deep sleep immediately if SCL and SDL are both pulled low at startup, which attiny uses when it detects there is not enough battery to run properly. 
      */
-    static void Initialize() {''
+    static void Initialize() {
         // before we do anything, check if we should go to deep sleep immediately conserving power
         pinMode(I2C_SCL, INPUT);
         pinMode(I2C_SDA, INPUT);
@@ -102,13 +103,13 @@ public:
 
 
         WiFiConnect();
-        //SetMode(Mode::MP3);
-        //VolumeChange(4);
-        //SetPlaylist(0);
+        
+        SetMode(Mode::MP3);
+        SetPlaylist(0);
         //SetTrack(0);
 
-        SetMode(Mode::Radio);
-        SetRadioStation(0);
+        //SetMode(Mode::Radio);
+        //SetRadioStation(0);
     }
 
     static void Loop() {
@@ -150,12 +151,12 @@ private:
         FSInfo fs_info;
         LittleFS.info(fs_info); 
         LOG("LittleFS Stats:");
-        LOG("  Total bytes:      " +fs_info.totalBytes);
-        LOG("  Used bytes:       " +fs_info.usedBytes);
-        LOG("  Block size:       " +fs_info.blockSize);
-        LOG("  Page size:        " +fs_info.pageSize);
-        LOG("  Max open files:   " +fs_info.maxOpenFiles);
-        LOG("  Max path lenghth: " +fs_info.maxPathLength);
+        LOG("  Total bytes:     " +fs_info.totalBytes);
+        LOG("  Used bytes:      " +fs_info.usedBytes);
+        LOG("  Block size:      " +fs_info.blockSize);
+        LOG("  Page size:       " +fs_info.pageSize);
+        LOG("  Max open files:  " +fs_info.maxOpenFiles);
+        LOG("  Max path length: " +fs_info.maxPathLength);
     }
 
     static void InitializeSDCard() {
@@ -203,7 +204,25 @@ private:
         if (n == sizeof(State)) {
             Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
             LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
-            LOG("   Events:");
+            // TODO charging 
+            // TODO headphones
+            // TODO alarm
+            if (State_.controlChange())
+                ControlChange();
+            if (State_.controlButtonChange())
+                State_.controlDown() ? ControlDown() : ControlUp();
+            if (State_.controlPress())
+                ControlPress();
+            if (State_.controlLongPress())
+                ControlLongPress();
+            if (State_.volumeChange())
+                VolumeChange();
+            if (State_.volumeButtonChange())
+                State_.volumeDown() ? VolumeDown() : VolumeUp();
+            if (State_.volumePress())
+                VolumePress();
+            if (State_.volumeLongPress())
+                VolumeLongPress();
             // TODO process the events now 
         } else {
             LOG("I2C State corruption: " + n);
@@ -218,7 +237,16 @@ private:
         bool irq : 1;
     } Status_;
 
+    /** Number of times the loop function gets called in the past second. 
 
+        This number can 
+     * 
+     * 
+     * 55k when completely idle
+     * 16k when playing mp3 with hiccups
+     * 38k when playing low quality mono mp3 
+     * 20k when playing stereo mp3 
+     */
     static inline uint16_t LoopCount_ = 0;
     static inline uint16_t CurrentLoopCount_ = 0;
 
@@ -231,67 +259,72 @@ private:
 //@{
 private:
 
-    static void ControlChange(uint16_t value) {
+    static void ControlChange() {
+        LOG("Control: " + State_.control());
         switch (State_.mode()) {
             case Mode::MP3: {
-
+                if (State_.mp3PlaylistSelection())
+                    SetPlaylist(State_.control());
+                else
+                    SetTrack(State_.control());
                 break;
             }
             case Mode::Radio: {
                 if (State_.radioManualTuning()) 
-                    SetRadioFrequency(value + RADIO_FREQUENCY_OFFSET);
+                    SetRadioFrequency(State_.control() + RADIO_FREQUENCY_OFFSET);
                 else 
-                    SetRadioStation(value);
+                    SetRadioStation(State_.control());
             }
         }
     }
 
     static void ControlDown() {
+        LOG("Control down");
 
     }
 
     static void ControlUp() {
+        LOG("Control up");
 
     }
 
     static void ControlPress() {
+        LOG("Control press");
         switch (State_.mode()) {
             case Mode::MP3: {
+                State_.setMp3PlaylistSelection(!State_.mp3PlaylistSelection());
+                SetMode(State_.mode());
+                msg::Send(msg::SetMP3Settings{State_});
                 break;
             }
             case Mode::Radio:
                 State_.setRadioManualTuning(!State_.radioManualTuning());
-                if (State_.radioManualTuning()) { 
-                    State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
-                    State_.setControlColor(RADIO_FREQUENCY_COLOR);
-                } else {
-                    State_.resetControl(State_.radioStation(), NumRadioStations());
-                    State_.setControlColor(RADIO_STATION_COLOR);
-                }
+                SetMode(State_.mode());
                 msg::Send(msg::SetMode{State_});
                 msg::Send(msg::SetRadioSettings{State_});
+                break;
         }
-
     }
 
     static void ControlLongPress() {
-
+        LOG("Control long press");
+        // TODO switch mode
     }
 
     /** Volume knob always adjusts the volume. 
      
         No need to update any state here as the avr's state has been updated by the user input causing the change and esp state has been updated already - we are simply reacting to the event. 
      */
-    static void VolumeChange(uint8_t value) {
-        LOG("Volume: " + value);
+    static void VolumeChange() {
+        LOG("Volume: " + State_.volume());
         switch (State_.mode()) {
             case Mode::MP3:
             case Mode::WalkieTalkie:
             case Mode::NightLight:
-                I2S_.SetGain(value * ESP_VOLUME_STEP);
+                I2S_.SetGain(State_.volume() * ESP_VOLUME_STEP);
                 break;
             case Mode::Radio:
-                Radio_.setVolume(value);
+                Radio_.setVolume(State_.volume());
                 break;
         }
     }
@@ -316,7 +349,7 @@ private:
     /** Enables or disables the audio lights. 
      */
     static void VolumeLongPress() {
-
+        // TODO switch audio lights on or off
     }
 
 
@@ -346,10 +379,25 @@ private:
         switch (mode) {
             case Mode::MP3: {
                 LOG("Mode: MP3");
+                if (State_.mp3PlaylistSelection()) {
+                    State_.resetControl(State_.mp3PlaylistId(), NumPlaylists());
+                    State_.setControlColor(MP3_PLAYLIST_COLOR);
+                } else {
+                    State_.resetControl(State_.mp3TrackId(), NumTracks(State_.mp3PlaylistId()));
+                    State_.setControlColor(MP3_TRACK_COLOR);
+                }
+                Play();
                 break;
             }
             case Mode::Radio: {
                 LOG("Mode: radio");
+                if (State_.radioManualTuning()) {
+                    State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
+                    State_.setControlColor(RADIO_FREQUENCY_COLOR);
+                } else {
+                    State_.resetControl(State_.radioStation(), NumRadioStations());
+                    State_.setControlColor(RADIO_STATION_COLOR);
+                }
                 Play();
                 break;
             }
@@ -463,10 +511,11 @@ private:
         The index is the index to the runtime playlist table, not the id of the playlist on the SD card.  
      */
     static void SetPlaylist(uint8_t index) {
-        LOG("Opening playlist " + index + " id: " + MP3Playlists_[index].id);
+        LOG("Playlist " + index + " (folder " + MP3Playlists_[index].id + ")");
         CurrentPlaylist_.close();
         CurrentPlaylist_ = SD.open(STR(MP3Playlists_[index].id));
         State_.setMP3PlaylistId(index);
+        State_.setMP3TrackId(0);
         SetTrack(0);
     }
 
@@ -485,7 +534,10 @@ private:
         }
         while (true) {
             File f = CurrentPlaylist_.openNextFile();
+            if (!f)
+                break;
             if (String(f.name()).endsWith(".mp3")) {
+                ++lastTrack;
                 if (index == lastTrack) {
                     String filename{STR(MP3Playlists_[State_.mp3PlaylistId()].id + "/" + f.name())};
                     f.close();
@@ -493,14 +545,32 @@ private:
                     //I2S_.SetGain(State_.volume() * ESP_VOLUME_STEP);
                     I2S_.SetGain(1);
                     MP3_.begin(& MP3File_, & I2S_);
-                    LOG("Opening track " + index + ", file: " + filename);
+                    LOG("Track " + index + ", file: " + filename);
+                    State_.setMp3TrackId(index);
                     return;
                 }
-                ++lastTrack;
             }
             f.close();
         }
         // TODO error
+    }
+
+    /** Returns the number of tracks available in the given playlist. 
+     */
+    static uint16_t NumTracks(uint8_t playlistId) {
+        if (playlistId >= 8)
+            return 0;
+        return MP3Playlists_[playlistId].numTracks;
+    }
+
+    /** Returns the available number of mp3 playlists. 
+     */
+    static uint8_t NumPlaylists() {
+        uint8_t i = 0;
+        for (; i < 8; ++i)
+            if (! MP3Playlists_[i].isValid())
+                break;
+        return i;
     }
 
     struct PlaylistInfo {
@@ -561,6 +631,7 @@ private:
     }
 
     static void SetRadioFrequency(uint16_t mhzx10) {
+        LOG("Radio frequency: " + mhzx10);
         if (State_.mode() == Mode::Radio) {
             Radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
             State_.setRadioFrequency(mhzx10);
@@ -569,6 +640,7 @@ private:
     }
 
     static void SetRadioStation(uint8_t index) {
+        LOG("Radio station: " + index);
         if (State_.mode() == Mode::Radio) {
             Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
             State_.setRadioFrequency(RadioStations_[index]);
@@ -709,6 +781,7 @@ private:
             ip
         );
         Server_.begin();
+        MDNS.begin("mp3-player");
     }
 
     static void Http404() {
@@ -803,7 +876,6 @@ private:
 
     static inline ESP8266WebServer Server_{80};
     static inline DNSServer DNSServer_;
-
 
 
 //@}

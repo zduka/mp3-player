@@ -264,6 +264,9 @@ private:
             case msg::SetMode::Id: {
                 auto msg = msg::At<msg::SetMode>(Buffer_);
                 msg.applyTo(State_);
+                // sync the volume and control states
+                Control_.setValues(State_.control(), State_.maxControl());
+                Volume_.setValues(State_.volume(), State_.maxVolume());
                 break;
             }
             case msg::SetWiFiStatus::Id: {
@@ -329,7 +332,7 @@ private:
     }   
 
     static void VolumeValueChanged() {
-        Volume_.poll();
+        Volume_.poll(); 
         State_.setVolume(Volume_.value());
         SetIrq();
         LightsMode_ = LightsMode::VolumeValue;
@@ -434,7 +437,7 @@ private:
         // the low battery warning blinks out of sync with the other notifications
         } else {
             if (State_.voltage() <= 340)
-                Neopixels_.addColor(0, Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS))
+                Neopixels_.addColor(0, Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS));
         }
         //    Neopixels_.
         Neopixels_.reversedTick(max(MaxBrightness_ / 16, 1));
