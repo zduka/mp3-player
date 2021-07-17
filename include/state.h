@@ -216,6 +216,17 @@ public:
         return peripherals_ & CHARGING_MASK;
     }
 
+    /** Returns the audio source that is currently wired to the speaker or headphones. 
+     */
+    AudioSource audioSource() const {
+        return static_cast<AudioSource>((peripherals_ & AUDIO_SOURCE_MASK) >> 8);
+    }
+
+    void setAudioSource(AudioSource value) {
+        peripherals_ &= ~AUDIO_SOURCE_MASK;
+        peripherals_ |= (static_cast<uint16_t>(value) << 8);
+    }
+
     /** Returns the input voltage times 100. 
 
         As this is only useful to judge the battery capacity, or whether we are charhing, the following values may be returned:
@@ -225,7 +236,7 @@ public:
         0 = below 
      */    
     uint16_t voltage() const {
-        uint16_t result = (peripherals_ & VOLTAGE_MASK) >> 8;
+        uint16_t result = peripherals_ & VOLTAGE_MASK;
         if (result == 63)
             result = 500;
         else if (result != 0)
@@ -238,7 +249,7 @@ public:
         Has the precision of 0.25 degree over the entire range. 
      */
     int16_t temp() const {
-        int16_t result = static_cast<int16_t>(peripherals_ & TEMP_MASK);
+        int16_t result = static_cast<int16_t>(peripheralsTemp_);
         result = result * 10 / 4;
         return -100 + result;
     }
@@ -270,7 +281,7 @@ public:
             value = 0;
         }
         peripherals_ &= ~VOLTAGE_MASK;
-        peripherals_ |= (value << 8);
+        peripherals_ |= value && VOLTAGE_MASK;
     }
 
     void setTemp(uint16_t temp) {
@@ -290,19 +301,19 @@ public:
         }
         // now convert to celsius / 4
         x = x / 64;
-        peripherals_ &= ~TEMP_MASK;
-        peripherals_ |= (x & TEMP_MASK);
+        peripheralsTemp_ = x & 0xff;
     }
 #endif
 
 
 private:
-    static const uint16_t HEADPHONES_MASK = 0x1 << 15;
-    static const uint16_t CHARGING_MASK = 0x1 << 14;
-    static const uint16_t VOLTAGE_MASK = 0x3f << 8;
-    static const uint16_t TEMP_MASK = 0xff;
-
+    static const uint16_t AUDIO_SRC = 1 << 8;
+    static const uint16_t HEADPHONES_MASK = 1 << 7;
+    static const uint16_t CHARGING_MASK = 1 << 6;
+    static const uint16_t VOLTAGE_MASK = 0x3f;
+ 
     volatile uint16_t peripherals_ = 0;
+    volatile uint8_t peripheralsTemp_ = 0;
 
 //@}
 

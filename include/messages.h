@@ -141,5 +141,26 @@ namespace msg {
 
     } __attribute__((packed));
 
+    /** Sets the mode and updates control & value ranges and colors. 
+     */
+    class SetAudioSource : public Message {
+    public:
+        static constexpr uint8_t Id = 5;
+
+        SetAudioSource(State const & from):
+            Message{Id},
+            audioSource_{from.audioSource()} {
+        }
+
+        void applyTo(State & state) {
+            state.setAudioSource(audioSource_);
+        }
+
+    private:
+        AudioSource audioSource_;
+
+    } __attribute__((packed)); // msg::SetMode
+
+
 } // namespace msg
 
