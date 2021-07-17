@@ -50,12 +50,12 @@ public:
 
         Goes to deep sleep immediately if SCL and SDL are both pulled low at startup, which attiny uses when it detects there is not enough battery to run properly. 
      */
-    static void Initialize() {
+    static void Initialize() {''
         // before we do anything, check if we should go to deep sleep immediately conserving power
         pinMode(I2C_SCL, INPUT);
         pinMode(I2C_SDA, INPUT);
         if (!digitalRead(I2C_SCL) && !digitalRead(I2C_SDA))
-            Core.DeepSleep();
+            ESP.deepSleep(0);
         // continue with normal initialization
         Serial.begin(74880);
         LOG("Initializing ESP8266...");
@@ -112,9 +112,11 @@ public:
     }
 
     static void Loop() {
-        // see if we have a second tick
-        if (millis() - PreviousSecondMillis_ >= 1000) {
+        // see if we have a second tick, in which case update the time and utilization counters
+        while (millis() - PreviousSecondMillis_ >= 1000) {
             PreviousSecondMillis_ += 1000;
+            LoopCount_ = CurrentLoopCount_;
+            CurrentLoopCount_ = 0;
         }
         // see if we need to update the state
         if (Status_.irq) 
@@ -131,6 +133,9 @@ public:
                 // TODO set next track if we are in mp3 mode
             }
         }
+        // increase the current loop counts
+        ++CurrentLoopCount_;
+
     }
 
 private:
@@ -212,6 +217,10 @@ private:
         bool idle : 1;
         bool irq : 1;
     } Status_;
+
+
+    static inline uint16_t LoopCount_ = 0;
+    static inline uint16_t CurrentLoopCount_ = 0;
 
     static inline unsigned long PreviousSecondMillis_;
 
@@ -730,6 +739,7 @@ private:
             PSTR(",\"radioFrequency\":") + State_.radioFrequency() + 
             PSTR(",\"radioStation\":") + State_.radioStation() +
             PSTR(",\"radioManualTuning\":") + State_.radioManualTuning() +
+            PSTR(",\"espLoopCount\":") + LoopCount_ +
         PSTR("}")));
     }
 
