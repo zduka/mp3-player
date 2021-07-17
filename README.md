@@ -123,3 +123,6 @@ MP3 encoder - maybe
 
 https://github.com/zhuker/lamejs
 
+Bootstrap code must be updated to look for fonts in "." and then change the filenames so that they are short enouygh for littlefs (glyphicons.woff2)
+
+
