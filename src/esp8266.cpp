@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include <DNSServer.h>
+#include <Hash.h>
 
 #include <radio.h>
 #include <RDA5807M.h>
@@ -113,12 +114,23 @@ public:
     }
 
     static void Loop() {
+        // update the running usage statistics
+        uint32_t t = millis();
+        ++RunningLoopCount_;
+        uint16_t delay = t - LastMillis_;
+        if (RunningMaxLoopTime_ < delay)
+            RunningMaxLoopTime_ = delay;
+        LastMillis_ = t;
         // see if we have a second tick, in which case update the time and utilization counters
-        while (millis() - PreviousSecondMillis_ >= 1000) {
+        while (t - PreviousSecondMillis_ >= 1000) {
             PreviousSecondMillis_ += 1000;
-            LoopCount_ = CurrentLoopCount_;
-            CurrentLoopCount_ = 0;
+            LoopCount_ = RunningLoopCount_;
+            MaxLoopTime_ = RunningMaxLoopTime_;
+            RunningLoopCount_ = 0;
+            RunningMaxLoopTime_ = 0;
+            //LOG("loops: " + LoopCount_ + ", max diff: " + MaxLoopTime_);
         }
+
         // see if we need to update the state
         if (Status_.irq) 
             UpdateState();
@@ -134,9 +146,6 @@ public:
                 PlayNextTrack();
             }
         }
-        // increase the current loop counts
-        ++CurrentLoopCount_;
-
     }
 
 private:
@@ -235,7 +244,28 @@ private:
     static inline volatile struct {
         bool idle : 1;
         bool irq : 1;
+        unsigned powerOffCountdown : 12;
     } Status_;
+
+    static inline struct {
+        unsigned powerOffTimeout : 12;
+        unsigned wifiTimeout : 12;
+        bool allowRadioManualTuning : 1;
+        unsigned maxSpeakerVolume : 4;
+        unsigned maxHeadphonesVolume : 4;
+    } Config_;
+
+    /** Calculates usage statistics for the ESP chip. 
+     
+        Namely two metrics - the average and maximum distance between two calls to the loop function in milliseconds. 
+     */
+    static inline uint16_t LoopCount_ = 0;
+    static inline uint16_t MaxLoopTime_ = 0;
+
+    static inline uint32_t LastMillis_ = 0;
+    static inline uint16_t RunningLoopCount_ = 0;
+    static inline uint16_t RunningMaxLoopTime_ = 0;
+    static inline uint32_t PreviousSecondMillis_ = 0;
 
     /** Number of times the loop function gets called in the past second. 
 
@@ -247,10 +277,6 @@ private:
      * 38k when playing low quality mono mp3 
      * 20k when playing stereo mp3 
      */
-    static inline uint16_t LoopCount_ = 0;
-    static inline uint16_t CurrentLoopCount_ = 0;
-
-    static inline unsigned long PreviousSecondMillis_;
 
 /** \name Controls
  
@@ -514,8 +540,8 @@ private:
         LOG("Playlist " + index + " (folder " + MP3Playlists_[index].id + ")");
         CurrentPlaylist_.close();
         CurrentPlaylist_ = SD.open(STR(MP3Playlists_[index].id));
-        State_.setMP3PlaylistId(index);
-        State_.setMP3TrackId(0);
+        State_.setMp3PlaylistId(index);
+        State_.setMp3TrackId(0);
         SetTrack(0);
     }
 
@@ -795,6 +821,10 @@ private:
         MDNS.begin("mp3-player");
     }
 
+    static void Authenticate() {
+
+    }
+
     static void Http404() {
         Server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + Server_.uri() + "\" }");
     }
@@ -824,6 +854,7 @@ private:
             PSTR(",\"radioStation\":") + State_.radioStation() +
             PSTR(",\"radioManualTuning\":") + State_.radioManualTuning() +
             PSTR(",\"espLoopCount\":") + LoopCount_ +
+            PSTR(",\"espMaxLoopTime\":") + MaxLoopTime_ +
         PSTR("}")));
     }
 
@@ -888,6 +919,10 @@ private:
     static inline ESP8266WebServer Server_{80};
     static inline DNSServer DNSServer_;
 
+    static inline String AuthHash_;
+    static inline uint32_t AuthTime_;
+    static inline uint32_t AuthIP_;
+
 
 //@}
 
@@ -920,234 +955,5 @@ void setup() {
 void loop() {
     Player::Loop();
 }
-
-
-
-
-#ifdef HAHA
-
-/** Radio station. 
-
- */
-struct RadioStation {
-    uint16_t frequency;
-    String name;
-};
-
-class Player {
-public:
-    /** Initializes the player. 
-
-        We can't use the constructor as this interferes with the WiFi. Initializes the peripherals (namely I2C to AVR and the IRQ pin and interrupt) and loads the extra configuration from the SD card. 
-     */
-    void setup() {
-        pinMode(AVR_IRQ, INPUT_PULLUP);
-        attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AvrIRQ, FALLING);
-        Wire.begin(I2C_SDA, I2C_SCL);
-        // initialize the settings from SD card
-        setupSDCard();
-        // and now, get the state from AVR and initialize the peripherals as kept in the AVR state
-        setupState();
-        //delay(200);
-    }
-
-    void loop() {
-        switch (state_.mode()) {
-        case State::Mode::MP3:
-            if (mp3_.isRunning()) {
-                if (!mp3_.loop()) {
-                    mp3_.stop();
-                    LOG("song done");
-                    playNextTrack();
-                }
-            }
-            break;
-        }
-        if (stateUpdate_) {
-            State old{state_};
-            getStateUpdate();
-            updateState(old);
-        }
-    }
-
-    void setMode(State::Mode mode) {
-        if (mode != state_.mode()) {
-            leaveMode();
-            send(Command::SetMode{mode});
-        }
-        state_.setMode(mode);
-        // TODO disable idle as we start playing immediately
-        switch (mode) {
-            case State::Mode::MP3:
-                LOG("mode: mp3");
-                setPlaylist(state_.mp3PlaylistId());
-                setMp3PlaylistSelection(state_.mp3PlaylistSelection());
-                break;
-            case State::Mode::Radio:
-                LOG("mode: radio");
-                radio_.init();
-                radio_.setMono(true);
-                radio_.setVolume(state_.audioVolume());
-                setRadioFrequency(state_.radioFrequency());
-                setRadioManualTuning(state_.radioManualTuning());
-                break;
-            default:
-                LOG("unknown mode: " + (int) mode);
-        }
-    }
-
-    void play() {
-        LOG("play");
-        if (state_.idle()) {
-            state_.setIdle(false);
-            send(Command::SetIdle{false});
-        }
-        switch (state_.mode()) {
-            case State::Mode::MP3:
-                setTrack(state_.mp3TrackId());
-                break;
-            case State::Mode::Radio:
-                radio_.init();
-                radio_.setMono(true);
-                radio_.setVolume(state_.audioVolume());
-                setRadioFrequency(state_.radioFrequency());
-                break;
-        }
-    }
-
-    void stop() {
-        LOG("stop");
-        switch (state_.mode()) {
-            case State::Mode::MP3:
-                // stop current playback
-                if (mp3_.isRunning()) {
-                    mp3_.stop();
-                    i2s_.stop();
-                    mp3File_.close();
-                }
-                break;
-            case State::Mode::Radio:
-                // instead of mute, terminate the radio to conserve power
-                radio_.term();
-                break;
-        }
-        if (! state_.idle()) {
-            state_.setIdle(true);
-            send(Command::SetIdle{true});
-        }
-    }
-
-    /** Plays next track. 
-
-        Depending on the settings, this would play next song, or cycle tracks / albums.
-
-        TODO
-     */
-    void playNextTrack() {
-        if (state_.mp3TrackId() + 1 <  numTracks_)
-            setTrack(state_.mp3TrackId() + 1);
-        else
-            stop();
-    }
-
-
-private:
-
-
-
-
-    void leaveMode() {
-        switch (state_.mode()) {
-            case State::Mode::MP3:
-                LOG("leaving: mp3");
-                if (mp3_.isRunning()) {
-                    mp3_.stop();
-                    i2s_.stop();
-                    mp3File_.close();
-                }
-                break;
-            case State::Mode::Radio:
-                LOG("leaving: radio");
-                radio_.term();
-                break;
-        }
-    }
-
-    void setPlaylist(unsigned i) {
-        if (i >= numPlaylists_)
-            i = 0;
-        LOG("Opening playlist: " + i);
-        state_.setMp3PlaylistId(i);
-        currentPlaylist_.close();
-        String playlistDir{String{"/"} + (state_.mp3PlaylistId() + 1)};
-        currentPlaylist_ = SD.open(playlistDir.c_str());
-        numTracks_ = 0;
-        while (true) {
-            File f = currentPlaylist_.openNextFile();
-            // check if there are more files
-            if (!f)
-                break;
-            if (f.isDirectory())
-                continue;
-            if (String{f.name()}.endsWith(".mp3")) {
-                LOG("    " + f.name());
-                ++numTracks_;
-            }
-        }
-        LOG("tracks: " + numTracks_);
-        currentPlaylist_.rewindDirectory();
-        state_.setMp3PlaylistId(i);
-        // if current track id is greater than tracks found, reset
-        if (state_.mp3TrackId() >= numTracks_)
-            state_.setMp3TrackId(0);
-        // set the track as well
-        setTrack(state_.mp3TrackId());
-        // TODO
-        //else
-        //    send(Command::)
-        
-    }
-
-    void setTrack(unsigned i) {
-        if (numTracks_ == 0) {
-            LOG("Cannot play from empty playlist");
-            // TODO flash error
-            return;
-        }
-        if (i >= numTracks_)
-            i = numTracks_ - 1;
-        state_.setMp3TrackId(i);
-        // this is super extra not efficient, but whatever, seek before the file to open
-        currentPlaylist_.rewindDirectory();
-        while (i != 0) {
-            File f = currentPlaylist_.openNextFile();
-            if (String(f.name()).endsWith(".mp3"))
-                --i;
-            f.close();
-        }
-        // stop the current playback and start the new track, if running
-        if (mp3_.isRunning()) {
-            mp3_.stop();
-            i2s_.stop();
-            mp3File_.close();
-        }
-        if (! state_.idle()) {
-            // open the file and start playing it
-            File f = currentPlaylist_.openNextFile();
-            String fileName{String{"/"} + (state_.mp3PlaylistId() + 1) + "/" + f.name()};
-            LOG("Playing file: " + fileName);
-            mp3File_.open(fileName.c_str());
-            f.close();
-            i2s_.SetGain(state_.audioVolume() * ESP_VOLUME_STEP);
-            mp3_.begin(& mp3File_, & i2s_);
-        }
-        send(Command::SetMP3State{state_});
-    }
-
-
-
-
-#endif // HAHA
-
 
 #endif

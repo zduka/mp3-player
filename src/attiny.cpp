@@ -112,7 +112,7 @@ public:
     static void Loop() {
         if (Status_.sleep)
             Sleep();
-
+            
         if (Status_.tick) {
             Status_.tick = false;
             LightsTick();
@@ -207,7 +207,6 @@ private:
 
     inline volatile static struct {
         bool sleep : 1;
-        bool idle : 1;
         bool tick : 1;
         bool secondTick : 1;
         uint8_t ticksCounter : 5; // 0..31
@@ -261,6 +260,11 @@ private:
         // TODO check that numBytes <=32
         Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
         switch (Buffer_[0]) {
+            case msg::PowerOff::Id: {
+                // set sleep to true so that the sleep can be handled in main loop
+                Status_.sleep = true;
+                break;
+            }
             case msg::SetMode::Id: {
                 auto msg = msg::At<msg::SetMode>(Buffer_);
                 msg.applyTo(State_);

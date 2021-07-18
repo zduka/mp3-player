@@ -36,12 +36,26 @@ namespace msg {
         }
     #endif
 
+    /** Turns the LEDs and ESP off and puts AVR to sleep. 
+     */
+    class PowerOff : public Message {
+    public:
+        static constexpr uint8_t Id = 0;
+
+        PowerOff():
+            Message{Id} {
+        }
+
+    private:
+
+    } __attribute__((packed));
+
 
     /** Sets the mode and updates control & value ranges and colors. 
      */
     class SetMode : public Message {
     public:
-        static constexpr uint8_t Id = 0;
+        static constexpr uint8_t Id = 1;
 
         SetMode(State const & from):
             Message{Id},
@@ -71,7 +85,7 @@ namespace msg {
 
     class SetWiFiStatus : public Message {
     public:
-        static constexpr uint8_t Id = 1;
+        static constexpr uint8_t Id = 2;
 
         SetWiFiStatus(State const & from):
             Message{Id},
@@ -90,7 +104,7 @@ namespace msg {
 
     class SetAudioSource : public Message {
     public:
-        static constexpr uint8_t Id = 2;
+        static constexpr uint8_t Id = 3;
 
         SetAudioSource(State const & from):
             Message{Id},
@@ -109,7 +123,7 @@ namespace msg {
     
     class SetMP3Settings : public Message {
     public:
-        static constexpr uint8_t Id = 3;
+        static constexpr uint8_t Id = 4;
 
         SetMP3Settings(State const & from):
             Message{Id},
@@ -127,7 +141,7 @@ namespace msg {
     
     class SetRadioSettings : public Message {
     public:
-        static constexpr uint8_t Id = 4;
+        static constexpr uint8_t Id = 5;
 
         SetRadioSettings(State const & from):
             Message{Id},
@@ -142,6 +156,8 @@ namespace msg {
         uint16_t raw_;
 
     } __attribute__((packed));
+
+
 
 } // namespace msg
 

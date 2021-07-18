@@ -19,5 +19,5 @@
 - check that yield is enough to turn wifi off
 - change strings to PSTR
 - wifi_off does not inform about success
-
-- calculate wifi and mp3 utilization, maybe do max latency instead of # of loop calls 
+- check MDNS
+- add authentication

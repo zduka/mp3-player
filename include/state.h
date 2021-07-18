@@ -458,7 +458,7 @@ public:
         return (mp3_ & PLAYLIST_ID_MASK) >> 10;
     }
 
-    void setMP3PlaylistId(uint8_t value) {
+    void setMp3PlaylistId(uint8_t value) {
         mp3_ &= ~ PLAYLIST_ID_MASK;
         mp3_ |= (value << 10) & PLAYLIST_ID_MASK;
     }
