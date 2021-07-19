@@ -16,7 +16,8 @@
 
 # ESP
 
-- check that yield is enough to turn wifi off
+- sleep does not work
+- volume values in state not initialized
 - change strings to PSTR
 - wifi_off does not inform about success
 - check MDNS

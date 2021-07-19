@@ -51,6 +51,12 @@ public:
     /** Initializes the player. 
 
         Goes to deep sleep immediately if SCL and SDL are both pulled low at startup, which attiny uses when it detects there is not enough battery to run properly. 
+
+        1 = input voltage ok
+        2 = esp started (after update state)
+        3 = SD card found and ok
+        4 = settings ok, radio stations ok, playlists ok
+        5 = wifi & servers ok
      */
     static void Initialize() {
         // before we do anything, check if we should go to deep sleep immediately conserving power
@@ -77,17 +83,19 @@ public:
         InitializeLittleFS();
         // tell AVR that we are awake by requesting initial state
         UpdateState();
+        msg::Send(msg::LightsBar{2, 5, State_.accentColor()});
 
 
 
         // initialize the SD card
         InitializeSDCard();
+        msg::Send(msg::LightsBar{3, 5, State_.accentColor()});
 
         InitializeSettings();
-
         InitializeRadioStations();
-
         InitializeMP3Playlists();
+        msg::Send(msg::SetAccentColor{State_});
+        msg::Send(msg::LightsBar{4, 5, State_.accentColor()});
 
 
         //SetMode(Mode::Radio);
@@ -100,10 +108,10 @@ public:
         InitializeWiFi();
         InitializeServer();
         PreviousSecondMillis_ = millis();
+        msg::Send(msg::LightsBar{5, 5, State_.accentColor()});
         LOG("Initialization done.");
 
-
-        WiFiConnect();
+        //WiFiConnect();
         
         SetMode(Mode::MP3);
         SetPlaylist(0);
@@ -124,11 +132,7 @@ public:
         // see if we have a second tick, in which case update the time and utilization counters
         while (t - PreviousSecondMillis_ >= 1000) {
             PreviousSecondMillis_ += 1000;
-            LoopCount_ = RunningLoopCount_;
-            MaxLoopTime_ = RunningMaxLoopTime_;
-            RunningLoopCount_ = 0;
-            RunningMaxLoopTime_ = 0;
-            //LOG("loops: " + LoopCount_ + ", max diff: " + MaxLoopTime_);
+            SecondTick();
         }
 
         // see if we need to update the state
@@ -146,6 +150,15 @@ public:
                 PlayNextTrack();
             }
         }
+    }
+
+    /** Prepares the ESP to power off and informs AVR to cut power & go to sleep. 
+     */
+    static void PowerOff() {
+        LOG(PSTR("Powering off"));
+        msg::Send(msg::PowerOff{});
+        // do nothing as AVR is supposed to power off the chip immediately
+        while (true) { }
     }
 
 private:
@@ -192,9 +205,42 @@ private:
         }
     }
     
+    /** Loads the application settings from the SD card. 
+     
+        The settings are stored in the `settings.txt` file. If the file does not exist, uses the default settings. 
+     */
     static void InitializeSettings() {
+        // actually set the settings to their defaults first in case of corrupted settings file
+        Settings_.powerOffTimeout = DEFAULT_POWEROFF_TIMEOUT;
+        Settings_.wifiTimeout = DEFAULT_WIFI_TIMEOUT;
+        Settings_.allowRadioManualTuning = DEFAULT_ALLOW_RADIO_MANUAL_TUNING;
+        Settings_.maxSpeakerVolume = DEFAULT_MAX_SPEAKER_VOLUME;
+        Settings_.maxHeadphonesVolume = DEFAULT_MAX_HEADPHONES_VOLUME;
+        State_.setAccentColor(DEFAULT_ACCENT_COLOR);
         // TODO actually read this from the SD card & stuff, only upon first round
-        State_.resetVolume(3, 16);
+
+
+
+
+
+
+        Status_.powerOffCountdown = Settings_.powerOffTimeout;
+        Status_.wifiCountdown = Settings_.wifiTimeout;
+    }
+
+    /** Called every time a second passes.
+     */
+    static void SecondTick() {
+        LoopCount_ = RunningLoopCount_;
+        MaxLoopTime_ = RunningMaxLoopTime_;
+        RunningLoopCount_ = 0;
+        RunningMaxLoopTime_ = 0;
+        //LOG("loops: " + LoopCount_ + ", max diff: " + MaxLoopTime_);
+        // disconnect wifi if the wifi inactivity countdown has reached 0
+        if (State_.wifiStatus() != WiFiStatus::Off && Status_.wifiCountdown != 0 && --Status_.wifiCountdown == 0)
+            WiFiDisconnect();
+        if (Status_.idle && State_.wifiStatus() == WiFiStatus::Off && --Status_.powerOffCountdown == 0)
+            PowerOff();
     }
 
     /** Handler for the state update requests.
@@ -245,6 +291,7 @@ private:
         bool idle : 1;
         bool irq : 1;
         unsigned powerOffCountdown : 12;
+        unsigned wifiCountdown : 12;
     } Status_;
 
     static inline struct {
@@ -253,7 +300,7 @@ private:
         bool allowRadioManualTuning : 1;
         unsigned maxSpeakerVolume : 4;
         unsigned maxHeadphonesVolume : 4;
-    } Config_;
+    } Settings_;
 
     /** Calculates usage statistics for the ESP chip. 
      
@@ -478,6 +525,7 @@ private:
             // don't do anything for walkie talkie ?
         }
         Status_.idle = true;
+        Status_.powerOffCountdown = Settings_.powerOffTimeout;
     }
 
     /** Looks at the SD card and finds valid playlists. 
@@ -832,6 +880,8 @@ private:
     /** Returns the status of the player. 
      */
     static void HttpStatus() {
+        // reset the wifi timeout
+        Status_.wifiCountdown = Settings_.wifiTimeout;
         Server_.send(200, "text/json", STR(PSTR("{") +
             PSTR("\"millis\":") + millis() + 
             PSTR(",\"rssi\":") + WiFi.RSSI() +
@@ -948,7 +998,7 @@ void preinit() {
 }
 
 void setup() {
-    yield(); // delay(1); TODO check that yield is enough
+    delay(1); // necessary to enter the modem sleep mode
     Player::Initialize();
 }
 

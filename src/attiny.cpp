@@ -124,6 +124,36 @@ public:
 
 private:
 
+    static void Tick() {
+        // if sleeping & button(s) are pressed, we have 1/32th of a second tick and must determine if wake up
+        // if not sleeping, the long press counters must be increased and second tick determined
+        if (! Status_.sleep || State_.controlDown() || State_.volumeDown()) {
+            bool wakeup = false;
+            if (State_.controlDown() && ControlBtnCounter_ > 0 && --ControlBtnCounter_ == 0) 
+                wakeup = true;
+            if (State_.volumeDown() && VolumeBtnCounter_ > 0 && --VolumeBtnCounter_ ==0) 
+                wakeup = true;
+            // if sleeping, check if we should wake up, otherwise initiate the tick in main loop
+            if (Status_.sleep) {
+                if (wakeup) {
+                    State_.setControlDown(false);
+                    State_.setVolumeDown(false);
+                    State_.clearEvents();
+                    Status_.sleep = false;
+                }
+            } else {
+                Status_.tick = true;
+            }
+            // if this is the 32th tick, continue to second tick, otherwise return now            
+            if (Player::Status_.ticksCounter-- != 0)
+                return;
+        }
+        // we are left with 1 second tick either because sleeping, or because fast tick overflow
+        Status_.secondTick = true;
+        Time_.secondTick();
+        // TODO alarm & stuff
+    }
+
     /** Initialized when the chip wakes up into normal operation. 
      */
     static void Wakeup() {
@@ -147,7 +177,7 @@ private:
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         delay(50);
-        // TODO flash neopixels for wakeup
+        LightsBar(1,5,State_.accentColor(), 32);
     }
 
     static void Sleep() {
@@ -293,6 +323,16 @@ private:
                 msg.applyTo(State_);
                 break;
             }
+            case msg::SetAccentColor::Id: {
+                auto msg = msg::At<msg::SetAccentColor>(Buffer_);
+                msg.applyTo(State_);
+                break;
+            }
+            case msg::LightsBar::Id: {
+                auto msg = msg::At<msg::LightsBar>(Buffer_);
+                LightsBar(msg.value, msg.max, msg.color.withBrightness(MaxBrightness_), msg.timeout);
+                break;
+            }
         }
     }
 
@@ -353,12 +393,10 @@ private:
                 while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
                 RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
             }
-        } else {
+        } else if (State_.controlDown()) {
             State_.setControlDown(false);
             if (ControlBtnCounter_ == 0) {
                 State_.setControlLongPress();
-                // wake up from sleep if sleeping
-                Status_.sleep = false;
             } else {
                 ControlBtnCounter_ = 0;
                 State_.setControlPress();
@@ -418,6 +456,15 @@ private:
         } else if (LightsCounter_ > 0) {
             --LightsCounter_;
             switch (LightsMode_) {
+                case LightsMode::Bar:
+                    Neopixels_.showBar(EffectCounter_, EffectHelper_, EffectColor_);
+                    break;
+                case LightsMode::CenteredBar:
+                    Neopixels_.showCenteredBar(EffectCounter_, EffectHelper_, EffectColor_);
+                    break;
+                case LightsMode::Point:
+                    Neopixels_.showPoint(EffectCounter_, EffectHelper_, EffectColor_);
+                    break;
                 case LightsMode::ControlValue:
                     Neopixels_.showPoint(State_.control(), State_.maxControl() - 1, State_.controlColor());
                     break;
@@ -425,7 +472,7 @@ private:
                     Neopixels_.showBar(State_.volume(), State_.maxVolume() - 1, State_.volumeColor());
                     break;
             }
-        // if the wifi is currently connecting, show the connection increaser
+        // if the wifi is currently connecting, show the connection increase
         } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
             EffectCounter_ = (EffectCounter_ + 1) % 64;
             Neopixels_.showCenteredBar(EffectCounter_, 64, Color::Blue().withBrightness(MaxBrightness_));
@@ -448,15 +495,46 @@ private:
         Neopixels_.update();
     }
 
+    static void LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout) {
+        LightsMode_ = LightsMode::Bar;
+        EffectCounter_ = value;
+        EffectHelper_ = max;
+        EffectColor_ = color;
+        LightsCounter_ = timeout;
+    }
+
+    static void LightsCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout) {
+        LightsMode_ = LightsMode::CenteredBar;
+        EffectCounter_ = value;
+        EffectHelper_ = max;
+        EffectColor_ = color;
+        LightsCounter_ = timeout;
+    }
+
+    static void LightsPoint(uint16_t value, uint16_t max, Color const & color, uint8_t timeout) {
+        LightsMode_ = LightsMode::Point;
+        EffectCounter_ = value;
+        EffectHelper_ = max;
+        EffectColor_ = color;
+        LightsCounter_ = timeout;
+    }
+
     enum class LightsMode : uint8_t {
+        Bar,
+        CenteredBar,
+        Point,
         ControlValue,
         VolumeValue,
     }; // SpecialLightsMode
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static uint8_t MaxBrightness_ = 32;
-    inline static uint8_t EffectCounter_ = 0;
+    inline static uint16_t EffectCounter_ = 0;
+    inline static uint16_t EffectHelper_ = 0;
+    inline static Color EffectColor_;
     inline static uint8_t LightsCounter_ = 0;
+    /** Lights mode, which determines the meaning for the EffectCounter and EffectHelper. 
+     */
     inline static LightsMode LightsMode_;
 
 //@}
@@ -516,22 +594,7 @@ private:
 
 ISR(RTC_PIT_vect) {
     RTC.PITINTFLAGS = RTC_PI_bm;
-    // determine whether we have 1 second or 1/32th second ticks and call the appropriate functions
-    if (! Player::Status_.sleep || Player::State_.controlDown() || Player::State_.volumeDown()) {
-        Player::Status_.tick = true;
-        // if buttons are down, decrease their long press ticks
-        if (Player::ControlBtnCounter_ > 0)
-            --Player::ControlBtnCounter_;
-        if (Player::VolumeBtnCounter_ > 0)
-            --Player::VolumeBtnCounter_;
-        // if this is the 32th tick, continue to second tick, otherwise return now            
-        if (Player::Status_.ticksCounter-- != 0)
-            return;
-    } 
-    // the one-second tick
-    Player::Status_.secondTick = true;
-    Player::Time_.secondTick();
-    // TODO alarm & stuff
+    Player::Tick();
 }
 
 ISR(ADC0_RESRDY_vect) {

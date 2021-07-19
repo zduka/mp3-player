@@ -23,16 +23,15 @@ namespace msg {
         template<typename T>
         static void Send(T const & msg) {
             Wire.beginTransmission(AVR_I2C_ADDRESS);
-            Wire.write(pointer_cast<char const *>(& msg), sizeof(T));
+            unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
+            Wire.write(msgBytes, sizeof(T));
             Wire.endTransmission();
-            /*
             Serial.print("I2C command sent:");
             for (unsigned i = 0; i < sizeof(T); ++i) {
                 Serial.print(" ");
-                Serial.print(pointer_cast<char const *>(& msg)[i], HEX);
+                Serial.print(msgBytes[i], HEX);
             }
             Serial.println("");
-            */
         }
     #endif
 
@@ -155,6 +154,42 @@ namespace msg {
     private:
         uint16_t raw_;
 
+    } __attribute__((packed));
+
+    class SetAccentColor : public Message {
+    public:
+        static constexpr uint8_t Id = 6;
+
+        SetAccentColor(State const & from):
+            Message{Id},
+            color_{from.accentColor()} {
+        }
+
+        void applyTo(State & state) const {
+            state.setAccentColor(color_);
+        }
+
+    private:
+        Color color_;
+
+    }  __attribute__((packed));
+
+    /** Instructs the ATTiny to display a bar of given parameters in the LED strip. 
+     */
+    class LightsBar : public Message {
+    public:
+        static constexpr uint8_t Id = 7;
+        LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 32):
+            Message{Id},
+            value{value},
+            max{max},
+            color{color},
+            timeout{timeout} {
+        }
+        uint16_t value;
+        uint16_t max;
+        Color color;
+        uint8_t timeout;
     } __attribute__((packed));
 
 
