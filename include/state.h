@@ -12,6 +12,7 @@
 #define DEFAULT_POWEROFF_TIMEOUT 60
 #define DEFAULT_WIFI_TIMEOUT 60
 #define DEFAULT_ALLOW_RADIO_MANUAL_TUNING true
+#define DEFAULT_VOLUME 4
 #define DEFAULT_MAX_SPEAKER_VOLUME 15
 #define DEFAULT_MAX_HEADPHONES_VOLUME 15
 
@@ -77,6 +78,15 @@ enum class RadioTuning : uint8_t {
     Presets = 0,
     Manual = 1
 }; // RadioTuning
+
+enum class NightLightEffect : uint8_t {
+    Accent, // accent color, always
+    Hue, // cycles though colors based on hue
+    KnightRider, // knight rider effect using
+    BreatheBar, // breathe effect 
+    Breathe, // breathe effect (entire strip)
+    RunningLights, // xXXxXXxXX -->
+}
 
 /** The player state. 
  

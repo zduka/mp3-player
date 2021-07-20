@@ -454,24 +454,47 @@ private:
                 Neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
         // if special counter is not 0, we are showing the special effect in question
         } else if (LightsCounter_ > 0) {
-            --LightsCounter_;
             switch (LightsMode_) {
                 case LightsMode::Bar:
                     Neopixels_.showBar(EffectCounter_, EffectHelper_, EffectColor_);
                     break;
                 case LightsMode::CenteredBar:
                     Neopixels_.showCenteredBar(EffectCounter_, EffectHelper_, EffectColor_);
+                    --LightsCounter_;
                     break;
                 case LightsMode::Point:
                     Neopixels_.showPoint(EffectCounter_, EffectHelper_, EffectColor_);
+                    --LightsCounter_;
                     break;
                 case LightsMode::ControlValue:
                     Neopixels_.showPoint(State_.control(), State_.maxControl() - 1, State_.controlColor());
+                    --LightsCounter_;
                     break;
                 case LightsMode::VolumeValue:
                     Neopixels_.showBar(State_.volume(), State_.maxVolume() - 1, State_.volumeColor());
+                    --LightsCounter_;
                     break;
             }
+            --LightsCounter_;
+        } else if (State_.mode() == Mode::NightLight) {
+            // 4096 2048 1024 512 256 128 64 32
+            uint16_t speed = 64;
+            if ((EffectHelper_ & 1) == 0) {
+                if (0xffff - speed < EffectCounter_) {
+                    EffectCounter_ = 0xffff;
+                    EffectHelper_ = 1;
+                } else {
+                    EffectCounter_ += speed;
+                }
+            } else {
+                if (EffectCounter_ < speed) {
+                    EffectCounter_ = 0;
+                    EffectHelper_ = 0; // &= ~1;
+                } else {
+                    EffectCounter_ -= speed;
+                }
+            }
+            Neopixels_.showPoint(EffectCounter_, 0xffff, Color::Green().withBrightness(MaxBrightness_));
         // if the wifi is currently connecting, show the connection increase
         } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
             EffectCounter_ = (EffectCounter_ + 1) % 64;

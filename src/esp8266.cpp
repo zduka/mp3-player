@@ -95,6 +95,7 @@ public:
         InitializeRadioStations();
         InitializeMP3Playlists();
         msg::Send(msg::SetAccentColor{State_});
+        msg::Send(msg::SetMode(State_));
         msg::Send(msg::LightsBar{4, 5, State_.accentColor()});
 
 
@@ -113,12 +114,14 @@ public:
 
         //WiFiConnect();
         
-        SetMode(Mode::MP3);
-        SetPlaylist(0);
+        //SetMode(Mode::MP3);
+        //SetPlaylist(0);
         //SetTrack(0);
 
         //SetMode(Mode::Radio);
         //SetRadioStation(0);
+
+        SetMode(Mode::NightLight);
     }
 
     static void Loop() {
@@ -217,6 +220,7 @@ private:
         Settings_.maxSpeakerVolume = DEFAULT_MAX_SPEAKER_VOLUME;
         Settings_.maxHeadphonesVolume = DEFAULT_MAX_HEADPHONES_VOLUME;
         State_.setAccentColor(DEFAULT_ACCENT_COLOR);
+        State_.resetVolume(DEFAULT_VOLUME, 16); // volume is from 0 to 15 by HW requirements 
         // TODO actually read this from the SD card & stuff, only upon first round
 
 
@@ -226,6 +230,9 @@ private:
 
         Status_.powerOffCountdown = Settings_.powerOffTimeout;
         Status_.wifiCountdown = Settings_.wifiTimeout;
+        // check if current volume is too high and if so, adjust accordingly
+        uint8_t maxVolume = State_.headphones() ? Settings_.maxHeadphonesVolume : Settings_.maxSpeakerVolume;
+        State_.resetVolume(State_.volume() > maxVolume ? maxVolume : State_.volume(), 16);
     }
 
     /** Called every time a second passes.
@@ -389,6 +396,11 @@ private:
         No need to update any state here as the avr's state has been updated by the user input causing the change and esp state has been updated already - we are simply reacting to the event. 
      */
     static void VolumeChange() {
+        uint8_t maxVolume = State_.headphones() ? Settings_.maxHeadphonesVolume : Settings_.maxSpeakerVolume;
+        if (State_.volume() > maxVolume) {
+            State_.setVolume(maxVolume);
+            msg::Send(msg::SetMode{State_});
+        }
         LOG("Volume: " + State_.volume());
         switch (State_.mode()) {
             case Mode::MP3:
@@ -621,6 +633,7 @@ private:
                     MP3_.begin(& MP3File_, & I2S_);
                     LOG("Track " + index + ", file: " + filename);
                     State_.setMp3TrackId(index);
+                    msg::Send(msg::SetMP3Settings{State_});
                     return;
                 }
             }

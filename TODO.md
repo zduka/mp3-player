@@ -1,5 +1,7 @@
 # HW
 
+
+
 - enlarge footprints for all ICs and through-hole components
 - larger holes for audio jack
 - update the audio src, tpa power, and attiny serial port accordingly
@@ -12,12 +14,15 @@
 
 # ATTiny
 
+- not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
+
+- make speed & night lights mode part of state
+- how to make color & speed selectable for night mode? 
 - make sure that ADC is disconnected while sleeping
 
 # ESP
 
-- sleep does not work
-- volume values in state not initialized
+- longer delay before power down in night light mode
 - change strings to PSTR
 - wifi_off does not inform about success
 - check MDNS
