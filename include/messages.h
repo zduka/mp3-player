@@ -26,12 +26,14 @@ namespace msg {
             unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
             Wire.write(msgBytes, sizeof(T));
             Wire.endTransmission();
+            /*
             Serial.print("I2C command sent:");
             for (unsigned i = 0; i < sizeof(T); ++i) {
                 Serial.print(" ");
                 Serial.print(msgBytes[i], HEX);
             }
             Serial.println("");
+            */
         }
     #endif
 
@@ -156,9 +158,27 @@ namespace msg {
 
     } __attribute__((packed));
 
-    class SetAccentColor : public Message {
+    class SetNightLightSettings : public Message {
     public:
         static constexpr uint8_t Id = 6;
+
+        SetNightLightSettings(State const & from):
+            Message{Id},
+            raw_{from.nightLight_} {
+        }
+
+        void applyTo(State & state) const {
+            state.nightLight_ = raw_;
+        }
+
+    private:
+        uint16_t raw_;
+
+    } __attribute__((packed));
+
+    class SetAccentColor : public Message {
+    public:
+        static constexpr uint8_t Id = 7;
 
         SetAccentColor(State const & from):
             Message{Id},
@@ -178,7 +198,8 @@ namespace msg {
      */
     class LightsBar : public Message {
     public:
-        static constexpr uint8_t Id = 7;
+        static constexpr uint8_t Id = 8;
+
         LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 32):
             Message{Id},
             value{value},

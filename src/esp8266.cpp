@@ -122,6 +122,7 @@ public:
         //SetRadioStation(0);
 
         SetMode(Mode::NightLight);
+
     }
 
     static void Loop() {
@@ -304,6 +305,7 @@ private:
     static inline struct {
         unsigned powerOffTimeout : 12;
         unsigned wifiTimeout : 12;
+        unsigned nightLightsTimeout : 12;
         bool allowRadioManualTuning : 1;
         unsigned maxSpeakerVolume : 4;
         unsigned maxHeadphonesVolume : 4;
@@ -487,6 +489,10 @@ private:
                 break;
             }
             case Mode::WalkieTalkie: {
+                LOG("Mode: NightLight");
+                Status_.powerOffCountdown = Settings_.nightLightsTimeout;
+
+                break;
 
             }
             case Mode::NightLight: {

@@ -83,6 +83,9 @@ public:
     }
 
     void tick(uint8_t step = 16) {
+        if (! updated_)
+            return;
+        updated_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
             updated_ = current_[i].moveTowards(target_[i], step) || updated_;
     }
@@ -90,6 +93,9 @@ public:
     /** Identical to tick, but reverses the order of the visible pixels. 
      */
     void reversedTick(uint8_t step = 16) {
+        if (! updated_)
+            return;
+        updated_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
             updated_ = current_[i].moveTowards(target_[SIZE - 1 - i], step) || updated_;
     }

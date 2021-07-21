@@ -11,6 +11,7 @@
 
 #define DEFAULT_POWEROFF_TIMEOUT 60
 #define DEFAULT_WIFI_TIMEOUT 60
+#define DEFAULT_NIGHT_LIGHTS_TIMEOUT 3600
 #define DEFAULT_ALLOW_RADIO_MANUAL_TUNING true
 #define DEFAULT_VOLUME 4
 #define DEFAULT_MAX_SPEAKER_VOLUME 15
@@ -48,6 +49,7 @@ namespace msg {
     class SetAudioSource;
     class SetMP3Settings;
     class SetRadioSettings;
+    class SetNightLightSettings;
  } // namespace msg forward declarations
 
 enum class Mode : uint8_t {
@@ -79,14 +81,21 @@ enum class RadioTuning : uint8_t {
     Manual = 1
 }; // RadioTuning
 
+/** The various night light effects the player supports. 
+ */
 enum class NightLightEffect : uint8_t {
-    Accent, // accent color, always
-    Hue, // cycles though colors based on hue
-    KnightRider, // knight rider effect using
-    BreatheBar, // breathe effect 
-    Breathe, // breathe effect (entire strip)
-    RunningLights, // xXXxXXxXX -->
-}
+    Color, // single color
+    Breathe, // breathing effect with single color, whole strip
+    BreatheBar, // breathing effect, centered bar, single color
+    KnightRider, // larson scanner, single color
+    Running, // running lights, single color
+}; // NightLightEffect
+
+enum class NightLightControlMode : uint8_t {
+    Effect,
+    Speed,
+    Color
+}; // NightLightControlMode
 
 /** The player state. 
  
@@ -109,6 +118,7 @@ class State {
     friend class msg::SetAudioSource;
     friend class msg::SetMP3Settings;
     friend class msg::SetRadioSettings;
+    friend class msg::SetNightLightSettings;
 
 /** \name Events
  
@@ -470,6 +480,23 @@ public:
         mode_ |= (static_cast<uint8_t>(value) << 6) & WIFI_STATUS_MASK;
     }
 
+
+
+
+
+
+private:
+    // we really need only 2 bits, but using 3 gives extra space for the future 
+    static constexpr uint8_t MODE_MASK = 7;
+    static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 4;
+    static constexpr uint8_t AUDIO_SOURCE_MASK = 1 << 5;
+    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
+
+    volatile uint8_t mode_ = 0;
+
+
+public:
+
     uint8_t mp3PlaylistId() const {
         return (mp3_ & PLAYLIST_ID_MASK) >> 10;
     }
@@ -501,6 +528,15 @@ public:
             mp3_ &= ~PLAYLIST_SELECTION_MASK;            
     }
 
+
+    // TODO allow playlist change? 
+    static constexpr uint16_t PLAYLIST_SELECTION_MASK = 1 << 13;
+    static constexpr uint16_t PLAYLIST_ID_MASK = 7 << 10;
+    static constexpr uint16_t TRACK_ID_MASK = 1023;
+    volatile uint16_t mp3_;
+
+public:
+
     uint16_t radioFrequency() const {
         return (radio_ & FREQUENCY_MASK) + RADIO_FREQUENCY_OFFSET;
     }
@@ -530,29 +566,77 @@ public:
             radio_ &= ~MANUAL_TUNING_MASK;
     }
 
-
-
-
 private:
-    // we really need only 2 bits, but using 3 gives extra space for the future 
-    static constexpr uint8_t MODE_MASK = 7;
-    static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 4;
-    static constexpr uint8_t AUDIO_SOURCE_MASK = 1 << 5;
-    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
-
-    volatile uint8_t mode_ = 0;
-
-    // TODO allow playlist change? 
-    static constexpr uint16_t PLAYLIST_SELECTION_MASK = 1 << 13;
-    static constexpr uint16_t PLAYLIST_ID_MASK = 7 << 10;
-    static constexpr uint16_t TRACK_ID_MASK = 1023;
-    volatile uint16_t mp3_;
 
     // TODO allow manual tuning ?
     static constexpr uint16_t MANUAL_TUNING_MASK = 1 << 12;
     static constexpr uint16_t STATION_MASK = 7 << 9;
     static constexpr uint16_t FREQUENCY_MASK = 511;
     volatile uint16_t radio_ = 0;
+
+public:
+
+    NightLightEffect nightLightEffect() const {
+        return static_cast<NightLightEffect>(nightLight_ & NIGHT_LIGHT_EFFECT_MASK);
+        return NightLightEffect::Breathe;
+    }
+
+    void setNightLightEffect(NightLightEffect effect) {
+        nightLight_ &= ~NIGHT_LIGHT_EFFECT_MASK;
+        nightLight_ |= static_cast<uint16_t>(effect) & NIGHT_LIGHT_EFFECT_MASK;
+    }
+
+    uint16_t nightLightSpeed() const {
+        return (nightLight_ & NIGHT_LIGHT_SPEED_MASK) >> 3;
+    }
+
+    void setNightLightSpeed(uint16_t value) {
+        nightLight_ &= ~NIGHT_LIGHT_SPEED_MASK;
+        nightLight_ |= (value << 3) & NIGHT_LIGHT_SPEED_MASK;
+    }
+
+    bool nightLightRainbow() const {
+        return nightLight_ & NIGHT_LIGHT_RAINBOW_MASK;
+    }
+
+    void nightLightSetRainbow(bool value) {
+        if (value)
+            nightLight_ |= NIGHT_LIGHT_RAINBOW_MASK;
+        else
+            nightLight_ &= ~NIGHT_LIGHT_RAINBOW_MASK;
+    }
+
+    NightLightControlMode nightLightControlMode() const {
+        return static_cast<NightLightControlMode>((nightLight_ & NIGHT_LIGHT_CONTROL_MODE_MASK) >> 9);
+    }
+
+    void setNightLightControlMode(NightLightControlMode value) {
+        nightLight_ &= ~NIGHT_LIGHT_CONTROL_MODE_MASK;
+        nightLight_ |= (static_cast<uint16_t>(value) << 9) && NIGHT_LIGHT_CONTROL_MODE_MASK;
+    }
+
+    uint8_t nightLightHue() const {
+        return nightLight_ >> 11;
+    }
+
+    void setNightLightHue(uint8_t value) {
+        nightLight_ &= ~NIGHT_LIGHT_HUE_MASK;
+        nightLight_ |= (value << 11) & NIGHT_LIGHT_HUE_MASK;
+    }
+
+    Color nightLightColor() const {
+        return Color::White();
+    }
+
+private:
+
+    static constexpr uint16_t NIGHT_LIGHT_EFFECT_MASK = 7;
+    static constexpr uint16_t NIGHT_LIGHT_SPEED_MASK = 31 << 3;
+    static constexpr uint16_t NIGHT_LIGHT_RAINBOW_MASK = 1 << 8;
+    static constexpr uint16_t NIGHT_LIGHT_CONTROL_MODE_MASK = 3 << 9;
+    static constexpr uint16_t NIGHT_LIGHT_HUE_MASK = 31 << 11;
+
+    volatile uint16_t nightLight_ = 0;
 
 //@}
 

@@ -157,9 +157,9 @@ private:
     /** Initialized when the chip wakes up into normal operation. 
      */
     static void Wakeup() {
-        // enable the RTC interrupt to 1/32th of a second while awake
+        // enable the RTC interrupt to 1/64th of a second while awake
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-        RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
+        RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;
         // start ADC0 to measure the VCC and wait for the first measurement to be done
         ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
         ADC0.INTCTRL |= ADC_RESRDY_bm;
@@ -239,7 +239,7 @@ private:
         bool sleep : 1;
         bool tick : 1;
         bool secondTick : 1;
-        uint8_t ticksCounter : 5; // 0..31
+        uint8_t ticksCounter : 6; // 0..63
     } Status_;
 
     inline static State State_;
@@ -292,7 +292,7 @@ private:
         switch (Buffer_[0]) {
             case msg::PowerOff::Id: {
                 // set sleep to true so that the sleep can be handled in main loop
-                Status_.sleep = true;
+                //Status_.sleep = true;
                 break;
             }
             case msg::SetMode::Id: {
@@ -391,7 +391,7 @@ private:
             // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
             if (Status_.sleep) {
                 while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-                RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
+                RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;     
             }
         } else if (State_.controlDown()) {
             State_.setControlDown(false);
@@ -415,7 +415,7 @@ private:
             // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
             if (Status_.sleep) {
                 while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-                RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;     
+                RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;     
             }
         } else {
             State_.setVolumeDown(false);
@@ -475,8 +475,46 @@ private:
                     --LightsCounter_;
                     break;
             }
-            --LightsCounter_;
+            if (--LightsCounter_ == 0 && State_.mode() == Mode::NightLight) {
+                // if the special effect is done, go back to night light mode, if selected
+                EffectColor_ = State_.nightLightColor().withBrightness(MaxBrightness_);
+            }
         } else if (State_.mode() == Mode::NightLight) {
+            switch (State_.nightLightEffect()) {
+                case NightLightEffect::Color:
+                    Neopixels_.setAll(EffectColor_);
+                    break;
+                case NightLightEffect::Breathe:
+                    Neopixels_.setAll(EffectColor_.withBrightness(EffectCounter_ >> 8));
+                    break;
+                case NightLightEffect::BreatheBar:
+                    Neopixels_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
+                    break;
+                case NightLightEffect::KnightRider:
+                    Neopixels_.showPoint(EffectCounter_, 0xffff, EffectColor_);
+                case NightLightEffect::Running:
+                    break;
+            }
+            uint16_t speed = State_.nightLightSpeed() * 32;
+            if (EffectHelper_ & 1) {
+                EffectCounter_ += speed;
+                if (EffectCounter_ < speed) {
+                    EffectCounter_ = 0xffff;
+                    EffectHelper_ &= ~1;
+                }
+            } else {
+                EffectCounter_ -= speed;
+                if (EffectCounter_ > 0xffff - speed) {
+                    EffectCounter_ = 0;
+                    EffectHelper_ |= 1;
+                }
+            }
+            // if we are in rainbow mode, update the effect color hue
+            if (State_.nightLightRainbow()) {
+
+            }
+
+            /*
             // 4096 2048 1024 512 256 128 64 32
             uint16_t speed = 64;
             if ((EffectHelper_ & 1) == 0) {
@@ -495,6 +533,7 @@ private:
                 }
             }
             Neopixels_.showPoint(EffectCounter_, 0xffff, Color::Green().withBrightness(MaxBrightness_));
+            */
         // if the wifi is currently connecting, show the connection increase
         } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
             EffectCounter_ = (EffectCounter_ + 1) % 64;
@@ -514,7 +553,7 @@ private:
                 Neopixels_.addColor(0, Color::Red().withBrightness(NOTIFICATION_BRIGHTNESS));
         }
         //    Neopixels_.
-        Neopixels_.reversedTick(max(MaxBrightness_ / 16, 1));
+        Neopixels_.reversedTick(max(MaxBrightness_ / 32, 1));
         Neopixels_.update();
     }
 
