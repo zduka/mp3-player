@@ -62,25 +62,19 @@ namespace msg {
             Message{Id},
             mode_{from.mode()}, 
             controlValues_{from.controlValues_},
-            controlMaximums_{from.controlMaximums_},
-            controlColor_{from.controlColor_},
-            volumeColor_{from.volumeColor_} {
+            controlMaximums_{from.controlMaximums_} {
         }
 
         void applyTo(State & state) {
             state.setMode(mode_);
             state.controlValues_ = controlValues_;
             state.controlMaximums_ = controlMaximums_;
-            state.controlColor_ = controlColor_;
-            state.volumeColor_ = volumeColor_;
         }
 
     private:
         Mode mode_;
         uint16_t controlValues_;
         uint16_t controlMaximums_;
-        Color controlColor_;
-        Color volumeColor_;
 
     } __attribute__((packed)); // msg::SetMode
 
@@ -180,14 +174,12 @@ namespace msg {
     public:
         static constexpr uint8_t Id = 7;
 
-        SetAccentColor(State const & from):
+        SetAccentColor(Color const & color):
             Message{Id},
-            color_{from.accentColor()} {
+            color{color} {
         }
 
-        void applyTo(State & state) const {
-            state.setAccentColor(color_);
-        }
+        Color color;
 
     private:
         Color color_;
@@ -200,7 +192,46 @@ namespace msg {
     public:
         static constexpr uint8_t Id = 8;
 
-        LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 32):
+        LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 64):
+            Message{Id},
+            value{value},
+            max{max},
+            color{color},
+            timeout{timeout} {
+        }
+
+        uint16_t value;
+        uint16_t max;
+        Color color;
+        uint8_t timeout;
+    } __attribute__((packed));
+
+    /** Instructs the ATTiny to display a centered bar of given parameters in the LED strip. 
+     */
+    class LightsCenteredBar : public Message {
+    public:
+        static constexpr uint8_t Id = 9;
+
+        LightsCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 64):
+            Message{Id},
+            value{value},
+            max{max},
+            color{color},
+            timeout{timeout} {
+        }
+        uint16_t value;
+        uint16_t max;
+        Color color;
+        uint8_t timeout;
+    } __attribute__((packed));
+
+    /** Instructs the ATTiny to display a point of given parameters in the LED strip. 
+     */
+    class LightsPoint : public Message {
+    public:
+        static constexpr uint8_t Id = 10;
+
+        LightsPoint(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 64):
             Message{Id},
             value{value},
             max{max},

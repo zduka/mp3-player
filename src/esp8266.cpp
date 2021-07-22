@@ -83,20 +83,20 @@ public:
         InitializeLittleFS();
         // tell AVR that we are awake by requesting initial state
         UpdateState();
-        msg::Send(msg::LightsBar{2, 5, State_.accentColor()});
+        msg::Send(msg::LightsBar{2, 5, Color::White()});
 
 
 
         // initialize the SD card
         InitializeSDCard();
-        msg::Send(msg::LightsBar{3, 5, State_.accentColor()});
+        msg::Send(msg::LightsBar{3, 5, Color::White()});
 
         InitializeSettings();
         InitializeRadioStations();
         InitializeMP3Playlists();
-        msg::Send(msg::SetAccentColor{State_});
+        msg::Send(msg::SetAccentColor{Settings_.accentColor});
         msg::Send(msg::SetMode(State_));
-        msg::Send(msg::LightsBar{4, 5, State_.accentColor()});
+        msg::Send(msg::LightsBar{4, 5, Settings_.accentColor});
 
 
         //SetMode(Mode::Radio);
@@ -109,7 +109,7 @@ public:
         InitializeWiFi();
         InitializeServer();
         PreviousSecondMillis_ = millis();
-        msg::Send(msg::LightsBar{5, 5, State_.accentColor()});
+        msg::Send(msg::LightsBar{5, 5, Settings_.accentColor});
         LOG("Initialization done.");
 
         //WiFiConnect();
@@ -220,7 +220,7 @@ private:
         Settings_.allowRadioManualTuning = DEFAULT_ALLOW_RADIO_MANUAL_TUNING;
         Settings_.maxSpeakerVolume = DEFAULT_MAX_SPEAKER_VOLUME;
         Settings_.maxHeadphonesVolume = DEFAULT_MAX_HEADPHONES_VOLUME;
-        State_.setAccentColor(DEFAULT_ACCENT_COLOR);
+        Settings_.accentColor = DEFAULT_ACCENT_COLOR;
         State_.resetVolume(DEFAULT_VOLUME, 16); // volume is from 0 to 15 by HW requirements 
         // TODO actually read this from the SD card & stuff, only upon first round
 
@@ -303,6 +303,7 @@ private:
     } Status_;
 
     static inline struct {
+        Color accentColor;
         unsigned powerOffTimeout : 12;
         unsigned wifiTimeout : 12;
         unsigned nightLightsTimeout : 12;
@@ -468,10 +469,8 @@ private:
                 LOG("Mode: MP3");
                 if (State_.mp3PlaylistSelection()) {
                     State_.resetControl(State_.mp3PlaylistId(), NumPlaylists());
-                    State_.setControlColor(MP3_PLAYLIST_COLOR);
                 } else {
                     State_.resetControl(State_.mp3TrackId(), NumTracks(State_.mp3PlaylistId()));
-                    State_.setControlColor(MP3_TRACK_COLOR);
                 }
                 Play();
                 break;
@@ -480,22 +479,20 @@ private:
                 LOG("Mode: radio");
                 if (State_.radioManualTuning()) {
                     State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
-                    State_.setControlColor(RADIO_FREQUENCY_COLOR);
                 } else {
                     State_.resetControl(State_.radioStation(), NumRadioStations());
-                    State_.setControlColor(RADIO_STATION_COLOR);
                 }
                 Play();
                 break;
             }
             case Mode::WalkieTalkie: {
-                LOG("Mode: NightLight");
-                Status_.powerOffCountdown = Settings_.nightLightsTimeout;
-
                 break;
 
             }
             case Mode::NightLight: {
+                LOG("Mode: NightLight");
+                Status_.powerOffCountdown = Settings_.nightLightsTimeout;
+
 
             }
         }

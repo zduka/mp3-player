@@ -21,12 +21,12 @@ public:
         for (uint8_t i = 0; i < SIZE; ++i) {
             target_[i] = color;
         }
-        updated_ = true;
+        sync_ = true;
     }
 
     void addColor(uint8_t index, Color const & color) {
         target_[index].add(color);
-        updated_ = true;
+        sync_ = true;
     }
 
     /** Shows point at given offset. 
@@ -51,7 +51,7 @@ public:
             }
             target_[i] = color.withBrightness(b);
         }
-        updated_ = true;
+        sync_ = true;
     }
 
     /** Shows bar from the beginning to the given value. 
@@ -63,7 +63,7 @@ public:
             v -= b;
             target_[i] = color.withBrightness(b);
         }
-        updated_ = true;
+        sync_ = true;
     }
 
     /** Shows a bar at given value that grows symmetrically from the center. 
@@ -79,53 +79,66 @@ public:
             v -= b;
             target_[i] = color.withBrightness(b);
         }
-        updated_ = true;
+        sync_ = true;
     }
 
     void tick(uint8_t step = 16) {
-        if (! updated_)
+        if (! sync_)
             return;
-        updated_ = false;
+        sync_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
-            updated_ = current_[i].moveTowards(target_[i], step) || updated_;
+            update_ = current_[i].moveTowards(target_[i], step) || update_;
     }
 
     /** Identical to tick, but reverses the order of the visible pixels. 
      */
     void reversedTick(uint8_t step = 16) {
-        if (! updated_)
+        if (! sync_)
             return;
-        updated_ = false;
+        sync_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
-            updated_ = current_[i].moveTowards(target_[SIZE - 1 - i], step) || updated_;
+            update_ = current_[i].moveTowards(target_[SIZE - 1 - i], step) || update_;
     }
 
     void update(bool force = false) {
-        if (updated_ || force) {
-            updated_ = false;
+        if (update_ || force) {
+            update_ = false;
             leds_.show();
         }
     }
 
     void sync() {
+        if (!sync_)
+            return
+        sync_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
-            current_[i] = target_[i];
+            if (current_[i] != target_[i]) {
+                current_[i] = target_[i];
+                update_ = true;
+            }
     }
 
     void reversedSync() {
+        if (!sync_)
+            return;
+        sync_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
-            current_[i] = target_[SIZE - 1 - i];
+            if (current_[i] != target_[SIZE -1 -i]) {
+                current_[i] = target_[SIZE - 1 - i];
+                update_ = true;
+            }
     }
     
     Color & operator[](unsigned index) {
         return target_[index];
-        updated_ = true;
+        sync_ = true;
     }
 
 private:
 
     Color current_[SIZE];
     Color target_[SIZE];
-    volatile bool updated_ = false;
+    volatile bool update_ = false;
+    volatile bool sync_ = false;
     tinyNeoPixel leds_;
 }; 

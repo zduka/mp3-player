@@ -16,13 +16,14 @@
 # ATTiny
 
 - not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
-
+- start poweron bar with white, ESP turns to accent color
 - make speed & night lights mode part of state
 - how to make color & speed selectable for night mode? 
 - make sure that ADC is disconnected while sleeping
 
 # ESP
 
+- send lights commands when control or volume knob turns
 - mode switch to NightLight & controls
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR

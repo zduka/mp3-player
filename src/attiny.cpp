@@ -177,7 +177,7 @@ private:
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         delay(50);
-        LightsBar(1,5,State_.accentColor(), 32);
+        LightsBar(1,5,AccentColor_, 64);
     }
 
     static void Sleep() {
@@ -323,14 +323,29 @@ private:
                 msg.applyTo(State_);
                 break;
             }
+            case msg::SetNightLightSettings::Id: {
+                auto msg = msg::At<msg::SetNightLightSettings>(Buffer_);
+                msg.applyTo(State_);
+                break;
+            }
             case msg::SetAccentColor::Id: {
                 auto msg = msg::At<msg::SetAccentColor>(Buffer_);
-                msg.applyTo(State_);
+                AccentColor_ = msg.color;
                 break;
             }
             case msg::LightsBar::Id: {
                 auto msg = msg::At<msg::LightsBar>(Buffer_);
-                LightsBar(msg.value, msg.max, msg.color.withBrightness(MaxBrightness_), msg.timeout);
+                LightsBar(msg.value, msg.max, msg.color, msg.timeout);
+                break;
+            }
+            case msg::LightsCenteredBar::Id: {
+                auto msg = msg::At<msg::LightsCenteredBar>(Buffer_);
+                LightsCenteredBar(msg.value, msg.max, msg.color, msg.timeout);
+                break;
+            }
+            case msg::LightsPoint::Id: {
+                auto msg = msg::At<msg::LightsPoint>(Buffer_);
+                LightsPoint(msg.value, msg.max, msg.color, msg.timeout);
                 break;
             }
         }
@@ -371,16 +386,12 @@ private:
         Control_.poll();
         State_.setControl(Control_.value());
         SetIrq();
-        LightsMode_ = LightsMode::ControlValue;
-        LightsCounter_ = SPECIAL_LIGHTS_TIMEOUT;
     }   
 
     static void VolumeValueChanged() {
         Volume_.poll(); 
         State_.setVolume(Volume_.value());
         SetIrq();
-        LightsMode_ = LightsMode::VolumeValue;
-        LightsCounter_ = SPECIAL_LIGHTS_TIMEOUT;
     } 
 
     static void ControlButtonChanged() {
@@ -466,14 +477,6 @@ private:
                     Neopixels_.showPoint(EffectCounter_, EffectHelper_, EffectColor_);
                     --LightsCounter_;
                     break;
-                case LightsMode::ControlValue:
-                    Neopixels_.showPoint(State_.control(), State_.maxControl() - 1, State_.controlColor());
-                    --LightsCounter_;
-                    break;
-                case LightsMode::VolumeValue:
-                    Neopixels_.showBar(State_.volume(), State_.maxVolume() - 1, State_.volumeColor());
-                    --LightsCounter_;
-                    break;
             }
             if (--LightsCounter_ == 0 && State_.mode() == Mode::NightLight) {
                 // if the special effect is done, go back to night light mode, if selected
@@ -492,48 +495,34 @@ private:
                     break;
                 case NightLightEffect::KnightRider:
                     Neopixels_.showPoint(EffectCounter_, 0xffff, EffectColor_);
+                    break;
                 case NightLightEffect::Running:
                     break;
             }
             uint16_t speed = State_.nightLightSpeed() * 32;
-            if (EffectHelper_ & 1) {
+            if (EffectHelper_ & 0x8000) {
                 EffectCounter_ += speed;
                 if (EffectCounter_ < speed) {
                     EffectCounter_ = 0xffff;
-                    EffectHelper_ &= ~1;
+                    EffectHelper_ &= ~0x8000;
                 }
             } else {
                 EffectCounter_ -= speed;
                 if (EffectCounter_ > 0xffff - speed) {
                     EffectCounter_ = 0;
-                    EffectHelper_ |= 1;
+                    EffectHelper_ |= 0x8000;
                 }
             }
             // if we are in rainbow mode, update the effect color hue
             if (State_.nightLightRainbow()) {
-
+                uint16_t hue = EffectHelper_ & 0xfff;
+                hue += State_.nightLightSpeed();
+                if (hue > 0xfff)
+                    hue = 0;
+                EffectHelper_ = (EffectHelper_ & 0xf000) | hue;
+                EffectColor_ = Color::HSV(hue << 4, 255, MaxBrightness_);
             }
-
-            /*
-            // 4096 2048 1024 512 256 128 64 32
-            uint16_t speed = 64;
-            if ((EffectHelper_ & 1) == 0) {
-                if (0xffff - speed < EffectCounter_) {
-                    EffectCounter_ = 0xffff;
-                    EffectHelper_ = 1;
-                } else {
-                    EffectCounter_ += speed;
-                }
-            } else {
-                if (EffectCounter_ < speed) {
-                    EffectCounter_ = 0;
-                    EffectHelper_ = 0; // &= ~1;
-                } else {
-                    EffectCounter_ -= speed;
-                }
-            }
-            Neopixels_.showPoint(EffectCounter_, 0xffff, Color::Green().withBrightness(MaxBrightness_));
-            */
+            Neopixels_.reversedSync();
         // if the wifi is currently connecting, show the connection increase
         } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
             EffectCounter_ = (EffectCounter_ + 1) % 64;
@@ -585,14 +574,13 @@ private:
         Bar,
         CenteredBar,
         Point,
-        ControlValue,
-        VolumeValue,
     }; // SpecialLightsMode
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static uint8_t MaxBrightness_ = 32;
     inline static uint16_t EffectCounter_ = 0;
     inline static uint16_t EffectHelper_ = 0;
+    inline static Color AccentColor_ = DEFAULT_ACCENT_COLOR;
     inline static Color EffectColor_;
     inline static uint8_t LightsCounter_ = 0;
     /** Lights mode, which determines the meaning for the EffectCounter and EffectHelper. 
@@ -639,7 +627,7 @@ private:
     static void UpdateAudioLights() {
         uint8_t v = AudioMax_ - AudioMin_;
         v = v < 32 ? 0 : v - 32;
-        Neopixels_.showCenteredBar(v, 128, State_.accentColor());
+        Neopixels_.showCenteredBar(v, 128, AccentColor_);
         AudioMin_ = 255;
         AudioMax_ = 0;
     }

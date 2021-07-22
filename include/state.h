@@ -577,8 +577,8 @@ private:
 public:
 
     NightLightEffect nightLightEffect() const {
+        return NightLightEffect::Color;
         return static_cast<NightLightEffect>(nightLight_ & NIGHT_LIGHT_EFFECT_MASK);
-        return NightLightEffect::Breathe;
     }
 
     void setNightLightEffect(NightLightEffect effect) {
@@ -587,6 +587,7 @@ public:
     }
 
     uint16_t nightLightSpeed() const {
+        return 1;
         return (nightLight_ & NIGHT_LIGHT_SPEED_MASK) >> 3;
     }
 
@@ -596,6 +597,7 @@ public:
     }
 
     bool nightLightRainbow() const {
+        return true;
         return nightLight_ & NIGHT_LIGHT_RAINBOW_MASK;
     }
 
@@ -639,40 +641,5 @@ private:
     volatile uint16_t nightLight_ = 0;
 
 //@}
-
-// colors
-
-public:
-
-    Color accentColor() const {
-        return accentColor_;
-    }
-
-    void setAccentColor(Color const & value) {
-        accentColor_ = value;
-    }
-
-    Color controlColor() const {
-        return controlColor_;
-    }
-
-    void setControlColor(Color const & value) {
-        controlColor_ = value;
-    }
-
-    Color volumeColor() const {
-        return volumeColor_;
-    }
-
-    void setVolumeColor(Color const & value) {
-        volumeColor_ = value;
-    }
-
-private:
-    volatile Color accentColor_ = DEFAULT_ACCENT_COLOR;
-    volatile Color controlColor_ = MP3_TRACK_COLOR;
-    volatile Color volumeColor_ = DEFAULT_VOLUME_COLOR;
-
-// mode backups
 
 } __attribute__((packed)); // State 
