@@ -244,6 +244,22 @@ namespace msg {
         uint8_t timeout;
     } __attribute__((packed));
 
+    /** Sets the colors of the leds explicitly
+     */
+    class LightsColors : public Message {
+    public:
+        static constexpr uint8_t Id = 11;
+
+        LightsColors(Color l0, Color l1, Color l2, Color l3, Color l4, Color l5, Color l6, Color l7, uint8_t timeout = 64):
+            Message{Id},
+            colors{l0, l1, l2, l3, l4, l5, l6, l7},
+            timeout{timeout} { 
+        }
+
+        Color colors[8];
+        uint8_t timeout;
+    } __attribute__((packed));
+
 
 
 } // namespace msg

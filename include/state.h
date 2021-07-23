@@ -6,7 +6,8 @@
 
 /** Brightness for notifications such as wifi connection, or low battery.
  */
-#define NOTIFICATION_BRIGHTNESS 16
+#define DEFAULT_NOTIFICATION_BRIGHTNESS 16
+#define DEFAULT_BRIGHTNESS 32
 
 
 #define DEFAULT_POWEROFF_TIMEOUT 60
@@ -28,11 +29,12 @@
 #define DEFAULT_ACCENT_COLOR Color::White()
 #define BUTTONS_COLOR Color::DarkRed()
 #define BUTTONS_LONG_PRESS_COLOR Color::Red()
-#define DEFAULT_VOLUME_COLOR Color::Yellow()
+#define VOLUME_COLOR Color::Yellow()
 #define RADIO_STATION_COLOR Color::Green()
 #define RADIO_FREQUENCY_COLOR Color::Cyan()
 #define MP3_TRACK_COLOR Color::Blue()
 #define MP3_PLAYLIST_COLOR Color::Purple()
+#define NIGHTLIGHT_EFFECT_COLOR Color::White()
 
 #define DEFAULT_AP_SSID "mp3-player"
 #define DEFAULT_AP_PASSWORD "mp3-player"
@@ -90,12 +92,6 @@ enum class NightLightEffect : uint8_t {
     KnightRider, // larson scanner, single color
     Running, // running lights, single color
 }; // NightLightEffect
-
-enum class NightLightControlMode : uint8_t {
-    Effect,
-    Speed,
-    Color
-}; // NightLightControlMode
 
 /** The player state. 
  
@@ -576,8 +572,11 @@ private:
 
 public:
 
+    static constexpr uint8_t NIGHTLIGHT_WHITE_HUE = 0;
+    static constexpr uint8_t NIGHTLIGHT_ACCENT_COLOR_HUE = 1; 
+    static constexpr uint8_t NIGHTLIGHT_RAINBOW_HUE = 31;
+
     NightLightEffect nightLightEffect() const {
-        return NightLightEffect::Color;
         return static_cast<NightLightEffect>(nightLight_ & NIGHT_LIGHT_EFFECT_MASK);
     }
 
@@ -586,57 +585,46 @@ public:
         nightLight_ |= static_cast<uint16_t>(effect) & NIGHT_LIGHT_EFFECT_MASK;
     }
 
-    uint16_t nightLightSpeed() const {
-        return 1;
-        return (nightLight_ & NIGHT_LIGHT_SPEED_MASK) >> 3;
-    }
-
-    void setNightLightSpeed(uint16_t value) {
-        nightLight_ &= ~NIGHT_LIGHT_SPEED_MASK;
-        nightLight_ |= (value << 3) & NIGHT_LIGHT_SPEED_MASK;
-    }
-
-    bool nightLightRainbow() const {
-        return true;
-        return nightLight_ & NIGHT_LIGHT_RAINBOW_MASK;
-    }
-
-    void nightLightSetRainbow(bool value) {
-        if (value)
-            nightLight_ |= NIGHT_LIGHT_RAINBOW_MASK;
-        else
-            nightLight_ &= ~NIGHT_LIGHT_RAINBOW_MASK;
-    }
-
-    NightLightControlMode nightLightControlMode() const {
-        return static_cast<NightLightControlMode>((nightLight_ & NIGHT_LIGHT_CONTROL_MODE_MASK) >> 9);
-    }
-
-    void setNightLightControlMode(NightLightControlMode value) {
-        nightLight_ &= ~NIGHT_LIGHT_CONTROL_MODE_MASK;
-        nightLight_ |= (static_cast<uint16_t>(value) << 9) && NIGHT_LIGHT_CONTROL_MODE_MASK;
-    }
-
     uint8_t nightLightHue() const {
-        return nightLight_ >> 11;
+        return (nightLight_ & NIGHT_LIGHT_HUE_MASK) >> 4;
     }
 
     void setNightLightHue(uint8_t value) {
         nightLight_ &= ~NIGHT_LIGHT_HUE_MASK;
-        nightLight_ |= (value << 11) & NIGHT_LIGHT_HUE_MASK;
+        nightLight_ |= (value << 4) & NIGHT_LIGHT_HUE_MASK;
     }
 
-    Color nightLightColor() const {
-        return Color::White();
+    Color nightLightColor(Color const & accentColor, uint8_t brightness) const {
+        uint8_t hue = nightLightHue();
+        switch (hue) {
+            case NIGHTLIGHT_WHITE_HUE:
+            case NIGHTLIGHT_RAINBOW_HUE:
+                return Color::White().withBrightness(brightness);
+            case NIGHTLIGHT_ACCENT_COLOR_HUE:
+                return accentColor.withBrightness(brightness);
+            // actual hue angle from 0 to 28
+            default:
+                hue -= 2;
+                return Color::HSV(hue * 2340, 255, brightness);
+        }
+    }
+
+    bool nightLightHueSelection() const {
+        return nightLight_ & NIGHT_LIGHT_HUE_SELECTION_MASK;
+    }
+
+    void setNightLightHueSelection(bool value) {
+        if (value)
+            nightLight_ |= NIGHT_LIGHT_HUE_SELECTION_MASK;
+        else
+            nightLight_ &= ~NIGHT_LIGHT_HUE_SELECTION_MASK;
     }
 
 private:
 
-    static constexpr uint16_t NIGHT_LIGHT_EFFECT_MASK = 7;
-    static constexpr uint16_t NIGHT_LIGHT_SPEED_MASK = 31 << 3;
-    static constexpr uint16_t NIGHT_LIGHT_RAINBOW_MASK = 1 << 8;
-    static constexpr uint16_t NIGHT_LIGHT_CONTROL_MODE_MASK = 3 << 9;
-    static constexpr uint16_t NIGHT_LIGHT_HUE_MASK = 31 << 11;
+    static constexpr uint16_t NIGHT_LIGHT_EFFECT_MASK = 15;
+    static constexpr uint16_t NIGHT_LIGHT_HUE_MASK = 31 << 4;
+    static constexpr uint16_t NIGHT_LIGHT_HUE_SELECTION_MASK = 1 << 9;
 
     volatile uint16_t nightLight_ = 0;
 

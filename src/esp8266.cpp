@@ -215,12 +215,13 @@ private:
      */
     static void InitializeSettings() {
         // actually set the settings to their defaults first in case of corrupted settings file
+        Settings_.accentColor = DEFAULT_ACCENT_COLOR;
+        Settings_.maxBrightness = DEFAULT_BRIGHTNESS;
         Settings_.powerOffTimeout = DEFAULT_POWEROFF_TIMEOUT;
         Settings_.wifiTimeout = DEFAULT_WIFI_TIMEOUT;
         Settings_.allowRadioManualTuning = DEFAULT_ALLOW_RADIO_MANUAL_TUNING;
         Settings_.maxSpeakerVolume = DEFAULT_MAX_SPEAKER_VOLUME;
         Settings_.maxHeadphonesVolume = DEFAULT_MAX_HEADPHONES_VOLUME;
-        Settings_.accentColor = DEFAULT_ACCENT_COLOR;
         State_.resetVolume(DEFAULT_VOLUME, 16); // volume is from 0 to 15 by HW requirements 
         // TODO actually read this from the SD card & stuff, only upon first round
 
@@ -304,6 +305,7 @@ private:
 
     static inline struct {
         Color accentColor;
+        uint8_t maxBrightness : 8;
         unsigned powerOffTimeout : 12;
         unsigned wifiTimeout : 12;
         unsigned nightLightsTimeout : 12;
@@ -346,17 +348,44 @@ private:
         LOG("Control: " + State_.control());
         switch (State_.mode()) {
             case Mode::MP3: {
-                if (State_.mp3PlaylistSelection())
+                if (State_.mp3PlaylistSelection()) {
                     SetPlaylist(State_.control());
-                else
+                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, MP3_PLAYLIST_COLOR.withBrightness(Settings_.maxBrightness)));
+                } else {
                     SetTrack(State_.control());
+                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, MP3_TRACK_COLOR.withBrightness(Settings_.maxBrightness)));
+                }
                 break;
             }
             case Mode::Radio: {
-                if (State_.radioManualTuning()) 
+                if (State_.radioManualTuning()) {
                     SetRadioFrequency(State_.control() + RADIO_FREQUENCY_OFFSET);
-                else 
+                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, RADIO_FREQUENCY_COLOR.withBrightness(Settings_.maxBrightness)));
+                } else {
                     SetRadioStation(State_.control());
+                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness)));
+                }
+            }
+            case Mode::NightLight: {
+                if (State_.nightLightHueSelection()) {
+                    SetNightLightHue(State_.control());
+                    if (State_.control() == State::NIGHTLIGHT_RAINBOW_HUE) 
+                        msg::Send(msg::LightsColors(
+                            Color::HSV(0 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(1 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(2 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(3 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(4 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(5 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(6 << 13, 255, Settings_.maxBrightness),
+                            Color::HSV(7 << 13, 255, Settings_.maxBrightness)
+                        ));
+                    else 
+                        msg::Send(msg::LightsBar(8, 8, State_.nightLightColor(Settings_.accentColor, Settings_.maxBrightness)));
+                } else {
+                    SetNightLightEffect(static_cast<NightLightEffect>(State_.control()));
+                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness)));
+                }
             }
         }
     }
@@ -385,6 +414,12 @@ private:
                 SetMode(State_.mode());
                 msg::Send(msg::SetMode{State_});
                 msg::Send(msg::SetRadioSettings{State_});
+                break;
+            case Mode::NightLight:
+                State_.setNightLightHueSelection(!State_.nightLightHueSelection());
+                SetMode(State_.mode());
+                msg::Send(msg::SetMode{State_});
+                msg::Send(msg::SetNightLightSettings{State_});
                 break;
         }
     }
@@ -415,6 +450,7 @@ private:
                 Radio_.setVolume(State_.volume());
                 break;
         }
+        msg::Send(msg::LightsBar(State_.volume(), State_.maxVolume() - 1, VOLUME_COLOR.withBrightness(Settings_.maxBrightness)));
     }
 
     static void VolumeDown() {
@@ -492,8 +528,12 @@ private:
             case Mode::NightLight: {
                 LOG("Mode: NightLight");
                 Status_.powerOffCountdown = Settings_.nightLightsTimeout;
-
-
+                if (State_.nightLightHueSelection()) 
+                    State_.resetControl(0, 32);
+                else
+                    State_.resetControl(0, 5);
+                // TODO play a lullaby
+                break;
             }
         }
 
@@ -736,8 +776,8 @@ private:
         if (State_.mode() == Mode::Radio) {
             Radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
             State_.setRadioFrequency(mhzx10);
-            msg::Send(msg::SetRadioSettings{State_});
         }
+        msg::Send(msg::SetRadioSettings{State_});
     }
 
     static void SetRadioStation(uint8_t index) {
@@ -746,8 +786,8 @@ private:
             Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
             State_.setRadioFrequency(RadioStations_[index]);
             State_.setRadioStation(index);            
-            msg::Send(msg::SetRadioSettings{State_});
         }
+        msg::Send(msg::SetRadioSettings{State_});
     }
 
     /** Returns the number of valid stations. 
@@ -764,6 +804,20 @@ private:
     static constexpr uint16_t RADIO_STATION_NONE = 0xffff;
     static inline uint16_t RadioStations_[8];
 
+/** \name Night Lights
+ */
+
+    static void SetNightLightEffect(NightLightEffect effect) {
+        LOG("Night light effect: " + static_cast<int>(effect));
+        State_.setNightLightEffect(effect);
+        msg::Send(msg::SetNightLightSettings{State_});
+    }
+
+    static void SetNightLightHue(uint8_t hue) {
+        LOG("Night light hue: " + hue);
+        State_.setNightLightHue(hue);
+        msg::Send(msg::SetNightLightSettings{State_});
+    }
 
 /** \name Webserver
  */

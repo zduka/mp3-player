@@ -15,16 +15,14 @@
 
 # ATTiny
 
+- Raw lights mode does not always work, neopixel values can be overriden and then the rainbow is lost in night mode
+- seems the RTC is less than 1 sec now
+- determine decent speed settings for the night light effects
 - not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
-- start poweron bar with white, ESP turns to accent color
-- make speed & night lights mode part of state
-- how to make color & speed selectable for night mode? 
 - make sure that ADC is disconnected while sleeping
 
 # ESP
 
-- send lights commands when control or volume knob turns
-- mode switch to NightLight & controls
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR
 - wifi_off does not inform about success

@@ -87,7 +87,10 @@ public:
             return;
         sync_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
-            update_ = current_[i].moveTowards(target_[i], step) || update_;
+            if (current_[i].moveTowards(target_[i], step)) {
+                sync_ = true;
+                update_ = true;
+            }
     }
 
     /** Identical to tick, but reverses the order of the visible pixels. 
@@ -97,11 +100,18 @@ public:
             return;
         sync_ = false;
         for (uint8_t i = 0; i < SIZE; ++i)
-            update_ = current_[i].moveTowards(target_[SIZE - 1 - i], step) || update_;
+            if (current_[i].moveTowards(target_[SIZE - 1 - i], step)) {
+                sync_ = true;
+                update_ = true;
+            }
     }
 
-    void update(bool force = false) {
-        if (update_ || force) {
+    void forceUpdate() {
+        update_ = true;
+    }
+
+    void update() {
+        if (update_) {
             update_ = false;
             leds_.show();
         }
