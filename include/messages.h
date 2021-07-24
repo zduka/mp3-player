@@ -192,7 +192,7 @@ namespace msg {
     public:
         static constexpr uint8_t Id = 8;
 
-        LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 64):
+        LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout):
             Message{Id},
             value{value},
             max{max},
@@ -212,7 +212,7 @@ namespace msg {
     public:
         static constexpr uint8_t Id = 9;
 
-        LightsCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 64):
+        LightsCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout):
             Message{Id},
             value{value},
             max{max},
@@ -231,7 +231,7 @@ namespace msg {
     public:
         static constexpr uint8_t Id = 10;
 
-        LightsPoint(uint16_t value, uint16_t max, Color const & color, uint8_t timeout = 64):
+        LightsPoint(uint16_t value, uint16_t max, Color const & color, uint8_t timeout):
             Message{Id},
             value{value},
             max{max},
@@ -250,7 +250,7 @@ namespace msg {
     public:
         static constexpr uint8_t Id = 11;
 
-        LightsColors(Color l0, Color l1, Color l2, Color l3, Color l4, Color l5, Color l6, Color l7, uint8_t timeout = 64):
+        LightsColors(Color l0, Color l1, Color l2, Color l3, Color l4, Color l5, Color l6, Color l7, uint8_t timeout):
             Message{Id},
             colors{l0, l1, l2, l3, l4, l5, l6, l7},
             timeout{timeout} { 

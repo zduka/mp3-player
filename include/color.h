@@ -180,3 +180,90 @@ private:
     }
     
 } __attribute__((packed));
+
+/** Array of N pixels that supports basic drawing and effects. 
+ */
+template<uint16_t SIZE>
+class ColorStrip {
+public:
+    Color & operator[](unsigned index) {
+        changed_ = true;
+        return colors_[index];
+    }
+
+    void fill(Color const & color, uint8_t step = 255) {
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            changed_ = colors_[i].moveTowards(color, step) | changed_;
+        }
+    }
+
+    void moveTowards(ColorStrip<SIZE> const & other, uint8_t step) {
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            changed_ = colors_[i].moveTowards(other.colors_[i], step) | changed_;
+        }
+    }
+
+    void moveTowardsReversed(ColorStrip<SIZE> const & other, uint8_t step) {
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            changed_ = colors_[i].moveTowards(other.colors_[SIZE - 1 - i], step) | changed_;
+        }
+    }
+
+    /** Shows point at given offset. 
+     */
+    void showPoint(uint16_t value, uint16_t max, Color const & color, uint8_t step = 255) {
+        uint8_t v = 255;
+        uint32_t offset = static_cast<uint32_t>(value) * (SIZE - 1) * 255 / max;
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            uint8_t b = 0;
+            // if offset is larger than pixel, stay black and remove from offset
+            if (offset >= 255) {
+                offset -= 255;
+            // otherwise if offset is 0, just use value    
+            } else if (offset == 0) {
+                b = v;
+                v = 0;
+                // otherwise we have some offset and some value, and the value has to be split
+            } else {
+                b = 255 - (offset & 0xff);
+                v -= b; // we know it
+                offset = 0;
+            }
+            changed_ = colors_[i].moveTowards(color.withBrightness(b), step) | changed_;
+        }
+    }
+
+    /** Shows bar from the beginning to the given value. 
+     */
+    void showBar(uint16_t value, uint16_t max, Color const & color, uint8_t step = 255) {
+        uint32_t v = static_cast<uint32_t>(value) * (SIZE * 255) / max;
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            uint8_t b = v > 255 ? 255 : (v & 0xff);
+            v -= b;
+            changed_ = colors_[i].moveTowards(color.withBrightness(b), step) | changed_;
+        }
+    }
+
+    /** Shows a bar at given value that grows symmetrically from the center. 
+     */
+    void showCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t step = 255) {
+        uint32_t v = static_cast<uint32_t>(value) * (SIZE * 255) / max;
+        uint32_t offset = (SIZE * 255 - v) / 2;
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            uint8_t b = (offset > 255) ? 0 : (255 - offset);
+            offset -= (255 - b);
+            if (v < b)
+                b = v;
+            v -= b;
+            changed_ = colors_[i].moveTowards(color.withBrightness(b), step) | changed_;
+        }
+    }
+
+    void markAsChanged() {
+        changed_ = true;
+    }
+
+protected:
+    Color colors_[SIZE];
+    bool changed_ = false;
+}; // ColorStrip

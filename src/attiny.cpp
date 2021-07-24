@@ -177,7 +177,9 @@ private:
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         delay(50);
-        LightsBar(1,5,Color::White().withBrightness(MaxBrightness_), 64);
+        // start the wakeup progress bar
+        SpecialLights_.showBar(1, 5, Color::White().withBrightness(MaxBrightness_));
+        LightsCounter_ = 64;
     }
 
     static void Sleep() {
@@ -205,28 +207,22 @@ private:
         TODO actually put to sleep, maybe put this to lights and then deal with it in a loop in wakeup? 
      */
     static void CriticalBattery() {
-        Neopixels_.setAll(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
-        Neopixels_.sync();
+        Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
         Neopixels_.update();
         delay(50);
-        Neopixels_.setAll(Color::Black());
-        Neopixels_.sync();
+        Neopixels_.fill(Color::Black());
         Neopixels_.update();
         delay(100);
-        Neopixels_.setAll(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
-        Neopixels_.sync();
+        Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
         Neopixels_.update();
         delay(50);
-        Neopixels_.setAll(Color::Black());
-        Neopixels_.sync();
+        Neopixels_.fill(Color::Black());
         Neopixels_.update();
         delay(100);
-        Neopixels_.setAll(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
-        Neopixels_.sync();
+        Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
         Neopixels_.update();
         delay(50);
-        Neopixels_.setAll(Color::Black());
-        Neopixels_.sync();
+        Neopixels_.fill(Color::Black());
         Neopixels_.update();
     }
 
@@ -301,6 +297,8 @@ private:
                 // sync the volume and control states
                 Control_.setValues(State_.control(), State_.maxControl());
                 Volume_.setValues(State_.volume(), State_.maxVolume());
+                // sync the effect color for the night mode
+                EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
                 break;
             }
             case msg::SetWiFiStatus::Id: {
@@ -326,6 +324,7 @@ private:
             case msg::SetNightLightSettings::Id: {
                 auto msg = msg::At<msg::SetNightLightSettings>(Buffer_);
                 msg.applyTo(State_);
+                EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
                 break;
             }
             case msg::SetAccentColor::Id: {
@@ -335,25 +334,27 @@ private:
             }
             case msg::LightsBar::Id: {
                 auto msg = msg::At<msg::LightsBar>(Buffer_);
-                LightsBar(msg.value, msg.max, msg.color, msg.timeout);
+                SpecialLights_.showBar(msg.value, msg.max, msg.color);
+                LightsCounter_ = msg.timeout;
                 break;
             }
             case msg::LightsCenteredBar::Id: {
                 auto msg = msg::At<msg::LightsCenteredBar>(Buffer_);
-                LightsCenteredBar(msg.value, msg.max, msg.color, msg.timeout);
+                SpecialLights_.showCenteredBar(msg.value, msg.max, msg.color);
+                LightsCounter_ = msg.timeout;
                 break;
             }
             case msg::LightsPoint::Id: {
                 auto msg = msg::At<msg::LightsPoint>(Buffer_);
-                LightsPoint(msg.value, msg.max, msg.color, msg.timeout);
+                SpecialLights_.showPoint(msg.value, msg.max, msg.color);
+                LightsCounter_ = msg.timeout;
                 break;
             }
             case msg::LightsColors::Id: {
                 auto msg = msg::At<msg::LightsColors>(Buffer_);
-                LightsCounter_ = msg.timeout;
-                LightsMode_ = LightsMode::Raw;
                 for (int i = 0; i < 8; ++i)
-                    Neopixels_[i] = msg.colors[i];
+                    SpecialLights_[i] = msg.colors[i];
+                LightsCounter_ = msg.timeout;
                 break;
             }
         }
@@ -462,51 +463,41 @@ private:
 
     /** Determines what to show with the lights. 
      
+        The following things are displayed on the strip:
+
      */ 
     static void LightsTick() {
-        // when a button is down, the highest priority is the long press bar
+        // always start fresh
+        uint8_t step = max(MaxBrightness_ / 32, 1);
+        // when a button is down then the strip shows the long press progress first and foremost
         if (State_.volumeDown() || State_.controlDown()) {
             uint8_t v = BUTTON_LONG_PRESS_TICKS - max(VolumeBtnCounter_, ControlBtnCounter_);
             if (v == BUTTON_LONG_PRESS_TICKS)
-                Neopixels_.setAll(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+                Lights_.fill(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
             else
-                Neopixels_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
-        // if special counter is not 0, we are showing the special effect in question
+                Lights_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+        // otherwise, if LightsCounter_ is non-zero, it means that the special lights are to be shown, in which case we simply perform the tick against the special lights buffer instead.   
         } else if (LightsCounter_ > 0) {
-            switch (LightsMode_) {
-                case LightsMode::Raw:
-                    // do nothing, the colors are already in neopixel's target
-                    Neopixels_.forceUpdate();
-                    break;
-                case LightsMode::Bar:
-                    Neopixels_.showBar(EffectCounter_, EffectHelper_, EffectColor_);
-                    break;
-                case LightsMode::CenteredBar:
-                    Neopixels_.showCenteredBar(EffectCounter_, EffectHelper_, EffectColor_);
-                    --LightsCounter_;
-                    break;
-                case LightsMode::Point:
-                    Neopixels_.showPoint(EffectCounter_, EffectHelper_, EffectColor_);
-                    --LightsCounter_;
-                    break;
-            }
-            if (--LightsCounter_ == 0 && State_.mode() == Mode::NightLight) {
-                // if the special effect is done, go back to night light mode, if selected
-                EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
-            }
+            Lights_.moveTowards(SpecialLights_, step);
+            --LightsCounter_ == 0;
+        // otherwise, show network connecting bar, if currently connecting to a network
+        } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
+            Lights_.showCenteredBar(Status_.ticksCounter, 63, Color::Blue().withBrightness(MaxBrightness_));
+        // if in night light mode, show the selected effect
         } else if (State_.mode() == Mode::NightLight) {
+            step = 255; // pixels will be synced, not moved towards
             switch (State_.nightLightEffect()) {
                 case NightLightEffect::Color:
-                    Neopixels_.setAll(EffectColor_);
+                    Lights_.fill(EffectColor_);
                     break;
                 case NightLightEffect::Breathe:
-                    Neopixels_.setAll(EffectColor_.withBrightness(EffectCounter_ >> 8));
+                    Lights_.fill(EffectColor_.withBrightness(EffectCounter_ >> 8));
                     break;
                 case NightLightEffect::BreatheBar:
-                    Neopixels_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
+                    Lights_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
                     break;
                 case NightLightEffect::KnightRider:
-                    Neopixels_.showPoint(EffectCounter_, 0xffff, EffectColor_);
+                    Lights_.showPoint(EffectCounter_, 0xffff, EffectColor_);
                     break;
                 case NightLightEffect::Running:
                     break;
@@ -534,71 +525,41 @@ private:
                 EffectHelper_ = (EffectHelper_ & 0xf000) | hue;
                 EffectColor_ = Color::HSV(hue << 4, 255, MaxBrightness_);
             }
-            Neopixels_.reversedSync();
-        // if the wifi is currently connecting, show the connection increase
-        } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
-            EffectCounter_ = (EffectCounter_ + 1) % 64;
-            Neopixels_.showCenteredBar(EffectCounter_, 64, Color::Blue().withBrightness(MaxBrightness_));
-            Neopixels_.reversedSync();
-        // if there is nothing to show, set all neopixels black
+        // TODO audio lights here
+        // otherwise the lights are off
         } else {
-            Neopixels_.setAll(Color::Black());
+            Lights_.fill(Color::Black());
         }
+        // update the actual neopixels buffer
+        Neopixels_.moveTowardsReversed(Lights_, step);
+        // and finally, draw over the bar notification lights - since we do this every tick, calculate the blinking brightness transition first
+        uint16_t notificationBrightness = DEFAULT_NOTIFICATION_BRIGHTNESS;
+        if (Status_.ticksCounter < 16)
+            notificationBrightness = notificationBrightness * Status_.ticksCounter / 16;
+        else if (Status_.ticksCounter > 48)
+            notificationBrightness = notificationBrightness * (63 - Status_.ticksCounter) / 16;
         // after done, the bar as such, graft on it any notification LEDs with have
         if (Time_.second() % 2) {
             if (State_.wifiStatus() == WiFiStatus::Connected || State_.wifiStatus() == WiFiStatus::SoftAP)
-                Neopixels_.addColor(7, Color::Blue().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
+                Neopixels_[0].add(Color::Blue().withBrightness(notificationBrightness));
         // the low battery warning blinks out of sync with the other notifications
         } else {
             if (State_.voltage() <= 340)
-                Neopixels_.addColor(0, Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
+                Neopixels_[7].add(Color::Red().withBrightness(notificationBrightness));
         }
-        //    Neopixels_.
-        Neopixels_.reversedTick(max(MaxBrightness_ / 32, 1));
+        // and finally, update the neopixels
         Neopixels_.update();
     }
 
-    static void LightsBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout) {
-        LightsMode_ = LightsMode::Bar;
-        EffectCounter_ = value;
-        EffectHelper_ = max;
-        EffectColor_ = color;
-        LightsCounter_ = timeout;
-    }
-
-    static void LightsCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t timeout) {
-        LightsMode_ = LightsMode::CenteredBar;
-        EffectCounter_ = value;
-        EffectHelper_ = max;
-        EffectColor_ = color;
-        LightsCounter_ = timeout;
-    }
-
-    static void LightsPoint(uint16_t value, uint16_t max, Color const & color, uint8_t timeout) {
-        LightsMode_ = LightsMode::Point;
-        EffectCounter_ = value;
-        EffectHelper_ = max;
-        EffectColor_ = color;
-        LightsCounter_ = timeout;
-    }
-
-    enum class LightsMode : uint8_t {
-        Raw,
-        Bar,
-        CenteredBar,
-        Point,
-    }; // SpecialLightsMode
-
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
+    inline static ColorStrip<8> Lights_;
+    inline static ColorStrip<8> SpecialLights_;
     inline static volatile uint8_t MaxBrightness_ = DEFAULT_BRIGHTNESS;
     inline static volatile uint16_t EffectCounter_ = 0;
     inline static volatile uint16_t EffectHelper_ = 0;
     inline static Color AccentColor_ = DEFAULT_ACCENT_COLOR;
     inline static Color EffectColor_;
     inline static volatile uint8_t LightsCounter_ = 0;
-    /** Lights mode, which determines the meaning for the EffectCounter and EffectHelper. 
-     */
-    inline static volatile LightsMode LightsMode_;
 
 //@}
 

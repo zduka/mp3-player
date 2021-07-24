@@ -83,20 +83,20 @@ public:
         InitializeLittleFS();
         // tell AVR that we are awake by requesting initial state
         UpdateState();
-        msg::Send(msg::LightsBar{2, 5, Color::White()});
+        msg::Send(msg::LightsBar{2, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
 
 
         // initialize the SD card
         InitializeSDCard();
-        msg::Send(msg::LightsBar{3, 5, Color::White()});
+        msg::Send(msg::LightsBar{3, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
         InitializeSettings();
         InitializeRadioStations();
         InitializeMP3Playlists();
         msg::Send(msg::SetAccentColor{Settings_.accentColor});
-        msg::Send(msg::SetMode(State_));
-        msg::Send(msg::LightsBar{4, 5, Settings_.accentColor});
+        msg::Send(msg::SetMode{State_});
+        msg::Send(msg::LightsBar{4, 5, Settings_.accentColor, DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
 
         //SetMode(Mode::Radio);
@@ -109,7 +109,7 @@ public:
         InitializeWiFi();
         InitializeServer();
         PreviousSecondMillis_ = millis();
-        msg::Send(msg::LightsBar{5, 5, Settings_.accentColor});
+        msg::Send(msg::LightsBar{5, 5, Settings_.accentColor,DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
         LOG("Initialization done.");
 
         //WiFiConnect();
@@ -350,27 +350,27 @@ private:
             case Mode::MP3: {
                 if (State_.mp3PlaylistSelection()) {
                     SetPlaylist(State_.control());
-                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, MP3_PLAYLIST_COLOR.withBrightness(Settings_.maxBrightness)));
+                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, MP3_PLAYLIST_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 } else {
                     SetTrack(State_.control());
-                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, MP3_TRACK_COLOR.withBrightness(Settings_.maxBrightness)));
+                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, MP3_TRACK_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 }
                 break;
             }
             case Mode::Radio: {
                 if (State_.radioManualTuning()) {
                     SetRadioFrequency(State_.control() + RADIO_FREQUENCY_OFFSET);
-                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, RADIO_FREQUENCY_COLOR.withBrightness(Settings_.maxBrightness)));
+                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_FREQUENCY_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 } else {
                     SetRadioStation(State_.control());
-                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness)));
+                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 }
             }
             case Mode::NightLight: {
                 if (State_.nightLightHueSelection()) {
                     SetNightLightHue(State_.control());
                     if (State_.control() == State::NIGHTLIGHT_RAINBOW_HUE) 
-                        msg::Send(msg::LightsColors(
+                        msg::Send(msg::LightsColors{
                             Color::HSV(0 << 13, 255, Settings_.maxBrightness),
                             Color::HSV(1 << 13, 255, Settings_.maxBrightness),
                             Color::HSV(2 << 13, 255, Settings_.maxBrightness),
@@ -378,13 +378,14 @@ private:
                             Color::HSV(4 << 13, 255, Settings_.maxBrightness),
                             Color::HSV(5 << 13, 255, Settings_.maxBrightness),
                             Color::HSV(6 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(7 << 13, 255, Settings_.maxBrightness)
-                        ));
+                            Color::HSV(7 << 13, 255, Settings_.maxBrightness),
+                            DEFAULT_SPECIAL_LIGHTS_TIMEOUT                            
+                        });
                     else 
-                        msg::Send(msg::LightsBar(8, 8, State_.nightLightColor(Settings_.accentColor, Settings_.maxBrightness)));
+                        msg::Send(msg::LightsBar{8, 8, State_.nightLightColor(Settings_.accentColor, Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 } else {
                     SetNightLightEffect(static_cast<NightLightEffect>(State_.control()));
-                    msg::Send(msg::LightsPoint(State_.control(), State_.maxControl() - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness)));
+                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness), DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 }
             }
         }
@@ -392,12 +393,10 @@ private:
 
     static void ControlDown() {
         LOG("Control down");
-
     }
 
     static void ControlUp() {
         LOG("Control up");
-
     }
 
     static void ControlPress() {
@@ -450,7 +449,7 @@ private:
                 Radio_.setVolume(State_.volume());
                 break;
         }
-        msg::Send(msg::LightsBar(State_.volume(), State_.maxVolume() - 1, VOLUME_COLOR.withBrightness(Settings_.maxBrightness)));
+        msg::Send(msg::LightsBar{State_.volume(), State_.maxVolume() - 1, VOLUME_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
     }
 
     static void VolumeDown() {

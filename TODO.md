@@ -12,11 +12,10 @@
 - no need for charging voltage pin at AVR
 - no need for inductor at neopixels, or needs to have capacitor too
 - when the inductor has capacitor, it *seems* that the antenna can be connected to ground 
+- see PCB based connectors for pwr, neopixels and speaker
 
 # ATTiny
 
-- Raw lights mode does not always work, neopixel values can be overriden and then the rainbow is lost in night mode
-- seems the RTC is less than 1 sec now
 - determine decent speed settings for the night light effects
 - not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
 - make sure that ADC is disconnected while sleeping
