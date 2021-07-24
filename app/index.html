@@ -15,7 +15,7 @@
 
     <style>
         body {
-            padding-top: 50px;
+            padding-top: 55px;
         }
 
     </style>
@@ -25,6 +25,7 @@
 
     <nav class="navbar navbar-inverse navbar-fixed-top">
       <div class="container">
+
         <div class="navbar-header">
           <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
             <span class="sr-only">Toggle navigation</span>
@@ -44,7 +45,6 @@
             <span class="glyphicon glyphicon-scale"></span><!-- radio mode -->
             <span class="glyphicon glyphicon-lamp"></span><!-- night light mode -->
             <span class="glyphicon glyphicon-earphone"></span><!-- walkie talkie mode -->
-
           </a>
         </div>
         <div id="navbar" class="collapse navbar-collapse">
@@ -59,13 +59,45 @@
 
     <div class="container">
 
-      <div class="starter-template">
-        <h1>Bootstrap starter template</h1>
-        <p class="lead">Use this document as a way to quickly start any new project.<br> All you get is this text and a mostly barebones HTML document.</p>
+        <!-- The generated alerts go here -->
+
+        <div id="alertsSpace">
+        </div>
+
+        <div class="panel panel-default">
+            <div class="panel-heading">
+              <h3 class="panel-title">Song Upload</h3>
+            </div>
+            <div class="panel-body">
+                Select an MP3 file to upload to the server:
+                <input class="btn btn-default" type="file" id="myFile" name="filename">
+            </div>
+        </div>
 
 
-        <span class="glyphicon glyphicon-signal">/</span>
-      </div>
+        <div class="panel panel-default">
+            <div class="panel-heading">
+              <h3 class="panel-title">Volume</h3>
+            </div>
+            <div class="panel-body">
+                Volume:
+                <div class="progress">
+                    <div class="progress-bar progress-bar-success" role="progressbar" style="width: 40%">
+                    </div>
+                </div>
+                Maximum volume (speakers):
+                <div class="progress">
+                    <div class="progress-bar progress-bar-info" role="progressbar" style="width: 100%">
+                    </div>
+                </div>
+                Maximum volume (headphones):
+                <div class="progress">
+                    <div class="progress-bar progress-bar-info" role="progressbar" style="width:100%">
+                    </div>
+                </div>
+
+            </div>
+        </div>
 
     </div><!-- /.container -->
 
@@ -74,6 +106,7 @@
     ================================================== -->
     <!-- Placed at the end of the document so the pages load faster -->
     <script src="jquery-1.12.4.min.js"></script>
+    <script src="app.js"></script>
     <script src="bootstrap.min.js"></script>
     <script src="lame.min.js"></script>
   </body>
