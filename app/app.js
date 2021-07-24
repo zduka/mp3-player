@@ -33,3 +33,29 @@ function showSuccess(message) {
 
 
 //showMessage("script loaded");
+
+
+
+function mp3Upload() {
+    console.log(this.files);
+    f = this.files[0]
+    console.log(f.size);
+    let reader = new FileReader();
+    reader.onload = mp3Convert;
+    reader.readAsArrayBuffer(f);    
+}
+
+function mp3Convert(buffer) {
+    console.log("Loaded " + buffer.byteLength());
+}
+
+function pageLoaded() {
+    document.getElementById('mp3-uploader').addEventListener('change', mp3Upload, false)
+    showMessage("attached")
+}
+
+$( document ).ready(function() {
+    $('#mp3-uploader').change(mp3Upload)
+    console.log( "ready!" );
+});
+
