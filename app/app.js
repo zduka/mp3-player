@@ -1,5 +1,8 @@
 
-
+/* Shows messages at the top of the page. 
+   
+   Nothing fancy, the messages can be dismissed by the user, or will be deleted automatically after 5 seconds. 
+ */
 let messageIndex = 0;
 
 function showMessage(message, kind = "info") {
