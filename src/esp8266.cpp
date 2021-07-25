@@ -118,10 +118,10 @@ public:
         //SetPlaylist(0);
         //SetTrack(0);
 
-        //SetMode(Mode::Radio);
-        //SetRadioStation(0);
+        SetMode(Mode::Radio);
+        SetRadioStation(0);
 
-        SetMode(Mode::NightLight);
+        //SetMode(Mode::NightLight);
 
     }
 
@@ -1075,4 +1075,4 @@ void loop() {
     Player::Loop();
 }
 
-#endif
+#endif // ARCH_ESP8266

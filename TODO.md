@@ -14,6 +14,9 @@
 
 # ATTiny
 
+- check the 8kHz timer is really 8kHz !
+- record sound when wanted, ignore when not
+- better lights algorithm - currently is always on almost all the time
 - determine decent speed settings for the night light effects
 - not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
 - make sure that ADC is disconnected while sleeping
