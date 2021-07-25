@@ -1,7 +1,5 @@
 # HW
 
-
-
 - enlarge footprints for all ICs and through-hole components
 - larger holes for audio jack
 - update the audio src, tpa power, and attiny serial port accordingly
@@ -19,6 +17,7 @@
 - determine decent speed settings for the night light effects
 - not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
 - make sure that ADC is disconnected while sleeping
+- audio source must be switched accordingly
 
 # ESP
 
@@ -27,3 +26,9 @@
 - wifi_off does not inform about success
 - check MDNS
 - add authentication
+
+ # Missing Features
+
+ - walkie talkie mode
+ - alarm clock
+ - birthday reminder

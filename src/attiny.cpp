@@ -104,7 +104,8 @@ public:
         // enable control interrupts for buttons
         ControlBtn_.setInterrupt(ControlButtonChanged);
         VolumeBtn_.setInterrupt(VolumeButtonChanged);
-        
+        // allow voltages to stabilize when powered up
+        delay(200);
         // from now on proceed identically to a wakeup
         Wakeup();
     }
@@ -119,6 +120,10 @@ public:
         }
         if (Status_.secondTick) {
             Status_.secondTick = false;
+            if (State_.voltage() <= BATTERY_CRITICAL) {
+                CriticalBattery();
+                return;
+            }
         }
     }
 
@@ -165,10 +170,13 @@ private:
         ADC0.INTCTRL |= ADC_RESRDY_bm;
         ADC0.COMMAND = ADC_STCONV_bm;
         // wait for the voltage measurement to finish
-        //while (ADC0.MUXPOS == ADC_MUXPOS_INTREF_gc) {
-        //}
-        // TODO deal with the voltage value appropriately
-        
+        while (ADC0.MUXPOS == ADC_MUXPOS_INTREF_gc) {
+        }
+        // if the voltage is below low battery threshold
+        if (State_.voltage() <= BATTERY_CRITICAL) {
+            CriticalBattery();
+            return;
+        }
         // enable interrupts for rotary encoders
         Control_.setInterrupt(ControlValueChanged);
         Volume_.setInterrupt(VolumeValueChanged);
@@ -183,30 +191,38 @@ private:
     }
 
     static void Sleep() {
-        // enable RTC interrupt every second so that the time can be kept
-        while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-        RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
-        // disable rotary encoder interrupts so that they do not wake us from sleep
-        Control_.clearInterrupt();
-        Volume_.clearInterrupt();
-        // turn off neopixels and esp
-        pinMode(DCDC_PWR, INPUT);
-        // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
-        Status_.sleep = true;
-        while (Status_.sleep) {
-            sleep_cpu();
-        }
-        // clear the button events that led to the wakeup
-        State_.clearButtonEvents();
-        // if we are not longer sleeping, wakeup
-        Wakeup();
+        do {
+            // enable RTC interrupt every second so that the time can be kept
+            while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
+            RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
+            // disable rotary encoder interrupts so that they do not wake us from sleep
+            Control_.clearInterrupt();
+            Volume_.clearInterrupt();
+            // turn off neopixels and esp
+            pinMode(DCDC_PWR, INPUT);
+            // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
+            Status_.sleep = true;
+            while (Status_.sleep) {
+                sleep_cpu();
+            }
+            // clear the button events that led to the wakeup
+            State_.clearButtonEvents();
+            // if we are not longer sleeping, wakeup
+            Wakeup();
+        } while (Status_.sleep == true);
     }
 
-    /** Flashes the strip three times and the puts the avr back to sleep. 
-
-        TODO actually put to sleep, maybe put this to lights and then deal with it in a loop in wakeup? 
+    /** Flashes the strip three times with red as a critical battery indicator. 
      */
     static void CriticalBattery() {
+        Wire.end();
+        pinMode(SDA, OUTPUT);
+        pinMode(SCL, OUTPUT);
+        digitalWrite(SDA, LOW);
+        digitalWrite(SCL, LOW);
+        pinMode(DCDC_PWR, OUTPUT);
+        digitalWrite(DCDC_PWR, LOW);
+        delay(50);
         Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
         Neopixels_.update();
         delay(50);
@@ -224,6 +240,8 @@ private:
         delay(50);
         Neopixels_.fill(Color::Black());
         Neopixels_.update();
+        Wire.begin(AVR_I2C_ADDRESS);
+        Status_.sleep = true;
     }
 
 
@@ -544,12 +562,13 @@ private:
                 Neopixels_[0].add(Color::Blue().withBrightness(notificationBrightness));
         // the low battery warning blinks out of sync with the other notifications
         } else {
-            if (State_.voltage() <= 340)
+            if (State_.voltage() <= BATTERY_LOW)
                 Neopixels_[7].add(Color::Red().withBrightness(notificationBrightness));
         }
         // and finally, update the neopixels
         Neopixels_.update();
     }
+
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static ColorStrip<8> Lights_;

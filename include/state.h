@@ -4,6 +4,10 @@
 
 #define AVR_I2C_ADDRESS 42
 
+
+#define BATTERY_LOW 350
+#define BATTERY_CRITICAL 340
+
 /** Brightness for notifications such as wifi connection, or low battery.
  */
 #define DEFAULT_NOTIFICATION_BRIGHTNESS 16
