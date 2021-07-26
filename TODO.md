@@ -14,7 +14,8 @@
 
 # ATTiny
 
-- check the 8kHz timer is really 8kHz !
+- move code from ISRs to main loop where possible (tick & adc0 mostly, some audio lights)
+- replace I2C with proper events
 - record sound when wanted, ignore when not
 - better lights algorithm - currently is always on almost all the time
 - determine decent speed settings for the night light effects

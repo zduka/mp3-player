@@ -48,7 +48,7 @@ but we actually need audio_src
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
-extern "C" void TCB0_INT_vect(void) __attribute__((signal));
+//extern "C" void TCB0_INT_vect(void) __attribute__((signal));
 /** ATTiny part of the player.     
     
  */
@@ -77,7 +77,7 @@ public:
         // configure the timer we use for 8kHz audio sampling
         TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
         TCB0.CTRLB = TCB_CNTMODE_INT_gc;
-        TCB0.CCMP = 167; // for 8kHz at 2.66 MHz (16MHz mainclock with 6 prescaler by default)
+        TCB0.CCMP = 1000; // for 8kHz
         // set sleep to full power down and enable sleep feature
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
         sleep_enable();     
@@ -95,8 +95,12 @@ public:
         VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
         VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
         VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
+        // configure the event system - ADC1 to sample when triggered by TCB0
+        EVSYS.SYNCCH0 = EVSYS_SYNCCH0_TCB0_gc;
+        EVSYS.ASYNCUSER12 = EVSYS_ASYNCUSER12_SYNCCH0_gc;
         // set ADC1 settings (mic & audio) - clkdiv by 4, internal voltage reference
         ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
+        ADC1.EVCTRL = ADC_STARTEI_bm;
         // set ADC0 settings (vcc, temperature)
         // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 64 values
         ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc;
@@ -300,12 +304,14 @@ private:
         By default, the state bytes are sent.
      */
     static void I2CRequest() {
+        //digitalWrite(AUDIO_SRC, HIGH);
         switch (I2CSource_) {
             case I2CSource::State:
                 Wire.write(pointer_cast<uint8_t*>(& State_), sizeof (State));
                 State_.clearEvents();
                 ClearIrq();
         }
+        //digitalWrite(AUDIO_SRC, LOW);
     }
 
     static void I2CReceive(int numBytes) {
@@ -618,25 +624,19 @@ private:
     static void StartAudioADC(AudioADCSource channel) {
         AudioMin_ = 255;
         AudioMax_ = 0;
-        Recording_ = 0;
-        RecordingCounter_ = 0;
         RecordingIndex_ = 0;
         // select ADC channel to either MIC or audio ADC
         ADC1.MUXPOS  = static_cast<uint8_t>(channel);
         // enable and use 8bit resolution, freerun mode
-        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc | ADC_FREERUN_bm;
+        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc /*| ADC_FREERUN_bm */;
         // enable the interrupt
         ADC1.INTCTRL |= ADC_RESRDY_bm;
-        // start the conversion
-        ADC1.COMMAND = ADC_STCONV_bm;        
-        // start the timer and enable the interrupt
-        TCB0.INTCTRL = TCB_CAPT_bm;
+        // start the timer
         TCB0.CTRLA |= TCB_ENABLE_bm;
 }
 
     static void StopAudioADC() {
         ADC1.CTRLA = 0;
-        TCB0.INTCTRL &= ~TCB_CAPT_bm;
         TCB0.CTRLA &= ~TCB_ENABLE_bm;
     }
 
@@ -653,14 +653,12 @@ private:
     }
 
     friend void ::ADC1_RESRDY_vect();
-    friend void ::TCB0_INT_vect();
+    //friend void ::TCB0_INT_vect();
 
     inline static volatile uint8_t AudioMin_;
     inline static volatile uint8_t AudioMax_;
     inline static volatile uint8_t AudioLightsMax_;
 
-    inline static volatile uint16_t Recording_;
-    inline static volatile uint8_t RecordingCounter_;
     inline static volatile uint8_t RecordingIndex_;
     inline static volatile uint8_t RecordingBuffer_[64];
 
@@ -672,11 +670,14 @@ private:
 
 
 ISR(RTC_PIT_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
     Player::Tick();
+    //digitalWrite(AUDIO_SRC, LOW);
 }
 
 ISR(ADC0_RESRDY_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
     uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
     switch (ADC0.MUXPOS) {
         case ADC_MUXPOS_INTREF_gc: { // VCC Sense
@@ -698,33 +699,43 @@ ISR(ADC0_RESRDY_vect) {
     }
     // start new conversion
     ADC0.COMMAND = ADC_STCONV_bm;
+    //digitalWrite(AUDIO_SRC, LOW);    
 }
 
 ISR(ADC1_RESRDY_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
     uint8_t value = ADC1.RES;
-    Player::Recording_ += value;
-    ++Player::RecordingCounter_;
+    Player::RecordingBuffer_[Player::RecordingIndex_++] = value;
+    Player::RecordingIndex_ &= 63;
+    //digitalWrite(AUDIO_SRC, LOW);
 }
 
 /** The 8kHz interrupt for audio recording. 
  */
+/*
 ISR(TCB0_INT_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
     TCB0.INTFLAGS = TCB_CAPT_bm; // clear the flag
-    if (Player::RecordingCounter_ == 0) // div by zero
-        return;
-    uint8_t value = Player::Recording_ / Player::RecordingCounter_;
-    Player::Recording_ = 0;
-    Player::RecordingCounter_ = 0;
-    // whether this is audio, or microphone, update the audio bar levels
-    if (value < Player::AudioMin_)
-        Player::AudioMin_ = value; 
-    if (value > Player::AudioMax_)
-        Player::AudioMax_ = value;
-    // if we are recording, store in the buffer
-    Player::RecordingBuffer_[Player::RecordingIndex_];
-    Player::RecordingIndex_ = (Player::RecordingIndex_ + 1) % 64;
-    // TODO notify ESP to read    
+    ADC1.COMMAND = ADC_STCONV_bm;
+    /*
+    if (Player::RecordingCounter_ != 0) { // div by zero
+        uint8_t value = Player::Recording_ / Player::RecordingCounter_;
+        Player::Recording_ = 0;
+        Player::RecordingCounter_ = 0;
+        // whether this is audio, or microphone, update the audio bar levels
+        if (value < Player::AudioMin_)
+            Player::AudioMin_ = value; 
+        if (value > Player::AudioMax_)
+            Player::AudioMax_ = value;
+        // if we are recording, store in the buffer
+        Player::RecordingBuffer_[Player::RecordingIndex_];
+        Player::RecordingIndex_ = (Player::RecordingIndex_ + 1) % 64;
+        // TODO notify ESP to read    
+    }
+    * /
+    //digitalWrite(AUDIO_SRC, LOW);
 }
+*/
 
 void setup() {
     Player::Initialize();
