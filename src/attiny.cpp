@@ -407,6 +407,14 @@ private:
     inline static uint8_t Buffer_[32];
 
 
+    inline static uint8_t I2C_TX_Offset_ = 0;
+    inline static uint8_t I2C_TX_Length_ = 0;
+    inline static uint8_t * I2C_TX_Buffer_ = nullptr;
+
+    inline static uint8_t I2C_RX_Offset_ = 0;
+    inline static uint8_t I2C_RX_Buffer_[32];
+
+
 //@}
 
 
@@ -677,15 +685,30 @@ ISR(RTC_PIT_vect) {
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
-#define I2C_ADDRESS_MATCH (TWI_APIF_bm & TWI_AP_bm)
-#define I2C_DATA_WRITE (TWI_DIF_bm & TWI_DIR_bm & TWI_RXACK_bm)
-#define I2C_DATA_READ (TWI_DIF_bm)
+#define I2C_DATA_TX (TWI_DIF_bm & TWI_DIR_bm)
+#define I2C_DATA_RX (TWI_DIF_bm)
+#define I2C_START_TX (TWI_APIF_bm & TWI_AP_bm & TWI_DIR_bm)
+#define I2C_START_RX (TWI_APIF_bm & TWI_AP_bm)
+#define I2C_STOP_TX
+#define I2C_STOP_RX 
 
 void twi() {
 //ISR(TWI0_TWIS_vect) {
     uint8_t status = TWI0.SSTATUS;
-    // fastpath for sending data to master, in which case we just send new byte
-    if (status & I2C_DATA_WRITE == I2C_DATA_WRITE) {
+    // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don
+    if (status == I2C_DATA_TX) {
+        if (Player::I2C_TX_Offset < Player::I2C_TX_Length_) {
+            TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
+            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+        } else {
+            TWI0.SCTRLB = TWI_SCMD_COMPTRANS>gc;
+        }
+    } else if (status == I2C_DATA_RX) {
+        Player::I2C_RX_Buffer_[Player::I2C_RX_Offset_++] = TWI0.SDATA;
+        TWI0.SCTRLB = (Player::I2C_RX_Offset == 32) 
+            ? (TWI_ACKACT_NACK_gc | TWI_SCMD_COMPTRANS_gc)
+            : (TWI_ACKACT_ACK_gc | TWI_SCMD_RESPONSE_gc);
+    } else if (status == I2C_START_TX) {
 
     }
     if (status & I2C_ADDRESS_MATCH == I2C_ADDRESS_MATCH) {
