@@ -4,10 +4,11 @@
 #error "Only 8Mhz clock is supported"
 #endif
 
+#include <Arduino.h>
 
 #include <avr/sleep.h>
 #include <util/delay.h>
-#include <Wire.h>
+//#include <Wire.h>
 
 #include "state.h"
 #include "messages.h"
@@ -46,6 +47,7 @@ but we actually need audio_src
 #define MIC 10
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
+extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 //extern "C" void TCB0_INT_vect(void) __attribute__((signal));
@@ -109,9 +111,20 @@ public:
         ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
         ADC0.SAMPCTRL = 31;
         // initialize I2C slave. 
-        Wire.begin(AVR_I2C_ADDRESS);
-        Wire.onRequest(I2CRequest);
-        Wire.onReceive(I2CReceive);
+        //Wire.begin(AVR_I2C_ADDRESS);
+        //Wire.onRequest(I2CRequest);
+        //Wire.onReceive(I2CReceive);
+        // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
+        TWI0.SADDR = AVR_I2C_ADDRESS << 1;
+        TWI0.SADDRMASK = 0;
+        // enable the TWI in slave mode, enable all interrupts
+        TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
+        // bus Error Detection circuitry needs Master enabled to work 
+        // TODO not sure why we need it
+        TWI0.MCTRLA = TWI_ENABLE_bm;   
+        // set transmit buffer to state and transmit length to state size
+        I2C_TX_Buffer_ = pointer_cast<uint8_t*>(& State_);
+        I2C_TX_Length_ = sizeof(State);     
         // enable control interrupts for buttons
         ControlBtn_.setInterrupt(ControlButtonChanged);
         VolumeBtn_.setInterrupt(VolumeButtonChanged);
@@ -227,7 +240,7 @@ private:
     /** Flashes the strip three times with red as a critical battery indicator. 
      */
     static void CriticalBattery() {
-        Wire.end();
+        //Wire.end();
         pinMode(SDA, OUTPUT);
         pinMode(SCL, OUTPUT);
         digitalWrite(SDA, LOW);
@@ -252,7 +265,7 @@ private:
         delay(50);
         Neopixels_.fill(Color::Black());
         Neopixels_.update();
-        Wire.begin(AVR_I2C_ADDRESS);
+        //Wire.begin(AVR_I2C_ADDRESS);
         Status_.sleep = true;
     }
 
@@ -303,6 +316,7 @@ private:
      
         By default, the state bytes are sent.
      */
+    /*
     static void I2CRequest() {
         //digitalWrite(AUDIO_SRC, HIGH);
         switch (I2CSource_) {
@@ -312,8 +326,9 @@ private:
                 ClearIrq();
         }
         //digitalWrite(AUDIO_SRC, LOW);
-    }
+    }*/
 
+    /*
     static void I2CReceive(int numBytes) {
         // TODO check that numBytes <=32
         Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
@@ -391,6 +406,9 @@ private:
             }
         }
     }
+    */
+
+   friend void TWI0_TWIS_vect();
 
     enum class I2CSource : uint8_t {
         State
@@ -685,34 +703,61 @@ ISR(RTC_PIT_vect) {
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
-#define I2C_DATA_TX (TWI_DIF_bm & TWI_DIR_bm)
-#define I2C_DATA_RX (TWI_DIF_bm)
-#define I2C_START_TX (TWI_APIF_bm & TWI_AP_bm & TWI_DIR_bm)
-#define I2C_START_RX (TWI_APIF_bm & TWI_AP_bm)
-#define I2C_STOP_TX
+#define I2C_DATA_TX (TWI_DIF_bm | TWI_DIR_bm | TWI_CLKHOLD_bm | TWI_AP_bm)
+#define I2C_DATA_TX_END (TWI_DIF_bm | TWI_DIR_bm | TWI_CLKHOLD_bm | TWI_AP_bm | TWI_RXACK_bm)
+#define I2C_DATA_RX (TWI_DIF_bm | TWI_CLKHOLD_bm)
+#define I2C_START_TX (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm | TWI_CLKHOLD_bm)
+#define I2C_START_RX (TWI_APIF_bm | TWI_AP_bm | TWI_CLKHOLD_bm)
+#define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm | TWI_RXACK_bm)
 #define I2C_STOP_RX 
 
-void twi() {
-//ISR(TWI0_TWIS_vect) {
+ISR(TWI0_TWIS_vect) {
+    digitalWrite(AUDIO_SRC, HIGH);
     uint8_t status = TWI0.SSTATUS;
-    // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don
+    // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don't the ack
     if (status == I2C_DATA_TX) {
-        if (Player::I2C_TX_Offset < Player::I2C_TX_Length_) {
+        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
             TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         } else {
-            TWI0.SCTRLB = TWI_SCMD_COMPTRANS>gc;
+            TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
         }
+    // a byte has been received from master. Store it and send either ACK if we can store more, or NACK if we can't store more
     } else if (status == I2C_DATA_RX) {
         Player::I2C_RX_Buffer_[Player::I2C_RX_Offset_++] = TWI0.SDATA;
-        TWI0.SCTRLB = (Player::I2C_RX_Offset == 32) 
-            ? (TWI_ACKACT_NACK_gc | TWI_SCMD_COMPTRANS_gc)
-            : (TWI_ACKACT_ACK_gc | TWI_SCMD_RESPONSE_gc);
+        TWI0.SCTRLB = (Player::I2C_RX_Offset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
+    // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
     } else if (status == I2C_START_TX) {
-
+        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
+            TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
+        } else {
+            TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
+        }
+    // master requests to write data itself. ACK if we have free space in the buffer, NACK otherwise.
+    } else if (status == I2C_START_RX) {
+        if (Player::I2C_RX_Offset_ < 32)
+            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+        else
+            TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
+    } else if (status == I2C_DATA_TX_END) {
+        if (Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
+            Player::I2C_TX_Offset_ = 0;
+        TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
+    } else if (status == I2C_STOP_TX) {
+        TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
+    } else {
+        Player::Neopixels_[7] = (status & 1) ? Color::Red() : Color::Black();
+        Player::Neopixels_[6] = (status & 2) ? Color::Red() : Color::Black();
+        Player::Neopixels_[5] = (status & 4) ? Color::Red() : Color::Black();
+        Player::Neopixels_[4] = (status & 8) ? Color::Red() : Color::Black();
+        Player::Neopixels_[3] = (status & 16) ? Color::Red() : Color::Black();
+        Player::Neopixels_[2] = (status & 32) ? Color::Red() : Color::Black();
+        Player::Neopixels_[1] = (status & 64) ? Color::Red() : Color::Black();
+        Player::Neopixels_[0] = (status & 128) ? Color::Red() : Color::Black();
+        Player::Neopixels_.update();
+        while (true) { };
     }
-    if (status & I2C_ADDRESS_MATCH == I2C_ADDRESS_MATCH) {
-    }
+    digitalWrite(AUDIO_SRC, LOW);
 }
 
 ISR(ADC0_RESRDY_vect) {
