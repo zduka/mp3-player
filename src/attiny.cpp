@@ -406,6 +406,7 @@ private:
 
     inline static uint8_t Buffer_[32];
 
+
 //@}
 
 
@@ -676,6 +677,21 @@ ISR(RTC_PIT_vect) {
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
+#define I2C_ADDRESS_MATCH (TWI_APIF_bm & TWI_AP_bm)
+#define I2C_DATA_WRITE (TWI_DIF_bm & TWI_DIR_bm & TWI_RXACK_bm)
+#define I2C_DATA_READ (TWI_DIF_bm)
+
+void twi() {
+//ISR(TWI0_TWIS_vect) {
+    uint8_t status = TWI0.SSTATUS;
+    // fastpath for sending data to master, in which case we just send new byte
+    if (status & I2C_DATA_WRITE == I2C_DATA_WRITE) {
+
+    }
+    if (status & I2C_ADDRESS_MATCH == I2C_ADDRESS_MATCH) {
+    }
+}
+
 ISR(ADC0_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
     uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
@@ -704,8 +720,8 @@ ISR(ADC0_RESRDY_vect) {
 
 ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
-    uint8_t value = ADC1.RES;
-    Player::RecordingBuffer_[Player::RecordingIndex_++] = value;
+    //uint8_t value = ADC1.RES;
+    Player::RecordingBuffer_[Player::RecordingIndex_++] = ADC1.RESL;
     Player::RecordingIndex_ &= 63;
     //digitalWrite(AUDIO_SRC, LOW);
 }
