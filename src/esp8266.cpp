@@ -13,7 +13,8 @@
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
 #include <AudioGeneratorMP3.h>
-#include <AudioOutputI2SNoDAC.h>
+//#include <AudioOutputI2SNoDAC.h>
+#include <AudioOutputI2S.h>
 
 #include "state.h"
 #include "messages.h"
@@ -114,15 +115,15 @@ public:
 
         //WiFiConnect();
         
-        //SetMode(Mode::MP3);
-        //SetPlaylist(0);
+        SetMode(Mode::MP3);
+        SetPlaylist(1);
         //SetTrack(0);
 
-        SetMode(Mode::Radio);
-        SetRadioStation(0);
+        //SetMode(Mode::Radio);
+        //SetRadioStation(0);
 
         //SetMode(Mode::NightLight);
-
+        LOG("End of setup");
     }
 
     static void Loop() {
@@ -666,6 +667,7 @@ private:
             File f = CurrentPlaylist_.openNextFile();
             if (!f)
                 break;
+            LOG("Checking file " + f.name() + " index: " + index + " nextTrack: " + nextTrack);
             if (String(f.name()).endsWith(".mp3")) {
                 if (index == nextTrack) {
                     String filename{STR(MP3Playlists_[State_.mp3PlaylistId()].id + "/" + f.name())};
@@ -677,11 +679,13 @@ private:
                     State_.setMp3TrackId(index);
                     msg::Send(msg::SetMP3Settings{State_});
                     return;
+                } else {
+                    ++nextTrack;
                 }
-            }
+            } 
             f.close();
-            ++nextTrack;
         }
+        LOG("No file found");
         // TODO error
     }
 
@@ -737,7 +741,7 @@ private:
     }; // 
 
     static inline AudioGeneratorMP3 MP3_;
-    static inline AudioOutputI2SNoDAC I2S_;
+    static inline AudioOutputI2S I2S_;
     static inline AudioFileSourceSD MP3File_;
     static inline PlaylistInfo MP3Playlists_[8];
 

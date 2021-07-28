@@ -1,0 +1,7 @@
+493c493,496
+<   i2sc_temp |= I2SRF | I2SMR | I2SRMS | I2STMS | (div1 << I2SBD) | (div2 << I2SCD);
+---
+>   //i2sc_temp |= I2SRF | I2SMR | I2SRMS | I2STMS | (div1 << I2SBD) | (div2 << I2SCD);
+>   // For use with PT8211 which uses the japanese format for I2S, this has to be manually changed, otherwise the sound will be extremely distorted. More details here:
+>   // https://github.com/esp8266/Arduino/issues/6940
+>   i2sc_temp |= I2SRF | I2SMR | I2SRMS | (div1 << I2SBD) | (div2 << I2SCD);
