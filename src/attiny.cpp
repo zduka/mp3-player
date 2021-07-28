@@ -8,7 +8,7 @@
 
 #include <avr/sleep.h>
 #include <util/delay.h>
-#include <Wire.h>
+//#include <Wire.h>
 
 #include "state.h"
 #include "messages.h"
@@ -47,7 +47,7 @@ but we actually need audio_src
 #define MIC 10
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
-//extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
+extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 //extern "C" void TCB0_INT_vect(void) __attribute__((signal));
@@ -111,17 +111,17 @@ public:
         ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
         ADC0.SAMPCTRL = 31;
         // initialize I2C slave. 
-        Wire.begin(AVR_I2C_ADDRESS);
-        Wire.onRequest(I2CRequest);
-        Wire.onReceive(I2CReceive);
+       // Wire.begin(AVR_I2C_ADDRESS);
+        //Wire.onRequest(I2CRequest);
+        //Wire.onReceive(I2CReceive);
         // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
-        //TWI0.SADDR = AVR_I2C_ADDRESS << 1;
-        //TWI0.SADDRMASK = 0;
+        TWI0.SADDR = AVR_I2C_ADDRESS << 1;
+        TWI0.SADDRMASK = 0;
         // enable the TWI in slave mode, enable all interrupts
-        //TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
+        TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
         // bus Error Detection circuitry needs Master enabled to work 
         // TODO not sure why we need it
-        //TWI0.MCTRLA = TWI_ENABLE_bm;   
+        TWI0.MCTRLA = TWI_ENABLE_bm;   
         // set transmit buffer to state and transmit length to state size
         I2C_TX_Buffer_ = pointer_cast<uint8_t*>(& State_);
         I2C_TX_Length_ = sizeof(State);     
@@ -316,6 +316,7 @@ private:
      
         By default, the state bytes are sent.
      */
+    /*
     static void I2CRequest() {
         //digitalWrite(AUDIO_SRC, HIGH);
         switch (I2CSource_) {
@@ -326,7 +327,8 @@ private:
         }
         //digitalWrite(AUDIO_SRC, LOW);
     }
-
+    */
+    /*
     static void I2CReceive(int numBytes) {
         // TODO check that numBytes <=32
         Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
@@ -403,7 +405,7 @@ private:
                 break;
             }
         }
-    }
+    } */
 
    friend void TWI0_TWIS_vect();
 
@@ -707,7 +709,7 @@ ISR(RTC_PIT_vect) {
 #define I2C_START_RX (TWI_APIF_bm | TWI_AP_bm | TWI_CLKHOLD_bm)
 #define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm | TWI_RXACK_bm)
 #define I2C_STOP_RX 
-/*
+
 ISR(TWI0_TWIS_vect) {
     digitalWrite(AUDIO_SRC, HIGH);
     uint8_t status = TWI0.SSTATUS;
@@ -756,7 +758,7 @@ ISR(TWI0_TWIS_vect) {
     }
     digitalWrite(AUDIO_SRC, LOW);
 }
-*/
+
 
 ISR(ADC0_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);

@@ -115,12 +115,12 @@ public:
 
         //WiFiConnect();
         
-        SetMode(Mode::MP3);
-        SetPlaylist(1);
+        //SetMode(Mode::MP3);
+        //SetPlaylist(1);
         //SetTrack(0);
 
-        //SetMode(Mode::Radio);
-        //SetRadioStation(0);
+        SetMode(Mode::Radio);
+        SetRadioStation(0);
 
         //SetMode(Mode::NightLight);
         LOG("End of setup");

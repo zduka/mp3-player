@@ -4,11 +4,9 @@
 - larger holes for audio jack
 - update the audio src, tpa power, and attiny serial port accordingly
 - add LEDs to the attiny & serial port (they can either go to the led strip kind of, or be behind the buttons)
-- esp8266 PWM needs jumper to be either RX, or PWM (or maybe not when we use I2S DAC)
 - headphones signal is inverted for TPA311 (!!)
-- determine if clean voltage is necessary, or if audio can go via 3V3 already
+- determine if clean voltage is necessary, or if audio can go via 3V3 already - most likely can go with 3v3 as it is, seems pretty clean on breadboard audio
 - no need for charging voltage pin at AVR
-- no need for inductor at neopixels, or needs to have capacitor too
 - when the inductor has capacitor, it *seems* that the antenna can be connected to ground 
 - see PCB based connectors for pwr, neopixels and speaker
 
