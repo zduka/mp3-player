@@ -21,19 +21,28 @@ namespace msg {
 
     #ifdef ARCH_ESP8266
         template<typename T>
-        static void Send(T const & msg) {
-            Wire.beginTransmission(AVR_I2C_ADDRESS);
-            unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
-            Wire.write(msgBytes, sizeof(T));
-            Wire.endTransmission();
-            /*
-            Serial.print("I2C command sent:");
-            for (unsigned i = 0; i < sizeof(T); ++i) {
-                Serial.print(" ");
-                Serial.print(msgBytes[i], HEX);
-            }
-            Serial.println("");
-            */
+        static void Send(T const & msg, uint8_t retries = 1 ) {
+            do {
+                Wire.beginTransmission(AVR_I2C_ADDRESS);
+                unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
+                Wire.write(msgBytes, sizeof(T));
+                uint8_t status = Wire.endTransmission();
+                /*
+                Serial.print("I2C command sent:");
+                for (unsigned i = 0; i < sizeof(T); ++i) {
+                    Serial.print(" ");
+                    Serial.print(msgBytes[i], HEX);
+                }
+                Serial.print(" status: ");
+                Serial.print(status)
+                Serial.println("");
+                */
+                if (status == 0)
+                    return;
+                LOG("I2C command failed: " + status);
+                delay(3);
+            } while (retries-- != 0);
+            LOG("I2C command failed despite retries");
         }
     #endif
 

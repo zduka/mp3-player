@@ -8,7 +8,6 @@
 
 #include <avr/sleep.h>
 #include <util/delay.h>
-//#include <Wire.h>
 
 #include "state.h"
 #include "messages.h"
@@ -111,17 +110,7 @@ public:
         ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
         ADC0.SAMPCTRL = 31;
         // initialize I2C slave. 
-       // Wire.begin(AVR_I2C_ADDRESS);
-        //Wire.onRequest(I2CRequest);
-        //Wire.onReceive(I2CReceive);
-        // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
-        TWI0.SADDR = AVR_I2C_ADDRESS << 1;
-        TWI0.SADDRMASK = 0;
-        // enable the TWI in slave mode, enable all interrupts
-        TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
-        // bus Error Detection circuitry needs Master enabled to work 
-        // TODO not sure why we need it
-        TWI0.MCTRLA = TWI_ENABLE_bm;   
+        InitializeI2C();
         // set transmit buffer to state and transmit length to state size
         I2C_TX_Buffer_ = pointer_cast<uint8_t*>(& State_);
         I2C_TX_Length_ = sizeof(State);     
@@ -136,6 +125,9 @@ public:
     }
 
     static void Loop() {
+        // if there is I2C message from ESP, process it
+        if (Irq_.i2cRx)
+            I2CReceive();
         if (Status_.sleep)
             Sleep();
             
@@ -240,11 +232,15 @@ private:
     /** Flashes the strip three times with red as a critical battery indicator. 
      */
     static void CriticalBattery() {
-        //Wire.end();
+        // disable I2C
+        TWI0.SCTRLA = 0;
+        TWI0.MCTRLA = 0;
+        // set SDA SCL low so that ESP goes to sleep immediately
         pinMode(SDA, OUTPUT);
         pinMode(SCL, OUTPUT);
         digitalWrite(SDA, LOW);
         digitalWrite(SCL, LOW);
+        // turn on peripheral voltage & flash the strip
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         delay(50);
@@ -265,7 +261,8 @@ private:
         delay(50);
         Neopixels_.fill(Color::Black());
         Neopixels_.update();
-        //Wire.begin(AVR_I2C_ADDRESS);
+        // initialize I2C back and go to sleep
+        InitializeI2C();
         Status_.sleep = true;
     }
 
@@ -290,6 +287,19 @@ private:
 //@{
 private:
 
+    static void InitializeI2C() {
+        // make sure that the pins are nout out - HW issue with the chip, will fail otherwise
+        PORTB.OUTCLR = 0x03; // PB0, PB1
+        // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
+        TWI0.SADDR = AVR_I2C_ADDRESS << 1;
+        TWI0.SADDRMASK = 0;
+        // enable the TWI in slave mode, enable all interrupts
+        TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
+        // bus Error Detection circuitry needs Master enabled to work 
+        // TODO not sure why we need it
+        TWI0.MCTRLA = TWI_ENABLE_bm;   
+    }
+
     static void SetIrq() {
         if (!Irq_.enabled) {
             Irq_.enabled = true;
@@ -311,35 +321,16 @@ private:
         ClearIrq();
     }
 
-
-    /** Triggered when ESP requests data to be sent. 
-     
-        By default, the state bytes are sent.
-     */
-    /*
-    static void I2CRequest() {
-        //digitalWrite(AUDIO_SRC, HIGH);
-        switch (I2CSource_) {
-            case I2CSource::State:
-                Wire.write(pointer_cast<uint8_t*>(& State_), sizeof (State));
-                State_.clearEvents();
-                ClearIrq();
-        }
-        //digitalWrite(AUDIO_SRC, LOW);
-    }
-    */
-    /*
-    static void I2CReceive(int numBytes) {
-        // TODO check that numBytes <=32
-        Wire.readBytes(pointer_cast<uint8_t*>(& Buffer_), numBytes);
-        switch (Buffer_[0]) {
+    static void I2CReceive() {
+        // TODO check that numBytes <= message length or accept corrupted messages?
+        switch (I2C_RX_Buffer_[0]) {
             case msg::PowerOff::Id: {
                 // set sleep to true so that the sleep can be handled in main loop
                 //Status_.sleep = true;
                 break;
             }
             case msg::SetMode::Id: {
-                auto msg = msg::At<msg::SetMode>(Buffer_);
+                auto msg = msg::At<msg::SetMode>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
                 // sync the volume and control states
                 Control_.setValues(State_.control(), State_.maxControl());
@@ -349,80 +340,77 @@ private:
                 break;
             }
             case msg::SetWiFiStatus::Id: {
-                auto msg = msg::At<msg::SetWiFiStatus>(Buffer_);
+                auto msg = msg::At<msg::SetWiFiStatus>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
                 break;
             }
             case msg::SetAudioSource::Id: {
-                auto msg = msg::At<msg::SetAudioSource>(Buffer_);
+                auto msg = msg::At<msg::SetAudioSource>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
                 break;
             }
             case msg::SetMP3Settings::Id: {
-                auto msg = msg::At<msg::SetMP3Settings>(Buffer_);
+                auto msg = msg::At<msg::SetMP3Settings>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
                 break;
             }
             case msg::SetRadioSettings::Id: {
-                auto msg = msg::At<msg::SetRadioSettings>(Buffer_);
+                auto msg = msg::At<msg::SetRadioSettings>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
                 break;
             }
             case msg::SetNightLightSettings::Id: {
-                auto msg = msg::At<msg::SetNightLightSettings>(Buffer_);
+                auto msg = msg::At<msg::SetNightLightSettings>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
                 EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
                 break;
             }
             case msg::SetAccentColor::Id: {
-                auto msg = msg::At<msg::SetAccentColor>(Buffer_);
+                auto msg = msg::At<msg::SetAccentColor>(I2C_RX_Buffer_);
                 AccentColor_ = msg.color;
                 break;
             }
             case msg::LightsBar::Id: {
-                auto msg = msg::At<msg::LightsBar>(Buffer_);
+                auto msg = msg::At<msg::LightsBar>(I2C_RX_Buffer_);
                 SpecialLights_.showBar(msg.value, msg.max, msg.color);
                 LightsCounter_ = msg.timeout;
                 break;
             }
             case msg::LightsCenteredBar::Id: {
-                auto msg = msg::At<msg::LightsCenteredBar>(Buffer_);
+                auto msg = msg::At<msg::LightsCenteredBar>(I2C_RX_Buffer_);
                 SpecialLights_.showCenteredBar(msg.value, msg.max, msg.color);
                 LightsCounter_ = msg.timeout;
                 break;
             }
             case msg::LightsPoint::Id: {
-                auto msg = msg::At<msg::LightsPoint>(Buffer_);
+                auto msg = msg::At<msg::LightsPoint>(I2C_RX_Buffer_);
                 SpecialLights_.showPoint(msg.value, msg.max, msg.color);
                 LightsCounter_ = msg.timeout;
                 break;
             }
             case msg::LightsColors::Id: {
-                auto msg = msg::At<msg::LightsColors>(Buffer_);
+                auto msg = msg::At<msg::LightsColors>(I2C_RX_Buffer_);
                 for (int i = 0; i < 8; ++i)
                     SpecialLights_[i] = msg.colors[i];
                 LightsCounter_ = msg.timeout;
                 break;
             }
         }
-    } */
+        Irq_.i2cRx = false;
+        cli();
+        I2C_RX_Offset_ = 0;
+        sei();
+    }
 
-   friend void TWI0_TWIS_vect();
+    friend void TWI0_TWIS_vect();
 
-    enum class I2CSource : uint8_t {
-        State
-    };
 
     static_assert(IRQ_MAX_DELAY < 128);
     inline volatile static struct {
         bool enabled : 1;
         uint8_t timer : 7; // 0..127
+        bool i2cRx : 1; // indicates that I2C message has been received
     } Irq_;
-
-    inline static I2CSource I2CSource_ = I2CSource::State;
-
-    inline static uint8_t Buffer_[32];
-
 
     inline static uint8_t I2C_TX_Offset_ = 0;
     inline static uint8_t I2C_TX_Length_ = 0;
@@ -702,19 +690,21 @@ ISR(RTC_PIT_vect) {
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
-#define I2C_DATA_TX (TWI_DIF_bm | TWI_DIR_bm | TWI_CLKHOLD_bm | TWI_AP_bm)
-#define I2C_DATA_TX_END (TWI_DIF_bm | TWI_DIR_bm | TWI_CLKHOLD_bm | TWI_AP_bm | TWI_RXACK_bm)
-#define I2C_DATA_RX (TWI_DIF_bm | TWI_CLKHOLD_bm)
-#define I2C_START_TX (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm | TWI_CLKHOLD_bm)
-#define I2C_START_RX (TWI_APIF_bm | TWI_AP_bm | TWI_CLKHOLD_bm)
-#define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm | TWI_RXACK_bm)
-#define I2C_STOP_RX 
+#define I2C_DATA_MASK (TWI_DIF_bm | TWI_DIR_bm) 
+#define I2C_DATA_TX (TWI_DIF_bm | TWI_DIR_bm)
+#define I2C_DATA_RX (TWI_DIF_bm)
+#define I2C_START_MASK (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm)
+#define I2C_START_TX (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm)
+#define I2C_START_RX (TWI_APIF_bm | TWI_AP_bm)
+#define I2C_STOP_MASK (TWI_APIF_bm | TWI_DIR_bm)
+#define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm)
+#define I2C_STOP_RX (TWI_APIF_bm)
 
 ISR(TWI0_TWIS_vect) {
     digitalWrite(AUDIO_SRC, HIGH);
     uint8_t status = TWI0.SSTATUS;
     // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don't the ack
-    if (status == I2C_DATA_TX) {
+    if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
         if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
             TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
@@ -722,27 +712,31 @@ ISR(TWI0_TWIS_vect) {
             TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
         }
     // a byte has been received from master. Store it and send either ACK if we can store more, or NACK if we can't store more
-    } else if (status == I2C_DATA_RX) {
+    } else if ((status & I2C_DATA_MASK) == I2C_DATA_RX) {
         Player::I2C_RX_Buffer_[Player::I2C_RX_Offset_++] = TWI0.SDATA;
         TWI0.SCTRLB = (Player::I2C_RX_Offset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
     // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
-    } else if (status == I2C_START_TX) {
+    } else if ((status & I2C_START_MASK) == I2C_START_TX) {
         if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
             TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
         } else {
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
         }
-    // master requests to write data itself. ACK if we have free space in the buffer, NACK otherwise.
-    } else if (status == I2C_START_RX) {
-        if (Player::I2C_RX_Offset_ < 32)
+    // master requests to write data itself. ACK if the buffer is empty (we do not support multiple commands in same buffer), NACK otherwise.
+    } else if ((status & I2C_START_MASK) == I2C_START_RX) {
+        if (Player::I2C_RX_Offset_ == 0)
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         else
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
-    } else if (status == I2C_DATA_TX_END) {
-        if (Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
+    } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
+        if (Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_)) {
             Player::I2C_TX_Offset_ = 0;
+            Player::State_.clearEvents();
+            Player::ClearIrq();    
+        }
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
-    } else if (status == I2C_STOP_TX) {
+    } else if ((status & I2C_STOP_MASK) == I2C_STOP_RX) {
+        Player::Irq_.i2cRx = true;
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
     } else {
         Player::Neopixels_[7] = (status & 1) ? Color::Red() : Color::Black();

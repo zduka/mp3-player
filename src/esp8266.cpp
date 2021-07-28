@@ -19,14 +19,6 @@
 #include "state.h"
 #include "messages.h"
 
-#define LOG(...) Log_(String("") + __VA_ARGS__)
-#define STR(...) (String("") + __VA_ARGS__)
-
-inline void Log_(String const & str) {
-    Serial.print(String(millis() / 1000) + ": ");
-    Serial.println(str);
-}
-
 /* ESP8266 PINOUT
 
          -- RST        up   1 -- TXD0
@@ -366,6 +358,7 @@ private:
                     SetRadioStation(State_.control());
                     msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 }
+                break;
             }
             case Mode::NightLight: {
                 if (State_.nightLightHueSelection()) {
@@ -388,6 +381,7 @@ private:
                     SetNightLightEffect(static_cast<NightLightEffect>(State_.control()));
                     msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness), DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 }
+                break;
             }
         }
     }
