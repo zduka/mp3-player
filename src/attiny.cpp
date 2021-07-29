@@ -128,6 +128,8 @@ public:
         // if there is I2C message from ESP, process it
         if (Irq_.i2cRx)
             I2CReceive();
+        if (Status_.adcReady)
+            VoltageAndTemperature();
         if (Status_.sleep)
             Sleep();
             
@@ -266,6 +268,31 @@ private:
         Status_.sleep = true;
     }
 
+    static void VoltageAndTemperature() {
+        uint16_t value = ADCResult_;
+        Status_.adcReady = false;
+        switch (ADC0.MUXPOS) {
+            case ADC_MUXPOS_INTREF_gc: { // VCC Sense
+                State_.setVoltage(value);
+                // switch the ADC to be ready to measure the temperature
+                ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+            }
+            case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
+                State_.setTemp(value);
+                // fallthrough to the default where we set the next measurement to be that of input voltage
+            }
+            default:
+                // switch the ADC to be ready to measure the VCC
+                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+        }
+        // start new conversion
+        ADC0.COMMAND = ADC_STCONV_bm;
+    }
+
 
     friend void ::RTC_PIT_vect();
 
@@ -276,9 +303,11 @@ private:
         bool tick : 1;
         bool secondTick : 1;
         uint8_t ticksCounter : 6; // 0..63
+        bool adcReady : 1; 
     } Status_;
 
     inline static State State_;
+    inline static volatile uint16_t ADCResult_ = 0;
 
     inline static volatile DateTime Time_;
 
@@ -608,6 +637,24 @@ private:
         Neopixels_.update();
     }
 
+    /** Shows the given byte displayed on the neopixels strip and freezes. 
+     
+        The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
+     */
+    static void ShowByte(uint8_t value, Color const & color) {
+        Neopixels_[7] = (value & 1) ? color : Color::Black();
+        Neopixels_[6] = (value & 2) ? color : Color::Black();
+        Neopixels_[5] = (value & 4) ? color : Color::Black();
+        Neopixels_[4] = (value & 8) ? color : Color::Black();
+        Neopixels_[3] = (value & 16) ? color : Color::Black();
+        Neopixels_[2] = (value & 32) ? color : Color::Black();
+        Neopixels_[1] = (value & 64) ? color : Color::Black();
+        Neopixels_[0] = (value & 128) ? color : Color::Black();
+        Neopixels_.update();
+        cli();
+        while (true) { };
+    }
+
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static ColorStrip<8> Lights_;
@@ -684,10 +731,10 @@ private:
 
 
 ISR(RTC_PIT_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
+    digitalWrite(AUDIO_SRC, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
     Player::Tick();
-    //digitalWrite(AUDIO_SRC, LOW);
+    digitalWrite(AUDIO_SRC, LOW);
 }
 
 #define I2C_DATA_MASK (TWI_DIF_bm | TWI_DIR_bm) 
@@ -701,7 +748,7 @@ ISR(RTC_PIT_vect) {
 #define I2C_STOP_RX (TWI_APIF_bm)
 
 ISR(TWI0_TWIS_vect) {
-    digitalWrite(AUDIO_SRC, HIGH);
+    //digitalWrite(AUDIO_SRC, HIGH);
     uint8_t status = TWI0.SSTATUS;
     // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don't the ack
     if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
@@ -739,50 +786,21 @@ ISR(TWI0_TWIS_vect) {
         Player::Irq_.i2cRx = true;
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
     } else {
-        Player::Neopixels_[7] = (status & 1) ? Color::Red() : Color::Black();
-        Player::Neopixels_[6] = (status & 2) ? Color::Red() : Color::Black();
-        Player::Neopixels_[5] = (status & 4) ? Color::Red() : Color::Black();
-        Player::Neopixels_[4] = (status & 8) ? Color::Red() : Color::Black();
-        Player::Neopixels_[3] = (status & 16) ? Color::Red() : Color::Black();
-        Player::Neopixels_[2] = (status & 32) ? Color::Red() : Color::Black();
-        Player::Neopixels_[1] = (status & 64) ? Color::Red() : Color::Black();
-        Player::Neopixels_[0] = (status & 128) ? Color::Red() : Color::Black();
-        Player::Neopixels_.update();
-        while (true) { };
+        Player::ShowByte(status, Color::Red());
     }
-    digitalWrite(AUDIO_SRC, LOW);
+    //digitalWrite(AUDIO_SRC, LOW);
 }
 
 
 ISR(ADC0_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
-    uint16_t value = ADC0.RES / 64; // 64 sampling for better precission
-    switch (ADC0.MUXPOS) {
-        case ADC_MUXPOS_INTREF_gc: { // VCC Sense
-            Player::State_.setVoltage(value);
-            // switch the ADC to be ready to measure the temperature
-            ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
-            ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-            break;
-        }
-        case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
-            Player::State_.setTemp(value);
-            // fallthrough to the default where we set the next measurement to be that of input voltage
-        }
-        default:
-            // switch the ADC to be ready to measure the VCC
-            ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
-            ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-            break;
-    }
-    // start new conversion
-    ADC0.COMMAND = ADC_STCONV_bm;
+    Player::ADCResult_ = ADC0.RES / 64; // 64 sampling for better precission
+    Player::Status_.adcReady = true;
     //digitalWrite(AUDIO_SRC, LOW);    
 }
 
 ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
-    //uint8_t value = ADC1.RES;
     Player::RecordingBuffer_[Player::RecordingIndex_++] = ADC1.RESL;
     Player::RecordingIndex_ &= 63;
     //digitalWrite(AUDIO_SRC, LOW);
