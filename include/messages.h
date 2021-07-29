@@ -269,7 +269,29 @@ namespace msg {
         uint8_t timeout;
     } __attribute__((packed));
 
+    /** Instructs the AVR to start recording sound. 
+     */
+    class StartRecording : public Message {
+    public:
+        static constexpr uint8_t Id = 12;
 
+        StartRecording():
+            Message{Id} { 
+        }
+
+    } __attribute__((packed));
+
+    /** Instructs the avr to stop recording sound. 
+     */
+    class StopRecording : public Message {
+    public:
+        static constexpr uint8_t Id = 13;
+
+        StopRecording():
+            Message{Id} { 
+        }
+
+    } __attribute__((packed));
 
 } // namespace msg
 

@@ -15,6 +15,7 @@
 #include <AudioGeneratorMP3.h>
 //#include <AudioOutputI2SNoDAC.h>
 #include <AudioOutputI2S.h>
+#include <AudioOutputSPIFFSWAV.h>
 
 #include "state.h"
 #include "messages.h"
@@ -116,7 +117,23 @@ public:
 
         //SetMode(Mode::NightLight);
         LOG("End of setup");
+        delay(100);
+        AOut_.SetRate(8000);
+        AOut_.SetChannels(1);
+        AOut_.SetFilename("/test.wav");
+        if (!AOut_.begin()) {
+            LOG("Cannot open file");
+        } else {
+            msg::Send(msg::StartRecording{});
+            Recording_ = true;
+        }
+
     }
+
+    // TODO update this for proper recording
+    static inline uint16_t RecordedLength_ = 0;
+    static inline AudioOutputSPIFFSWAV AOut_;
+    static inline bool Recording_ = false;
 
     static void Loop() {
         // update the running usage statistics
@@ -255,10 +272,29 @@ private:
 
     /** Gets the state from ATTiny. 
      */
+    // TODO update this for proper recording 
     static void UpdateState() {
         Status_.irq = false;
-        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
-        if (n == sizeof(State)) {
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, Recording_ ? 32 : sizeof(State));
+        if (Recording_) {
+            if (n != 32)
+                LOG("Corrupted recording length: " + n);
+            else {
+                Serial.print(".");
+                RecordedLength_ += 32;
+            }
+            while (n-- > 0) {
+                int16_t samples[2];
+                samples[0] = Wire.read();
+                AOut_.ConsumeSample(samples);
+            }     
+            if (RecordedLength_ >= 8000) {
+                Recording_ = false;
+                msg::Send(msg::StopRecording{});
+                AOut_.stop();
+                LOG("Recording done");
+            }
+        } else if (n == sizeof(State)) {
             Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
             LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
             // TODO charging 

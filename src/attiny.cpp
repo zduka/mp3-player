@@ -120,7 +120,7 @@ public:
         delay(200);
         // from now on proceed identically to a wakeup
         Wakeup();
-        StartAudioADC(AudioADCSource::Mic);
+        //StartAudioADC(AudioADCSource::Mic);
     }
 
     static void Loop() {
@@ -299,6 +299,7 @@ private:
         bool tick : 1;
         bool secondTick : 1;
         uint8_t ticksCounter : 6; // 0..63
+        bool recording : 1; // indicates that we are recording 
     } Status_;
 
     inline static State State_;
@@ -418,6 +419,18 @@ private:
                 LightsCounter_ = msg.timeout;
                 break;
             }
+            case msg::StartRecording::Id: {
+                Status_.recording = true;
+                I2C_TX_Mode_ = I2C_TX_Mode::Recording;
+                StartAudioADC(AudioADCSource::Mic);
+                break;
+            }
+            case msg::StopRecording::Id: {
+                Status_.recording = false;
+                I2C_TX_Mode_ = I2C_TX_Mode::State;
+                StopAudioADC();
+                break;
+            }
         }
         Irq_.i2cRx = false;
         cli();
@@ -435,6 +448,13 @@ private:
         bool i2cRx : 1; // indicates that I2C message has been received
     } Irq_;
 
+    enum class I2C_TX_Mode : uint8_t {
+        State,
+        Recording,
+        Custom,
+    }; 
+
+    inline static volatile I2C_TX_Mode I2C_TX_Mode_ = I2C_TX_Mode::State;
     inline static uint8_t I2C_TX_Offset_ = 0;
     inline static uint8_t I2C_TX_Length_ = 0;
     inline static uint8_t * I2C_TX_Buffer_ = nullptr;
@@ -679,7 +699,8 @@ private:
     static void StartAudioADC(AudioADCSource channel) {
         AudioMin_ = 255;
         AudioMax_ = 0;
-        RecordingIndex_ = 0;
+        RecordingRead_ = 0;
+        RecordingWrite_ = 0;
         // select ADC channel to either MIC or audio ADC
         ADC1.MUXPOS  = static_cast<uint8_t>(channel);
         // enable and use 8bit resolution, freerun mode
@@ -713,8 +734,10 @@ private:
     inline static volatile uint8_t AudioMax_;
     inline static volatile uint8_t AudioLightsMax_;
 
-    inline static volatile uint8_t RecordingIndex_;
-    inline static volatile uint8_t RecordingBuffer_[64];
+    
+    inline static volatile uint8_t RecordingWrite_ = 0;
+    inline static volatile uint8_t RecordingRead_ = 0;
+    inline static volatile uint8_t RecordingBuffer_[256];
 
 
 
@@ -757,6 +780,23 @@ ISR(TWI0_TWIS_vect) {
         TWI0.SCTRLB = (Player::I2C_RX_Offset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
     // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
     } else if ((status & I2C_START_MASK) == I2C_START_TX) {
+        Player::ClearIrq();
+        switch (Player::I2C_TX_Mode_) {
+            case Player::I2C_TX_Mode::State: 
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
+                Player::I2C_TX_Offset_ = 0;
+                Player::I2C_TX_Length_ = sizeof(State);
+                if (Player::Status_.recording)
+                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
+                break;
+            case Player::I2C_TX_Mode::Recording: 
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_) + Player::RecordingRead_;
+                Player::I2C_TX_Offset_ = 0;
+                Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
+                break;
+            case Player::I2C_TX_Mode::Custom: 
+                break;
+        }
         if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
             TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
         } else {
@@ -768,11 +808,12 @@ ISR(TWI0_TWIS_vect) {
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         else
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
+    // if we finished transmitting then if the state was transmitted, reset the transmit buffer so that we can transmit state again. 
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
-        if (Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_)) {
-            Player::I2C_TX_Offset_ = 0;
-            Player::State_.clearEvents();
-            Player::ClearIrq();    
+        if (Player::Status_.recording) {
+            Player::RecordingRead_ += 32;
+            if (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_)
+                Player::SetIrq();
         }
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_RX) {
@@ -785,9 +826,17 @@ ISR(TWI0_TWIS_vect) {
 }
 
 ISR(ADC1_RESRDY_vect) {
+    static uint8_t value = 0;
     //digitalWrite(AUDIO_SRC, HIGH);
-    Player::RecordingBuffer_[Player::RecordingIndex_++] = ADC1.RESL;
-    Player::RecordingIndex_ &= 63;
+    
+    
+    //Player::RecordingBuffer_[Player::RecordingWrite_++] = ADC1.RESL;
+    ADC1.RESL;
+    Player::RecordingBuffer_[Player::RecordingWrite_++] = value * 4;
+    value = (value + 1) % 50;
+    Player::RecordingBuffer_[Player::RecordingWrite_++] = ADC1.RESL;
+    if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
+        Player::SetIrq();
     //digitalWrite(AUDIO_SRC, LOW);
 }
 

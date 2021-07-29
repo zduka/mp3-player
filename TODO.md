@@ -12,6 +12,7 @@
 
 # ATTiny
 
+- recording does not wrap around 256, maybe because I2C to fast to read, so we end up with NACK
 - re-enable sleep
 - move code from ISRs to main loop where possible (tick)
 - record sound when wanted, ignore when not
@@ -23,6 +24,7 @@
 
 # ESP
 
+- proper recording code, not just the proof-of-concept hack, move from SPIFFS to SD
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR
 - wifi_off does not inform about success
