@@ -47,9 +47,8 @@ but we actually need audio_src
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
-extern "C" void ADC0_RESRDY_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
-//extern "C" void TCB0_INT_vect(void) __attribute__((signal));
+
 /** ATTiny part of the player.     
     
  */
@@ -128,7 +127,7 @@ public:
         // if there is I2C message from ESP, process it
         if (Irq_.i2cRx)
             I2CReceive();
-        if (Status_.adcReady)
+        if (ADC0.INTFLAGS & ADC_RESRDY_bm)
             VoltageAndTemperature();
         if (Status_.sleep)
             Sleep();
@@ -186,11 +185,11 @@ private:
         RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;
         // start ADC0 to measure the VCC and wait for the first measurement to be done
         ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
-        ADC0.INTCTRL |= ADC_RESRDY_bm;
         ADC0.COMMAND = ADC_STCONV_bm;
         // wait for the voltage measurement to finish
-        while (ADC0.MUXPOS == ADC_MUXPOS_INTREF_gc) {
+        while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
         }
+        VoltageAndTemperature();
         // if the voltage is below low battery threshold
         if (State_.voltage() <= BATTERY_CRITICAL) {
             CriticalBattery();
@@ -269,8 +268,7 @@ private:
     }
 
     static void VoltageAndTemperature() {
-        uint16_t value = ADCResult_;
-        Status_.adcReady = false;
+        uint16_t value = ADC0.RES / 64;
         switch (ADC0.MUXPOS) {
             case ADC_MUXPOS_INTREF_gc: { // VCC Sense
                 State_.setVoltage(value);
@@ -296,18 +294,14 @@ private:
 
     friend void ::RTC_PIT_vect();
 
-    friend void ::ADC0_RESRDY_vect();
-
     inline volatile static struct {
         bool sleep : 1;
         bool tick : 1;
         bool secondTick : 1;
         uint8_t ticksCounter : 6; // 0..63
-        bool adcReady : 1; 
     } Status_;
 
     inline static State State_;
-    inline static volatile uint16_t ADCResult_ = 0;
 
     inline static volatile DateTime Time_;
 
@@ -714,7 +708,6 @@ private:
     }
 
     friend void ::ADC1_RESRDY_vect();
-    //friend void ::TCB0_INT_vect();
 
     inline static volatile uint8_t AudioMin_;
     inline static volatile uint8_t AudioMax_;
@@ -789,14 +782,6 @@ ISR(TWI0_TWIS_vect) {
         Player::ShowByte(status, Color::Red());
     }
     //digitalWrite(AUDIO_SRC, LOW);
-}
-
-
-ISR(ADC0_RESRDY_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
-    Player::ADCResult_ = ADC0.RES / 64; // 64 sampling for better precission
-    Player::Status_.adcReady = true;
-    //digitalWrite(AUDIO_SRC, LOW);    
 }
 
 ISR(ADC1_RESRDY_vect) {

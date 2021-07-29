@@ -12,7 +12,6 @@
 
 # ATTiny
 
-- maybe no need for ADC0 interrupt at all and voltage & temp can be polled 
 - re-enable sleep
 - move code from ISRs to main loop where possible (tick)
 - record sound when wanted, ignore when not
