@@ -295,27 +295,30 @@ private:
                 LOG("Recording done");
             }
         } else if (n == sizeof(State)) {
+            State old = State_;
             Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
             LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
             // TODO charging 
             // TODO headphones
             // TODO alarm
-            if (State_.controlChange())
+
+            if (State_.control() != old.control())
                 ControlChange();
-            if (State_.controlButtonChange())
+            if (State_.controlDown() != old.controlDown())
                 State_.controlDown() ? ControlDown() : ControlUp();
             if (State_.controlPress())
                 ControlPress();
             if (State_.controlLongPress())
                 ControlLongPress();
-            if (State_.volumeChange())
+            if (State_.volume() != old.volume())
                 VolumeChange();
-            if (State_.volumeButtonChange())
+            if (State_.volumeDown() != old.volumeDown())
                 State_.volumeDown() ? VolumeDown() : VolumeUp();
             if (State_.volumePress())
                 VolumePress();
             if (State_.volumeLongPress())
                 VolumeLongPress();
+            State_.clearButtonEvents();
             // TODO process the events now 
         } else {
             LOG("I2C State corruption: " + n);

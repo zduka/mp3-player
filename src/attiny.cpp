@@ -161,7 +161,6 @@ private:
                 if (wakeup) {
                     State_.setControlDown(false);
                     State_.setVolumeDown(false);
-                    State_.clearEvents();
                     Status_.sleep = false;
                 }
             } else {
@@ -304,7 +303,7 @@ private:
 
     inline static State State_;
 
-    inline static volatile DateTime Time_;
+    inline static DateTime Time_;
 
 /** \name Comms
  */
@@ -769,6 +768,9 @@ ISR(TWI0_TWIS_vect) {
     // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don't the ack
     if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
         if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
+            // first byte of state is the events of the buttons, so once we send them, clear them so that we don't send them again
+            if (Player::I2C_TX_Offset_ == 0 && Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
+                Player::State_.clearButtonEvents();
             TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         } else {

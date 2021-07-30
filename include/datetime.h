@@ -130,6 +130,6 @@ private:
     static constexpr uint32_t MINUTE_MASK = 63 << 6;
     static constexpr uint32_t SECOND_MASK = 63;
 
-    uint32_t raw_ = 0;
+    volatile uint32_t raw_ = 0;
 
 } __attribute__((packed));

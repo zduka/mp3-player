@@ -122,107 +122,160 @@ class State {
     friend class msg::SetRadioSettings;
     friend class msg::SetNightLightSettings;
 
-/** \name Events
+/** \name Controls
  
-    Contains information about the events that triggered the state update (when coming from AVR to ESP). When an event is active, the relevant part of the status register then contains the actual value, where applicable.
+    Contains the actual information about the control and volume knob values and the state of their buttons.
  */
 //@{
 public:
 
-    bool chargingChange() const {
-        return events_ & CHARGING_CHANGE_MASK;
+    /** Determines if the control knob is currently pressed. 
+     */
+    bool controlDown() const {
+        return controlState_ & CONTROL_DOWN_MASK;
     }
 
-    bool headphonesChange() const {
-        return events_ & HEADPHONES_CHANGE_MASK;
+    void setControlDown(bool down) {
+        if (down)
+            controlState_ |= CONTROL_DOWN_MASK;
+        else
+            controlState_ &= ~CONTROL_DOWN_MASK;
     }
 
-    bool controlChange() const {
-        return events_ & CONTROL_CHANGE_MASK;
+    /** Determines if the volume knob is currently pressed. 
+     */
+    bool volumeDown() const {
+        return controlState_ & CONTROL_DOWN_MASK;
     }
 
-    bool controlButtonChange() const {
-        return events_ & CONTROL_BUTTON_CHANGE_MASK;
+    void setVolumeDown(bool down) {
+        if (down)
+            controlState_ |= VOLUME_DOWN_MASK;
+        else
+            controlState_ &= ~VOLUME_DOWN_MASK;
     }
 
     bool controlPress() const {
-        return events_ & CONTROL_PRESS_MASK;
+        return controlState_ & CONTROL_PRESS_MASK;
+    }
+
+    void setControlPress(bool value = true) {
+        if (value)
+            controlState_ |= CONTROL_PRESS_MASK;
+        else
+            controlState_ &= ~CONTROL_PRESS_MASK;
     }
 
     bool controlLongPress() const {
-        return events_ & CONTROL_LONG_PRESS_MASK;
+        return controlState_ & CONTROL_LONG_PRESS_MASK;
     }
 
-    bool volumeChange() const {
-        return events_ & VOLUME_CHANGE_MASK;
-    }
-
-    bool volumeButtonChange() const {
-        return events_ & VOLUME_BUTTON_CHANGE_MASK;
+    void setControlLongPress(bool value = true) {
+        if (value)
+            controlState_ |= CONTROL_LONG_PRESS_MASK;
+        else
+            controlState_ &= ~CONTROL_LONG_PRESS_MASK;
     }
 
     bool volumePress() const {
-        return events_ & VOLUME_PRESS_MASK;
+        return controlState_ & VOLUME_PRESS_MASK;
+    }
+
+    void setVolumePress(bool value = true) {
+        if (value)
+            controlState_ |= VOLUME_PRESS_MASK;
+        else
+            controlState_ &= ~VOLUME_PRESS_MASK;
     }
 
     bool volumeLongPress() const {
-        return events_ & VOLUME_LONG_PRESS_MASK;
+        return controlState_ & VOLUME_LONG_PRESS_MASK;
     }
 
-    bool alarm() const {
-        return events_ & ALARM_MASK;
+    void setVolumeLongPress(bool value = true) {
+        if (value)
+            controlState_ |= VOLUME_LONG_PRESS_MASK;
+        else
+            controlState_ &= ~VOLUME_LONG_PRESS_MASK;
     }
 
-#if (defined ARCH_ATTINY)
-    /** Clears the events. 
-     
-        This is to be called whenever the state with the events is sent to ESP so that we do not resend existing events. 
-     */
-    void clearEvents() {
-        events_ = 0;
-    }
-
-    /** Clears any events coming from the buttons 
-     * */
     void clearButtonEvents() {
-        events_ &= ~(CONTROL_PRESS_MASK + CONTROL_LONG_PRESS_MASK + CONTROL_BUTTON_CHANGE_MASK +
-                     VOLUME_PRESS_MASK + VOLUME_LONG_PRESS_MASK + VOLUME_BUTTON_CHANGE_MASK);
+        controlState_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK);
     }
 
-    void setControlPress() {
-        events_ |= CONTROL_PRESS_MASK;
+
+    /** The current value of the control knob. 
+     
+        Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
+     */
+    uint16_t control() const {
+        return controlValues_ & CONTROL_MASK;
     }
 
-    void setControlLongPress() {
-        events_ |= CONTROL_LONG_PRESS_MASK;
+    /** Maximum value (inclusive) the control knob can have, values up to 1023 are allowed. The minimum value is always 0. 
+     */
+    uint16_t maxControl() const {
+        return controlMaximums_ & CONTROL_MASK;
     }
 
-    void setVolumePress() {
-        events_ |= VOLUME_PRESS_MASK;
+    /** The current value of the volume knob. 
+     
+        Can be anywhere between 0 and maxVolume() value which may not exceed 63. 
+     */
+    uint8_t volume() const {
+        return (controlValues_ >> 10) & 63;
     }
 
-    void setVolumeLongPress() {
-        events_ |= VOLUME_LONG_PRESS_MASK;
+    /** The maximum value of the volume knob. 
+     
+        Can be up to 63. Min value is always 0. 
+     */
+    uint8_t maxVolume() const {
+        return (controlMaximums_ >> 10) & 63;
     }
-#endif
+
+
+    void resetControl(uint16_t value, uint16_t maxValue) {
+        controlValues_ &= ~CONTROL_MASK;
+        controlValues_ |= value;
+        controlMaximums_ &= ~ CONTROL_MASK;
+        controlMaximums_ |= maxValue;
+    }
+
+    void setControl(uint16_t value) {
+        assert(value <= maxControl());
+        controlValues_ &= ~CONTROL_MASK;
+        controlValues_ |= value;
+    }
+
+    void resetVolume(uint8_t value, uint8_t maxValue) {
+        controlValues_ &= ~VOLUME_MASK;
+        controlValues_ |= value << 10;
+        controlMaximums_ &= ~VOLUME_MASK;
+        controlMaximums_ |= maxValue << 10;
+    }
+    
+    void setVolume(uint8_t value) {
+        assert(value < maxVolume());
+        controlValues_ &= ~VOLUME_MASK;
+        controlValues_ |= value << 10; 
+    }
 
 private:
+    static constexpr uint8_t CONTROL_DOWN_MASK = 1;
+    static constexpr uint8_t VOLUME_DOWN_MASK = 2;
+    static constexpr uint8_t CONTROL_PRESS_MASK = 4;
+    static constexpr uint8_t VOLUME_PRESS_MASK = 8;
+    static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 16;
+    static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 32;
+    volatile uint8_t controlState_ = 0;
 
-    static constexpr uint16_t CHARGING_CHANGE_MASK = 1 << 0;
-    static constexpr uint16_t HEADPHONES_CHANGE_MASK = 1 << 1;
-    static constexpr uint16_t CONTROL_CHANGE_MASK = 1 << 2;
-    static constexpr uint16_t CONTROL_BUTTON_CHANGE_MASK = 1 << 3;
-    static constexpr uint16_t CONTROL_PRESS_MASK = 1 << 4;
-    static constexpr uint16_t CONTROL_LONG_PRESS_MASK = 1 << 5;
-    static constexpr uint16_t VOLUME_CHANGE_MASK = 1 << 6;
-    static constexpr uint16_t VOLUME_BUTTON_CHANGE_MASK = 1 << 7;
-    static constexpr uint16_t VOLUME_PRESS_MASK = 1 << 8;
-    static constexpr uint16_t VOLUME_LONG_PRESS_MASK = 1 << 9;
-    static constexpr uint16_t ALARM_MASK = 1 << 10;
-
-    volatile uint16_t events_;    
-
+    static constexpr uint16_t CONTROL_MASK = 1023;
+    static constexpr uint16_t VOLUME_MASK = 63 << 10;
+    volatile uint16_t controlValues_ = 0;
+    volatile uint16_t controlMaximums_ = 0;
 //@}
+
 
 
 /** \name Peripherals
@@ -332,111 +385,6 @@ private:
     volatile uint16_t peripherals_ = 0;
 
 //@}
-
-
-/** \name Controls
- 
-    Contains the actual information about the control and volume knob values and the state of their buttons.
- */
-//@{
-public:
-
-    /** The current value of the control knob. 
-     
-        Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
-     */
-    uint16_t control() const {
-        return controlValues_ & CONTROL_MASK;
-    }
-
-    /** Maximum value (inclusive) the control knob can have, values up to 1023 are allowed. The minimum value is always 0. 
-     */
-    uint16_t maxControl() const {
-        return controlMaximums_ & CONTROL_MASK;
-    }
-
-    /** Determines if the control knob is currently pressed. 
-     */
-    bool controlDown() const {
-        return controlState_ & CONTROL_DOWN_MASK;
-    }
-
-    /** The current value of the volume knob. 
-     
-        Can be anywhere between 0 and maxVolume() value which may not exceed 63. 
-     */
-    uint8_t volume() const {
-        return (controlValues_ >> 10) & 63;
-    }
-
-    /** The maximum value of the volume knob. 
-     
-        Can be up to 63. Min value is always 0. 
-     */
-    uint8_t maxVolume() const {
-        return (controlMaximums_ >> 10) & 63;
-    }
-
-    /** Determines if the volume knob is currently pressed. 
-     */
-    bool volumeDown() const {
-        return controlState_ & CONTROL_DOWN_MASK;
-    }
-
-    void resetControl(uint16_t value, uint16_t maxValue) {
-        controlValues_ &= ~CONTROL_MASK;
-        controlValues_ |= value;
-        controlMaximums_ &= ~ CONTROL_MASK;
-        controlMaximums_ |= maxValue;
-    }
-
-    void setControl(uint16_t value) {
-        assert(value <= maxControl());
-        controlValues_ &= ~CONTROL_MASK;
-        controlValues_ |= value;
-        events_ |= CONTROL_CHANGE_MASK;
-    }
-
-    void setControlDown(bool down) {
-        if (down)
-            controlState_ |= CONTROL_DOWN_MASK;
-        else
-            controlState_ &= ~CONTROL_DOWN_MASK;
-        events_ |= CONTROL_BUTTON_CHANGE_MASK;
-    }
-
-    void resetVolume(uint8_t value, uint8_t maxValue) {
-        controlValues_ &= ~VOLUME_MASK;
-        controlValues_ |= value << 10;
-        controlMaximums_ &= ~VOLUME_MASK;
-        controlMaximums_ |= maxValue << 10;
-    }
-    
-    void setVolume(uint8_t value) {
-        assert(value < maxVolume());
-        controlValues_ &= ~VOLUME_MASK;
-        controlValues_ |= value << 10; 
-        events_ |= VOLUME_CHANGE_MASK;
-    }
-
-    void setVolumeDown(bool down) {
-        if (down)
-            controlState_ |= VOLUME_DOWN_MASK;
-        else
-            controlState_ &= ~VOLUME_DOWN_MASK;
-        events_ |= VOLUME_BUTTON_CHANGE_MASK;
-    }
-
-private:
-    static constexpr uint16_t CONTROL_MASK = 1023;
-    static constexpr uint16_t VOLUME_MASK = 63 << 10;
-    volatile uint16_t controlValues_ = 0;
-    volatile uint16_t controlMaximums_ = 0;
-    static constexpr uint8_t CONTROL_DOWN_MASK = 1;
-    static constexpr uint8_t VOLUME_DOWN_MASK = 2;
-    volatile uint8_t controlState_ = 0;
-//@}
-
 
 
 /** \name Mode and mode information. 
