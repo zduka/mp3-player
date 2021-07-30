@@ -15,10 +15,10 @@
 #include <AudioGeneratorMP3.h>
 //#include <AudioOutputI2SNoDAC.h>
 #include <AudioOutputI2S.h>
-#include <AudioOutputSPIFFSWAV.h>
 
 #include "state.h"
 #include "messages.h"
+#include "esp8266/wav_writer.h"
 
 /* ESP8266 PINOUT
 
@@ -118,21 +118,17 @@ public:
         //SetMode(Mode::NightLight);
         LOG("End of setup");
         delay(100);
-        AOut_.SetRate(8000);
-        AOut_.SetChannels(1);
-        AOut_.SetFilename("/test.wav");
-        if (!AOut_.begin()) {
+        if (!AOut_.begin("/test.wav")) {
             LOG("Cannot open file");
         } else {
             msg::Send(msg::StartRecording{});
             Recording_ = true;
         }
-
     }
 
     // TODO update this for proper recording
     static inline uint16_t RecordedLength_ = 0;
-    static inline AudioOutputSPIFFSWAV AOut_;
+    static inline WavWriter AOut_;
     static inline bool Recording_ = false;
 
     static void Loop() {
@@ -284,14 +280,12 @@ private:
                 RecordedLength_ += 32;
             }
             while (n-- > 0) {
-                int16_t samples[2];
-                samples[0] = Wire.read();
-                AOut_.ConsumeSample(samples);
+                AOut_.add(Wire.read());
             }     
             if (RecordedLength_ >= 8000) {
                 Recording_ = false;
                 msg::Send(msg::StopRecording{});
-                AOut_.stop();
+                AOut_.end();
                 LOG("Recording done");
             }
         } else if (n == sizeof(State)) {
