@@ -275,13 +275,10 @@ private:
         if (Recording_) {
             if (n != 32)
                 LOG("Corrupted recording length: " + n);
-            else {
-                Serial.print(".");
+            else 
                 RecordedLength_ += 32;
-            }
-            while (n-- > 0) {
+            while (n-- > 0) 
                 AOut_.add(Wire.read());
-            }     
             if (RecordedLength_ >= 8000) {
                 Recording_ = false;
                 msg::Send(msg::StopRecording{});

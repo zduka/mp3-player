@@ -793,7 +793,7 @@ ISR(TWI0_TWIS_vect) {
                     Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
                 break;
             case Player::I2C_TX_Mode::Recording: 
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_) + Player::RecordingRead_;
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::RecordingBuffer_) + Player::RecordingRead_;
                 Player::I2C_TX_Offset_ = 0;
                 Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
                 break;
@@ -836,14 +836,7 @@ ISR(TWI0_TWIS_vect) {
 }
 
 ISR(ADC1_RESRDY_vect) {
-    static uint8_t value = 0;
     //digitalWrite(AUDIO_SRC, HIGH);
-    
-    
-    //Player::RecordingBuffer_[Player::RecordingWrite_++] = ADC1.RESL;
-    ADC1.RESL;
-    Player::RecordingBuffer_[Player::RecordingWrite_++] = value * 4;
-    value = (value + 1) % 50;
     Player::RecordingBuffer_[Player::RecordingWrite_++] = ADC1.RESL;
     if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
         Player::SetIrq();

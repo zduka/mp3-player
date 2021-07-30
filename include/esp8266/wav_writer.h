@@ -15,6 +15,8 @@ public:
         Technically writes the dummy header. 
      */
     bool begin(char const * filename) {
+        // delete the file if it exists to always start fresh
+        SD.remove(filename);
         f_ = SD.open(filename, FILE_WRITE);
         if (f_) {
             f_.write(pointer_cast<uint8_t const*>(& Header_), sizeof(Header_));
