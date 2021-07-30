@@ -23,7 +23,7 @@
       DCDC_PWR -- (03) PA7   PA0 (17) -- UPDI
                -- (04) PB5   PC3 (13) -- CTRL_B
       CHARGING -- (05) PB4   PC2 (12) -- AUDIO_ADC
-      NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC ????? was it here? 
+      NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC
        AVR_IRQ -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
 
@@ -786,6 +786,7 @@ ISR(TWI0_TWIS_vect) {
                 Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
                 Player::I2C_TX_Offset_ = 0;
                 Player::I2C_TX_Length_ = sizeof(State);
+                // if in the middle of recording, switch back to recording mode for the next request
                 if (Player::Status_.recording)
                     Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
                 break;
@@ -794,7 +795,12 @@ ISR(TWI0_TWIS_vect) {
                 Player::I2C_TX_Offset_ = 0;
                 Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
                 break;
+            // in custom mode leave the buffer and length intact for this call, but reset to either state or recording for next request
             case Player::I2C_TX_Mode::Custom: 
+                if (Player::Status_.recording)
+                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
+                else
+                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::State;
                 break;
         }
         if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
@@ -808,11 +814,13 @@ ISR(TWI0_TWIS_vect) {
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         else
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
-    // if we finished transmitting then if the state was transmitted, reset the transmit buffer so that we can transmit state again. 
+    // when a transmission finishes we must see if another transmission required and re-raise the irq flag for ESP. While recording this means we need to see if there is another 32 bytes available yet
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
         if (Player::Status_.recording) {
-            Player::RecordingRead_ += 32;
-            if (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_)
+            if (Player::I2C_TX_Offset_ == 32) // we only transmit 32byte chunks, anything less will be retransmitted as it was likely an error
+                Player::RecordingRead_ += 32;
+            // if the read and write offsets are into the same 32 bit partition, then the flag will be raised when more samples are available, otherwise raise the flag now
+            if (Player::RecordingRead_ /32 != Player::RecordingWrite_ / 32)
                 Player::SetIrq();
         }
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
