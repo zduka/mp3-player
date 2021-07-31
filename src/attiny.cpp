@@ -789,6 +789,14 @@ ISR(TWI0_TWIS_vect) {
                 Player::State_.clearButtonEvents();
             TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+        // after the selected buffer has been sent, if the buffer is was not state, switch to state and continue sending as long as master wants more data
+        } else if (Player::I2C_TX_Buffer_ != pointer_cast<uint8_t*>(& Player::State_)) {
+            Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
+            Player::I2C_TX_Offset_ = 0;
+            Player::I2C_TX_Length_ = sizeof(State);
+            TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
+            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+        // otherwise don't send anything else, master will eventually send stop
         } else {
             TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
         }
