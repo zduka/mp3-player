@@ -446,6 +446,10 @@ private:
                 StopAudioADC();
                 break;
             }
+            case msg::GetTime::Id: {
+                I2C_TX_Mode_ = I2C_TX_Mode::Time;
+                break;
+            }
         }
         Irq_.i2cRx = false;
         cli();
@@ -466,7 +470,7 @@ private:
     enum class I2C_TX_Mode : uint8_t {
         State,
         Recording,
-        Custom,
+        Time,
     }; 
 
     inline static volatile I2C_TX_Mode I2C_TX_Mode_ = I2C_TX_Mode::State;
@@ -589,65 +593,24 @@ private:
             Lights_.showCenteredBar(Status_.ticksCounter, 63, Color::Blue().withBrightness(MaxBrightness_));
         // if in night light mode, show the selected effect
         } else if (State_.mode() == Mode::NightLight) {
-            step = 255; // pixels will be synced, not moved towards
-            switch (State_.nightLightEffect()) {
-                case NightLightEffect::Color:
-                    Lights_.fill(EffectColor_);
-                    break;
-                case NightLightEffect::Breathe:
-                    Lights_.fill(EffectColor_.withBrightness(EffectCounter_ >> 8));
-                    break;
-                case NightLightEffect::BreatheBar:
-                    Lights_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
-                    break;
-                case NightLightEffect::KnightRider:
-                    Lights_.showPoint(EffectCounter_, 0xffff, EffectColor_);
-                    break;
-                case NightLightEffect::Running:
-                    break;
-            }
-            uint16_t speed = 16 * 32;
-            if (EffectHelper_ & 0x8000) {
-                EffectCounter_ += speed;
-                if (EffectCounter_ < speed) {
-                    EffectCounter_ = 0xffff;
-                    EffectHelper_ &= ~0x8000;
-                }
-            } else {
-                EffectCounter_ -= speed;
-                if (EffectCounter_ > 0xffff - speed) {
-                    EffectCounter_ = 0;
-                    EffectHelper_ |= 0x8000;
-                }
-            }
-            // if we are in rainbow mode, update the effect color hue
-            if (State_.nightLightHue() == State::NIGHTLIGHT_RAINBOW_HUE) {
-                uint16_t hue = EffectHelper_ & 0xfff;
-                hue += 16;
-                if (hue > 0xfff)
-                    hue = 0;
-                EffectHelper_ = (EffectHelper_ & 0xf000) | hue;
-                EffectColor_ = Color::HSV(hue << 4, 255, MaxBrightness_);
-            }
+            NightLight(step);
         // display audio lights now
         // TODO remove the true flag and actually work this based on mode & audio lights state
         } else if (State_.audioLights() || true) {
-            uint8_t v = AudioMax_ - AudioMin_;
-            AudioMin_ = 255;
-            AudioMax_ = 0;
-            if (v > AudioLightsMax_)
-                AudioLightsMax_ = v;
-            Lights_.showCenteredBar(v, AudioLightsMax_, AccentColor_.withBrightness(MaxBrightness_));
-            if (AudioLightsMax_ > 0 && Status_.ticksCounter % 4 == 0)
-                --AudioLightsMax_;
-            //step = 255;
+            AudioLights(step);
         // otherwise the lights are off
         } else {
             Lights_.fill(Color::Black());
         }
         // update the actual neopixels buffer
         Neopixels_.moveTowardsReversed(Lights_, step);
-        // and finally, draw over the bar notification lights - since we do this every tick, calculate the blinking brightness transition first
+        // draw over the bar notification lights - since we do this every tick, calculate the blinking brightness transition first
+        AddNotifications();
+        // and finally, update the neopixels
+        Neopixels_.update();
+    }
+
+    static void AddNotifications() {
         uint16_t notificationBrightness = DEFAULT_NOTIFICATION_BRIGHTNESS;
         if (Status_.ticksCounter < 16)
             notificationBrightness = notificationBrightness * Status_.ticksCounter / 16;
@@ -662,8 +625,69 @@ private:
             if (State_.voltage() <= BATTERY_LOW)
                 Neopixels_[7].add(Color::Red().withBrightness(notificationBrightness));
         }
-        // and finally, update the neopixels
-        Neopixels_.update();
+    }
+
+    static void NightLight(uint8_t & step) {
+        step = 255; // pixels will be synced, not moved towards
+        switch (State_.nightLightEffect()) {
+            case NightLightEffect::Color:
+                Lights_.fill(EffectColor_);
+                break;
+            case NightLightEffect::Breathe:
+                Lights_.fill(EffectColor_.withBrightness(EffectCounter_ >> 8));
+                break;
+            case NightLightEffect::BreatheBar:
+                Lights_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
+                break;
+            case NightLightEffect::KnightRider:
+                Lights_.showPoint(EffectCounter_, 0xffff, EffectColor_);
+                break;
+            case NightLightEffect::Running:
+                break;
+        }
+        uint16_t speed = 16 * 32;
+        if (EffectHelper_ & 0x8000) {
+            EffectCounter_ += speed;
+            if (EffectCounter_ < speed) {
+                EffectCounter_ = 0xffff;
+                EffectHelper_ &= ~0x8000;
+            }
+        } else {
+            EffectCounter_ -= speed;
+            if (EffectCounter_ > 0xffff - speed) {
+                EffectCounter_ = 0;
+                EffectHelper_ |= 0x8000;
+            }
+        }
+        // if we are in rainbow mode, update the effect color hue
+        if (State_.nightLightHue() == State::NIGHTLIGHT_RAINBOW_HUE) {
+            uint16_t hue = EffectHelper_ & 0xfff;
+            hue += 16;
+            if (hue > 0xfff)
+                hue = 0;
+            EffectHelper_ = (EffectHelper_ & 0xf000) | hue;
+            EffectColor_ = Color::HSV(hue << 4, 255, MaxBrightness_);
+        }
+    }
+
+    static void AudioLights(uint8_t & step) {
+        cli();
+        uint8_t ri = RecordingWrite_;
+        sei();
+        uint8_t audioMin = 255;
+        uint8_t audioMax = 0;
+        for (uint8_t i = 0; i < 125; ++i) {
+            uint8_t x = RecordingBuffer_[--ri];
+            audioMin = (x < audioMin) ? x : audioMin;
+            audioMax = (x > audioMax) ? x : audioMax;
+        }
+        uint8_t v = audioMax - audioMin;
+        //  v = v < 32 ? 0 : v - 32;
+        if (v > AudioLightsMax_)
+            AudioLightsMax_ = v;
+        Lights_.showCenteredBar(v, AudioLightsMax_, AccentColor_.withBrightness(MaxBrightness_));
+        if (AudioLightsMax_ > 0 && Status_.ticksCounter % 4 == 0)
+            --AudioLightsMax_;
     }
 
     /** Shows the given byte displayed on the neopixels strip and freezes. 
@@ -694,6 +718,7 @@ private:
     inline static Color AccentColor_ = DEFAULT_ACCENT_COLOR;
     inline static Color EffectColor_;
     inline static volatile uint8_t LightsCounter_ = 0;
+    inline static volatile uint8_t AudioLightsMax_;
 
 //@}
 
@@ -712,8 +737,6 @@ private:
     static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
 
     static void StartAudioADC(AudioADCSource channel) {
-        AudioMin_ = 255;
-        AudioMax_ = 0;
         RecordingRead_ = 0;
         RecordingWrite_ = 0;
         // select ADC channel to either MIC or audio ADC
@@ -735,26 +758,11 @@ private:
         return ADC1.CTRLA & ADC_ENABLE_bm;
     }
 
-    static void UpdateAudioLights() {
-        uint8_t v = AudioMax_ - AudioMin_;
-        v = v < 32 ? 0 : v - 32;
-        Neopixels_.showCenteredBar(v, 128, AccentColor_);
-        AudioMin_ = 255;
-        AudioMax_ = 0;
-    }
-
     friend void ::ADC1_RESRDY_vect();
-
-    inline static volatile uint8_t AudioMin_;
-    inline static volatile uint8_t AudioMax_;
-    inline static volatile uint8_t AudioLightsMax_;
-
     
     inline static volatile uint8_t RecordingWrite_ = 0;
     inline static volatile uint8_t RecordingRead_ = 0;
     inline static volatile uint8_t RecordingBuffer_[256];
-
-
 
 //@}
 
@@ -821,8 +829,11 @@ ISR(TWI0_TWIS_vect) {
                 Player::I2C_TX_Offset_ = 0;
                 Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
                 break;
-            // in custom mode leave the buffer and length intact for this call, but reset to either state or recording for next request
-            case Player::I2C_TX_Mode::Custom: 
+            // when sending time, set the buffer properly and revert back to the default TX mode
+            case Player::I2C_TX_Mode::Time:
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::Time_);
+                Player::I2C_TX_Offset_ = 0;
+                Player::I2C_TX_Length_ = sizeof(DateTime);
                 if (Player::Status_.recording)
                     Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
                 else
@@ -866,33 +877,6 @@ ISR(ADC1_RESRDY_vect) {
         Player::SetIrq();
     //digitalWrite(AUDIO_SRC, LOW);
 }
-
-/** The 8kHz interrupt for audio recording. 
- */
-/*
-ISR(TCB0_INT_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
-    TCB0.INTFLAGS = TCB_CAPT_bm; // clear the flag
-    ADC1.COMMAND = ADC_STCONV_bm;
-    /*
-    if (Player::RecordingCounter_ != 0) { // div by zero
-        uint8_t value = Player::Recording_ / Player::RecordingCounter_;
-        Player::Recording_ = 0;
-        Player::RecordingCounter_ = 0;
-        // whether this is audio, or microphone, update the audio bar levels
-        if (value < Player::AudioMin_)
-            Player::AudioMin_ = value; 
-        if (value > Player::AudioMax_)
-            Player::AudioMax_ = value;
-        // if we are recording, store in the buffer
-        Player::RecordingBuffer_[Player::RecordingIndex_];
-        Player::RecordingIndex_ = (Player::RecordingIndex_ + 1) % 64;
-        // TODO notify ESP to read    
-    }
-    * /
-    //digitalWrite(AUDIO_SRC, LOW);
-}
-*/
 
 void setup() {
     Player::Initialize();

@@ -274,5 +274,17 @@ namespace msg {
 
     } __attribute__((packed));
 
+    /** Instructs the ATTiny to return the current time in the next I2C master read transmission. 
+     */    
+    class GetTime : public Message {
+    public:
+        static constexpr uint8_t Id = 14;
+
+        GetTime():
+            Message{Id} {
+        }
+
+    } __attribute__((packed));
+
 } // namespace msg
 

@@ -21,6 +21,7 @@
 
 # ESP
 
+- when recording, check that the button is still held down
 - proper recording code, not just the proof-of-concept hack
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR
