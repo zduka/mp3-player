@@ -106,25 +106,6 @@ namespace msg {
 
     static_assert(sizeof(SetWiFiStatus) == 2);
 
-    class SetAudioSource : public Message {
-    public:
-        static constexpr uint8_t Id = 3;
-
-        SetAudioSource(State const & from):
-            Message{Id},
-            source_{from.audioSource()} {
-        }
-
-        void applyTo(State & state) const {
-            state.setAudioSource(source_);
-        }
-
-    private:
-        AudioSource source_;
-
-    } __attribute__((packed));
-
-    
     class SetMP3Settings : public Message {
     public:
         static constexpr uint8_t Id = 4;

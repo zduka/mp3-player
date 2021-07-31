@@ -992,7 +992,6 @@ private:
             PSTR(",\"maxVolume\":") + State_.maxVolume() +
             PSTR(",\"mode\":") + static_cast<uint8_t>(State_.mode()) +
             PSTR(",\"audioLights\":") + State_.audioLights() +
-            PSTR(",\"audioSource\":") + static_cast<uint8_t>(State_.audioSource()) +
             PSTR(",\"wifiStatus\":") + static_cast<uint8_t>(State_.wifiStatus()) +
             PSTR(",\"mp3PlaylistId\":") + State_.mp3PlaylistId() +
             PSTR(",\"mp3TrackId\":") + State_.mp3TrackId() +

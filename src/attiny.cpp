@@ -159,6 +159,7 @@ private:
             // if sleeping, check if we should wake up, otherwise initiate the tick in main loop
             if (Status_.sleep) {
                 if (wakeup) {
+                    // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
                     State_.setControlDown(false);
                     State_.setVolumeDown(false);
                     Status_.sleep = false;
@@ -223,6 +224,7 @@ private:
                 sleep_cpu();
             }
             // clear the button events that led to the wakeup
+            // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
             State_.clearButtonEvents();
             // if we are not longer sleeping, wakeup
             Wakeup();
@@ -270,14 +272,18 @@ private:
         uint16_t value = ADC0.RES / 64;
         switch (ADC0.MUXPOS) {
             case ADC_MUXPOS_INTREF_gc: { // VCC Sense
+                cli();
                 State_.setVoltage(value);
+                sei();
                 // switch the ADC to be ready to measure the temperature
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
                 ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
                 break;
             }
             case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
+                cli();
                 State_.setTemp(value);
+                sei();
                 // fallthrough to the default where we set the next measurement to be that of input voltage
             }
             default:
@@ -354,37 +360,47 @@ private:
             }
             case msg::SetMode::Id: {
                 auto msg = msg::At<msg::SetMode>(I2C_RX_Buffer_);
+                cli();
                 msg.applyTo(State_);
+                sei();
                 // sync the volume and control states
                 Control_.setValues(State_.control(), State_.maxControl());
                 Volume_.setValues(State_.volume(), State_.maxVolume());
                 // sync the effect color for the night mode
                 EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
+                // set the audio source accordingly
+                if (State_.mode() == Mode::Radio)
+                    digitalWrite(AUDIO_SRC, HIGH);
+                else
+                    digitalWrite(AUDIO_SRC, LOW); 
                 break;
             }
             case msg::SetWiFiStatus::Id: {
                 auto msg = msg::At<msg::SetWiFiStatus>(I2C_RX_Buffer_);
+                cli();
                 msg.applyTo(State_);
-                break;
-            }
-            case msg::SetAudioSource::Id: {
-                auto msg = msg::At<msg::SetAudioSource>(I2C_RX_Buffer_);
-                msg.applyTo(State_);
+                sei();
                 break;
             }
             case msg::SetMP3Settings::Id: {
                 auto msg = msg::At<msg::SetMP3Settings>(I2C_RX_Buffer_);
+                cli();
                 msg.applyTo(State_);
+                sei();
                 break;
             }
             case msg::SetRadioSettings::Id: {
                 auto msg = msg::At<msg::SetRadioSettings>(I2C_RX_Buffer_);
+                cli();
                 msg.applyTo(State_);
+                sei();
                 break;
             }
             case msg::SetNightLightSettings::Id: {
                 auto msg = msg::At<msg::SetNightLightSettings>(I2C_RX_Buffer_);
+                cli();
                 msg.applyTo(State_);
+                sei();
                 EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
                 break;
             }
@@ -479,19 +495,19 @@ private:
     inline static uint8_t ControlBtnCounter_ = 0;
     inline static uint8_t VolumeBtnCounter_ = 0;
 
-    static void ControlValueChanged() {
+    static void ControlValueChanged() { // IRQ
         Control_.poll();
         State_.setControl(Control_.value());
         SetIrq();
     }   
 
-    static void VolumeValueChanged() {
+    static void VolumeValueChanged() { // IRQ
         Volume_.poll(); 
         State_.setVolume(Volume_.value());
         SetIrq();
     } 
 
-    static void ControlButtonChanged() {
+    static void ControlButtonChanged() { // IRQ
         ControlBtn_.poll();
         if (ControlBtn_.pressed()) {
             ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
@@ -515,7 +531,7 @@ private:
             SetIrq();
     }
 
-    static void VolumeButtonChanged() {
+    static void VolumeButtonChanged() { // IRQ
         VolumeBtn_.poll();
         if (VolumeBtn_.pressed()) {
             VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;

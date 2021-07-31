@@ -12,19 +12,16 @@
 
 # ATTiny
 
-- changing state while sending it can lead to inconsistencies, 
 - re-enable sleep
 - move code from ISRs to main loop where possible (tick)
 - record sound when wanted, ignore when not
 - better lights algorithm - currently is always on almost all the time
 - determine decent speed settings for the night light effects
 - not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
-- make sure that ADC is disconnected while sleeping
-- audio source must be switched accordingly
 
 # ESP
 
-- proper recording code, not just the proof-of-concept hack, move from SPIFFS to SD
+- proper recording code, not just the proof-of-concept hack
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR
 - wifi_off does not inform about success

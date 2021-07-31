@@ -67,11 +67,6 @@ enum class Mode : uint8_t {
     NightLight,
 }; // Mode
 
-enum class AudioSource : uint8_t {
-    ESP = 0,
-    Radio = 1
-}; // AudioSource
-
 enum class WiFiStatus : uint8_t {
     Off = 0,
     Connecting = 1,
@@ -412,35 +407,22 @@ public:
             mode_ &= ~ AUDIO_LIGHTS_MASK;
     }
 
-    AudioSource audioSource() const {
-        return static_cast<AudioSource>((mode_ & AUDIO_SOURCE_MASK) >> 5);
-    }
-
-    void setAudioSource(AudioSource value) {
-        mode_ &= ~AUDIO_SOURCE_MASK;
-        mode_ |= (static_cast<uint8_t>(value) << 5) & AUDIO_SOURCE_MASK;
-    }
 
     WiFiStatus wifiStatus() const {
-        return static_cast<WiFiStatus>((mode_ & WIFI_STATUS_MASK) >> 6);
+        return static_cast<WiFiStatus>((mode_ & WIFI_STATUS_MASK) >> 5);
     }
 
     void setWiFiStatus(WiFiStatus value) {
         mode_ &= ~WIFI_STATUS_MASK;
-        mode_ |= (static_cast<uint8_t>(value) << 6) & WIFI_STATUS_MASK;
+        mode_ |= (static_cast<uint8_t>(value) << 5) & WIFI_STATUS_MASK;
     }
-
-
-
-
-
 
 private:
     // we really need only 2 bits, but using 3 gives extra space for the future 
     static constexpr uint8_t MODE_MASK = 7;
     static constexpr uint8_t AUDIO_LIGHTS_MASK = 1 << 4;
-    static constexpr uint8_t AUDIO_SOURCE_MASK = 1 << 5;
-    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
+    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 5;
+    // 1 bit left
 
     volatile uint8_t mode_ = 0;
 
