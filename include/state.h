@@ -140,7 +140,7 @@ public:
     /** Determines if the volume knob is currently pressed. 
      */
     bool volumeDown() const {
-        return controlState_ & CONTROL_DOWN_MASK;
+        return controlState_ & VOLUME_DOWN_MASK;
     }
 
     void setVolumeDown(bool down) {

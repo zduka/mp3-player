@@ -477,16 +477,19 @@ private:
     }
 
     static void VolumeDown() {
+        LOG("Volume down");
 
     }
 
     static void VolumeUp() {
+        LOG("Volume down");
 
     }
 
     /** Play/Pause toggle.
      */
     static void VolumePress() {
+        LOG("Volume press");
         if (Status_.idle) 
             Play();
         else
@@ -496,6 +499,7 @@ private:
     /** Enables or disables the audio lights. 
      */
     static void VolumeLongPress() {
+        LOG("Volume long press");
         // TODO switch audio lights on or off
     }
 

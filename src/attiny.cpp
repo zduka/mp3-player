@@ -770,10 +770,10 @@ private:
 
 
 ISR(RTC_PIT_vect) {
-    digitalWrite(AUDIO_SRC, HIGH);
+    //digitalWrite(AUDIO_SRC, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
     Player::Tick();
-    digitalWrite(AUDIO_SRC, LOW);
+    //digitalWrite(AUDIO_SRC, LOW);
 }
 
 #define I2C_DATA_MASK (TWI_DIF_bm | TWI_DIR_bm) 
@@ -792,11 +792,11 @@ ISR(TWI0_TWIS_vect) {
     // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don't the ack
     if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
         if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
-            // first byte of state is the events of the buttons, so once we send them, clear them so that we don't send them again
-            if (Player::I2C_TX_Offset_ == 0 && Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
-                Player::State_.clearButtonEvents();
             TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+            // first byte of state is the events of the buttons, so once we send them, clear them so that we don't send them again
+            if (Player::I2C_TX_Offset_ == 1 && Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
+                Player::State_.clearButtonEvents();
         // after the selected buffer has been sent, if the buffer is was not state, switch to state and continue sending as long as master wants more data
         } else if (Player::I2C_TX_Buffer_ != pointer_cast<uint8_t*>(& Player::State_)) {
             Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
