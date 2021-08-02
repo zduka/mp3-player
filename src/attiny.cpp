@@ -444,6 +444,7 @@ private:
                 Status_.recording = false;
                 I2C_TX_Mode_ = I2C_TX_Mode::State;
                 StopAudioADC();
+                StartAudioADC(AudioADCSource::Audio);
                 break;
             }
             case msg::GetTime::Id: {
@@ -671,9 +672,7 @@ private:
     }
 
     static void AudioLights(uint8_t & step) {
-        cli();
         uint8_t ri = RecordingWrite_;
-        sei();
         uint8_t audioMin = 255;
         uint8_t audioMax = 0;
         for (uint8_t i = 0; i < 125; ++i) {
@@ -682,12 +681,17 @@ private:
             audioMax = (x > audioMax) ? x : audioMax;
         }
         uint8_t v = audioMax - audioMin;
-        //  v = v < 32 ? 0 : v - 32;
         if (v > AudioLightsMax_)
             AudioLightsMax_ = v;
-        Lights_.showCenteredBar(v, AudioLightsMax_, AccentColor_.withBrightness(MaxBrightness_));
-        if (AudioLightsMax_ > 0 && Status_.ticksCounter % 4 == 0)
-            --AudioLightsMax_;
+        if (v < AudioLightsMin_)
+            AudioLightsMin_ = v;
+        Lights_.showCenteredBar(v - AudioLightsMin_, AudioLightsMax_ - AudioLightsMin_, AccentColor_.withBrightness(MaxBrightness_));
+        if (Status_.ticksCounter % 4 == 0) {
+            if (AudioLightsMax_ > v)
+                --AudioLightsMax_;
+            if (AudioLightsMin_ < v)
+                ++AudioLightsMin_;
+        }
     }
 
     /** Shows the given byte displayed on the neopixels strip and freezes. 
@@ -719,6 +723,7 @@ private:
     inline static Color EffectColor_;
     inline static volatile uint8_t LightsCounter_ = 0;
     inline static volatile uint8_t AudioLightsMax_;
+    inline static volatile uint8_t AudioLightsMin_;
 
 //@}
 
@@ -737,6 +742,8 @@ private:
     static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
 
     static void StartAudioADC(AudioADCSource channel) {
+        AudioLightsMin_ = 0;
+        AudioLightsMax_ = 255;
         RecordingRead_ = 0;
         RecordingWrite_ = 0;
         // select ADC channel to either MIC or audio ADC
@@ -872,7 +879,7 @@ ISR(TWI0_TWIS_vect) {
 
 ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
-    Player::RecordingBuffer_[Player::RecordingWrite_++] = ADC1.RESL;
+    Player::RecordingBuffer_[Player::RecordingWrite_++] = (ADC1.RES & 0xff);
     if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
         Player::SetIrq();
     //digitalWrite(AUDIO_SRC, LOW);

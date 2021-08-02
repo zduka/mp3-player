@@ -98,7 +98,6 @@ public:
 
         //Message::Send(Message::SetVolume{0, 16});
         //UpdateState();
-        //InitializeAP();
         InitializeWiFi();
         InitializeServer();
         PreviousSecondMillis_ = millis();
@@ -123,6 +122,8 @@ public:
             msg::Send(msg::StartRecording{});
             Recording_ = true;
         }
+
+        //WiFiConnect();
     }
 
     // TODO update this for proper recording
