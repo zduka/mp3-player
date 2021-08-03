@@ -12,7 +12,6 @@
 
 # ATTiny
 
-- invalid recording stuff sent
 - re-enable sleep
 - move code from ISRs to main loop where possible (tick)
 - record sound when wanted, ignore when not

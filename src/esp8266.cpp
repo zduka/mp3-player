@@ -271,13 +271,10 @@ private:
     // TODO update this for proper recording 
     static void UpdateState() {
         Status_.irq = false;
-        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, Recording_ ? 32 : sizeof(State));
-        if (Recording_) {
-            if (n != 32)
-                LOG("Corrupted recording length: " + n);
-            else 
-                RecordedLength_ += 32;
-            while (n-- > 0) 
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, Recording_ ? 33 : sizeof(State));
+        if (Recording_ && n == 33) {
+            RecordedLength_ += 32;
+            while (n-- > 1) 
                 AOut_.add(Wire.read());
             if (RecordedLength_ >= 8000) {
                 Recording_ = false;
@@ -285,13 +282,15 @@ private:
                 AOut_.end();
                 LOG("Recording done");
             }
-        } else if (n == sizeof(State)) {
+            // TODO actually read the state and determine if to stop the recording
+            Wire.read(); 
+        } else if (! Recording_ && n == sizeof(State)) {
             State old = State_;
             Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
             LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
             // TODO charging 
             // TODO headphones
-            // TODO alarm
+            // TODO alarm ...................
 
             if (State_.control() != old.control())
                 ControlChange();
@@ -310,9 +309,8 @@ private:
             if (State_.volumeLongPress())
                 VolumeLongPress();
             State_.clearButtonEvents();
-            // TODO process the events now 
         } else {
-            LOG("I2C State corruption: " + n);
+            LOG("I2C Err: " + n + (Recording_ ? " rec" : ""));
         }
     }
 

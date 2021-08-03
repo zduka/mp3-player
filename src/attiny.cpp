@@ -475,6 +475,9 @@ private:
     }; 
 
     inline static volatile I2C_TX_Mode I2C_TX_Mode_ = I2C_TX_Mode::State;
+    /** The mode of current TX in progress (if any). 
+     */
+    inline static I2C_TX_Mode I2C_Current_TX_Mode_;
     inline static uint8_t I2C_TX_Offset_ = 0;
     inline static uint8_t I2C_TX_Length_ = 0;
     inline static uint8_t * I2C_TX_Buffer_ = nullptr;
@@ -699,6 +702,7 @@ private:
         The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
      */
     static void ShowByte(uint8_t value, Color const & color) {
+        cli();
         Neopixels_[7] = (value & 1) ? color : Color::Black();
         Neopixels_[6] = (value & 2) ? color : Color::Black();
         Neopixels_[5] = (value & 4) ? color : Color::Black();
@@ -708,7 +712,6 @@ private:
         Neopixels_[1] = (value & 64) ? color : Color::Black();
         Neopixels_[0] = (value & 128) ? color : Color::Black();
         Neopixels_.update();
-        cli();
         while (true) { };
     }
 
@@ -805,7 +808,10 @@ ISR(TWI0_TWIS_vect) {
             if (Player::I2C_TX_Offset_ == 1 && Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
                 Player::State_.clearButtonEvents();
         // after the selected buffer has been sent, if the buffer is was not state, switch to state and continue sending as long as master wants more data
-        } else if (Player::I2C_TX_Buffer_ != pointer_cast<uint8_t*>(& Player::State_)) {
+        } else if (Player::I2C_Current_TX_Mode_ != Player::I2C_TX_Mode::State) {
+            if (Player::I2C_Current_TX_Mode_ == Player::I2C_TX_Mode::Recording)
+                Player::RecordingRead_ += 32; // we succeeded in sending the buffer, increment read index
+            Player::I2C_Current_TX_Mode_ = Player::I2C_TX_Mode::State;
             Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
             Player::I2C_TX_Offset_ = 0;
             Player::I2C_TX_Length_ = sizeof(State);
@@ -822,7 +828,8 @@ ISR(TWI0_TWIS_vect) {
     // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
     } else if ((status & I2C_START_MASK) == I2C_START_TX) {
         Player::ClearIrq();
-        switch (Player::I2C_TX_Mode_) {
+        Player::I2C_Current_TX_Mode_ = Player::I2C_TX_Mode_;
+        switch (Player::I2C_Current_TX_Mode_) {
             case Player::I2C_TX_Mode::State: 
                 Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
                 Player::I2C_TX_Offset_ = 0;
@@ -847,11 +854,10 @@ ISR(TWI0_TWIS_vect) {
                     Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::State;
                 break;
         }
-        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
+        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) 
             TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
-        } else {
+        else 
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
-        }
     // master requests to write data itself. ACK if the buffer is empty (we do not support multiple commands in same buffer), NACK otherwise.
     } else if ((status & I2C_START_MASK) == I2C_START_RX) {
         if (Player::I2C_RX_Offset_ == 0)
@@ -861,10 +867,8 @@ ISR(TWI0_TWIS_vect) {
     // when a transmission finishes we must see if another transmission required and re-raise the irq flag for ESP. While recording this means we need to see if there is another 32 bytes available yet
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
         if (Player::Status_.recording) {
-            if (Player::I2C_TX_Offset_ == 32) // we only transmit 32byte chunks, anything less will be retransmitted as it was likely an error
-                Player::RecordingRead_ += 32;
             // if the read and write offsets are into the same 32 bit partition, then the flag will be raised when more samples are available, otherwise raise the flag now
-            if (Player::RecordingRead_ /32 != Player::RecordingWrite_ / 32)
+            if (Player::RecordingRead_ / 32 != Player::RecordingWrite_ / 32)
                 Player::SetIrq();
         }
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
