@@ -121,7 +121,6 @@ public:
         delay(200);
         // from now on proceed identically to a wakeup
         Wakeup();
-        //StartAudioADC(AudioADCSource::Mic);
     }
 
     static void Loop() {
@@ -445,11 +444,30 @@ private:
                 Status_.recording = false;
                 I2C_TX_Mode_ = I2C_TX_Mode::State;
                 StopAudioADC();
-                StartAudioADC(AudioADCSource::Audio);
                 break;
             }
             case msg::GetTime::Id: {
                 I2C_TX_Mode_ = I2C_TX_Mode::Time;
+                break;
+            }
+            case msg::SetAudioLights::Id: {
+                auto msg = msg::At<msg::SetAudioLights>(I2C_RX_Buffer_);
+                msg.applyTo(State_);
+                if (State_.audioLights()) 
+                    StartAudioADC(AudioADCSource::Audio);
+                else
+                    StopAudioADC();
+                break;
+            }
+            case msg::Play::Id: {
+                // TODO enable sound out
+                if (State_.audioLights()) 
+                    StartAudioADC(AudioADCSource::Audio);
+                break;
+            }
+            case msg::Pause::Id: {
+                // TODO disable sound out
+                StopAudioADC();
                 break;
             }
         }
@@ -601,7 +619,7 @@ private:
             NightLight(step);
         // display audio lights now
         // TODO remove the true flag and actually work this based on mode & audio lights state
-        } else if (State_.audioLights() || true) {
+        } else if (State_.audioLights()) {
             AudioLights(step);
         // otherwise the lights are off
         } else {
@@ -746,8 +764,8 @@ private:
     static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
 
     static void StartAudioADC(AudioADCSource channel) {
-        AudioLightsMin_ = 0;
-        AudioLightsMax_ = 255;
+        AudioLightsMin_ = 255;
+        AudioLightsMax_ = 0;
         RecordingRead_ = 0;
         RecordingWrite_ = 0;
         // select ADC channel to either MIC or audio ADC

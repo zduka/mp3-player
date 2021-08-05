@@ -524,14 +524,14 @@ private:
     }
 
     /** Enables or disables the audio lights. 
+     
+        // TODO only if control not pressed as well
      */
     static void VolumeLongPress() {
         LOG("Volume long press");
-        // TODO switch audio lights on or off
+        State_.setAudioLights(! State_.audioLights());
+        msg::Send(msg::SetAudioLights{State_});
     }
-
-
-
 
 //@}
 
@@ -586,6 +586,7 @@ private:
     /** Resumes playback.
      */ 
     static void Play() {
+        msg::Send(msg::Play{});
         switch (State_.mode()) {
             case Mode::MP3:
                 SetPlaylist(State_.mp3PlaylistId());
@@ -621,6 +622,7 @@ private:
                 break;
             // don't do anything for walkie talkie ?
         }
+        msg::Send(msg::Pause{});
         Status_.idle = true;
         Status_.powerOffCountdown = Settings_.powerOffTimeout;
     }
@@ -1015,10 +1017,8 @@ private:
             PSTR(",\"wifiStatus\":") + static_cast<uint8_t>(State_.wifiStatus()) +
             PSTR(",\"mp3PlaylistId\":") + State_.mp3PlaylistId() +
             PSTR(",\"mp3TrackId\":") + State_.mp3TrackId() +
-            PSTR(",\"mp3PlaylistSelection\":") + State_.mp3PlaylistSelection() +
             PSTR(",\"radioFrequency\":") + State_.radioFrequency() + 
             PSTR(",\"radioStation\":") + State_.radioStation() +
-            PSTR(",\"radioManualTuning\":") + State_.radioManualTuning() +
             PSTR(",\"espLoopCount\":") + LoopCount_ +
             PSTR(",\"espMaxLoopTime\":") + MaxLoopTime_ +
         PSTR("}")));

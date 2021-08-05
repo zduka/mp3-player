@@ -74,15 +74,6 @@ enum class WiFiStatus : uint8_t {
     SoftAP = 3
 }; // WiFiStatus
 
-enum class MP3Selection : uint8_t {
-    Track = 0, 
-    Playlist = 1,
-}; // MP3Selection
-
-enum class RadioTuning : uint8_t {
-    Presets = 0,
-    Manual = 1
-}; // RadioTuning
 
 /** The various night light effects the player supports. 
  */
@@ -448,22 +439,7 @@ public:
         mp3_ |= (value & TRACK_ID_MASK);
     }
 
-    /** When true, control knob is used to select playlist, not track id. 
-     */
-    bool mp3PlaylistSelection() const {
-        return mp3_ & PLAYLIST_SELECTION_MASK;
-    }
-
-    void setMp3PlaylistSelection(bool value) {
-        if (value)
-            mp3_ |= PLAYLIST_SELECTION_MASK;
-        else 
-            mp3_ &= ~PLAYLIST_SELECTION_MASK;            
-    }
-
-
     // TODO allow playlist change? 
-    static constexpr uint16_t PLAYLIST_SELECTION_MASK = 1 << 13;
     static constexpr uint16_t PLAYLIST_ID_MASK = 7 << 10;
     static constexpr uint16_t TRACK_ID_MASK = 1023;
     volatile uint16_t mp3_;
@@ -488,21 +464,9 @@ public:
         radio_ |= (index << 9) & STATION_MASK;
     }
 
-    bool radioManualTuning() const {
-        return radio_ & MANUAL_TUNING_MASK;
-    }
-
-    void setRadioManualTuning(bool value) {
-        if (value)
-            radio_ |= MANUAL_TUNING_MASK;
-        else
-            radio_ &= ~MANUAL_TUNING_MASK;
-    }
-
 private:
 
     // TODO allow manual tuning ?
-    static constexpr uint16_t MANUAL_TUNING_MASK = 1 << 12;
     static constexpr uint16_t STATION_MASK = 7 << 9;
     static constexpr uint16_t FREQUENCY_MASK = 511;
     volatile uint16_t radio_ = 0;
@@ -546,22 +510,10 @@ public:
         }
     }
 
-    bool nightLightHueSelection() const {
-        return nightLight_ & NIGHT_LIGHT_HUE_SELECTION_MASK;
-    }
-
-    void setNightLightHueSelection(bool value) {
-        if (value)
-            nightLight_ |= NIGHT_LIGHT_HUE_SELECTION_MASK;
-        else
-            nightLight_ &= ~NIGHT_LIGHT_HUE_SELECTION_MASK;
-    }
-
 private:
 
     static constexpr uint16_t NIGHT_LIGHT_EFFECT_MASK = 15;
     static constexpr uint16_t NIGHT_LIGHT_HUE_MASK = 31 << 4;
-    static constexpr uint16_t NIGHT_LIGHT_HUE_SELECTION_MASK = 1 << 9;
 
     volatile uint16_t nightLight_ = 0;
 

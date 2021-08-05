@@ -286,5 +286,41 @@ namespace msg {
 
     } __attribute__((packed));
 
+    /** Instructs the ATTiny to either enable, or disable the audio lights bar when playing music.
+     */
+    class SetAudioLights : public Message {
+    public:
+        static constexpr uint8_t Id = 15;
+
+        SetAudioLights(State const & state):
+            Message{Id},
+            lightsOn_{state.audioLights()} {
+        }
+
+        void applyTo(State & state) const {
+            state.setAudioLights(lightsOn_);
+        }
+
+    private:
+
+        bool lightsOn_;
+    } __attribute__((packed));
+
+    class Play : public Message {
+    public:
+        static constexpr uint8_t Id = 16;
+        Play():
+            Message{Id} {
+        }
+    } __attribute__((packed));
+
+    class Pause : public Message {
+    public:
+        static constexpr uint8_t Id = 17;
+        Pause():
+            Message{Id} {
+        }
+    } __attribute__((packed));
+
 } // namespace msg
 

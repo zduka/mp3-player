@@ -12,15 +12,14 @@
 
 # ATTiny
 
+- audiolights are a bit weird...
 - re-enable sleep
 - move code from ISRs to main loop where possible (tick)
 - record sound when wanted, ignore when not
 - determine decent speed settings for the night light effects
-- not sure why but poweron does not power ESP sometimes, forcefully turning esp on fixes everything
 
 # ESP
 
-- restarts in mp3 mode after next track moves on
 - when recording, check that the button is still held down
 - proper recording code, not just the proof-of-concept hack
 - longer delay before power down in night light mode (done, check)
