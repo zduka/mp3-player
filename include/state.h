@@ -18,7 +18,7 @@
 #define DEFAULT_WIFI_TIMEOUT 3600
 #define DEFAULT_NIGHT_LIGHTS_TIMEOUT 3600
 #define DEFAULT_ALLOW_RADIO_MANUAL_TUNING true
-#define DEFAULT_VOLUME 3
+#define DEFAULT_VOLUME 2
 #define DEFAULT_MAX_SPEAKER_VOLUME 15
 #define DEFAULT_MAX_HEADPHONES_VOLUME 15
 #define DEFAULT_SPECIAL_LIGHTS_TIMEOUT 128
@@ -92,6 +92,7 @@ enum class NightLightEffect : uint8_t {
     BreatheBar, // breathing effect, centered bar, single color
     KnightRider, // larson scanner, single color
     Running, // running lights, single color
+    Sentinel // sentinel value indicating the end of effects
 }; // NightLightEffect
 
 /** The player state. 

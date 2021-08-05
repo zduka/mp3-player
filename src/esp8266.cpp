@@ -106,24 +106,24 @@ public:
 
         //WiFiConnect();
         
-        //SetMode(Mode::MP3);
+        SetMode(Mode::MP3);
         //SetPlaylist(1);
         //SetTrack(0);
 
-        SetMode(Mode::Radio);
-        SetRadioStation(0);
+        //SetMode(Mode::Radio);
+        //SetRadioStation(0);
 
         //SetMode(Mode::NightLight);
         LOG("End of setup");
+        /*
         delay(100);
         if (!AOut_.begin("/test.wav")) {
             LOG("Cannot open file");
         } else {
             msg::Send(msg::StartRecording{});
             Recording_ = true;
-        }
+        } */
 
-        //WiFiConnect();
     }
 
     // TODO update this for proper recording
@@ -371,46 +371,31 @@ private:
         LOG("Control: " + State_.control());
         switch (State_.mode()) {
             case Mode::MP3: {
-                if (State_.mp3PlaylistSelection()) {
-                    SetPlaylist(State_.control());
-                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, MP3_PLAYLIST_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                } else {
-                    SetTrack(State_.control());
-                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, MP3_TRACK_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                }
+                SetTrack(State_.control());
+                msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, MP3_TRACK_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 break;
             }
             case Mode::Radio: {
-                if (State_.radioManualTuning()) {
-                    SetRadioFrequency(State_.control() + RADIO_FREQUENCY_OFFSET);
-                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_FREQUENCY_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                } else {
-                    SetRadioStation(State_.control());
-                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                }
+                SetRadioFrequency(State_.control() + RADIO_FREQUENCY_OFFSET);
+                msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_FREQUENCY_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 break;
             }
             case Mode::NightLight: {
-                if (State_.nightLightHueSelection()) {
-                    SetNightLightHue(State_.control());
-                    if (State_.control() == State::NIGHTLIGHT_RAINBOW_HUE) 
-                        msg::Send(msg::LightsColors{
-                            Color::HSV(0 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(1 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(2 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(3 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(4 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(5 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(6 << 13, 255, Settings_.maxBrightness),
-                            Color::HSV(7 << 13, 255, Settings_.maxBrightness),
-                            DEFAULT_SPECIAL_LIGHTS_TIMEOUT                            
-                        });
-                    else 
-                        msg::Send(msg::LightsBar{8, 8, State_.nightLightColor(Settings_.accentColor, Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                } else {
-                    SetNightLightEffect(static_cast<NightLightEffect>(State_.control()));
-                    msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness), DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                }
+                SetNightLightHue(State_.control());
+                if (State_.control() == State::NIGHTLIGHT_RAINBOW_HUE) 
+                    msg::Send(msg::LightsColors{
+                        Color::HSV(0 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(1 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(2 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(3 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(4 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(5 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(6 << 13, 255, Settings_.maxBrightness),
+                        Color::HSV(7 << 13, 255, Settings_.maxBrightness),
+                        DEFAULT_SPECIAL_LIGHTS_TIMEOUT                            
+                    });
+                else 
+                    msg::Send(msg::LightsBar{8, 8, State_.nightLightColor(Settings_.accentColor, Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 break;
             }
         }
@@ -424,33 +409,74 @@ private:
         LOG("Control up");
     }
 
+    /** Depending on the current mode, short control press does the following:
+     
+        MP3: Cycles through available playlists
+     */
     static void ControlPress() {
         LOG("Control press");
         switch (State_.mode()) {
             case Mode::MP3: {
-                State_.setMp3PlaylistSelection(!State_.mp3PlaylistSelection());
-                SetMode(State_.mode());
+                uint8_t numPlaylists = NumPlaylists();
+                uint8_t playlist = State_.mp3PlaylistId() + 1;
+                if (playlist >= numPlaylists)
+                    playlist = 0;
+                SetPlaylist(playlist);
+                msg::Send(msg::LightsPoint{playlist, numPlaylists - 1, MP3_PLAYLIST_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 msg::Send(msg::SetMP3Settings{State_});
                 break;
             }
-            case Mode::Radio:
-                State_.setRadioManualTuning(!State_.radioManualTuning());
-                SetMode(State_.mode());
-                msg::Send(msg::SetMode{State_});
+            case Mode::Radio: {
+                uint8_t numStations = NumRadioStations();
+                uint8_t station = State_.radioStation() + 1;
+                if (station >= numStations)
+                    station = 0;
+                SetRadioStation(station);
+                msg::Send(msg::LightsPoint{station, numStations - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 msg::Send(msg::SetRadioSettings{State_});
                 break;
-            case Mode::NightLight:
-                State_.setNightLightHueSelection(!State_.nightLightHueSelection());
-                SetMode(State_.mode());
-                msg::Send(msg::SetMode{State_});
+            }
+            case Mode::WalkieTalkie: {
+                break;
+            }
+            case Mode::NightLight: {
+                uint8_t numEffects = static_cast<uint8_t>(NightLightEffect::Sentinel);
+                uint8_t effect = static_cast<uint8_t>(State_.nightLightEffect()) + 1;
+                if (effect >= numEffects)
+                    effect = 0;
+                State_.setNightLightEffect(static_cast<NightLightEffect>(effect));
+                msg::Send(msg::LightsPoint{effect, numEffects - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness), DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
                 msg::Send(msg::SetNightLightSettings{State_});
                 break;
+            }
         }
+        // update the mode settings, control & volume scales, etc.
+        SetMode(State_.mode());
     }
 
+    /** Long press of the control button cycles through the available modes. 
+     
+        // TODO only if not volume down
+     */ 
     static void ControlLongPress() {
         LOG("Control long press");
-        // TODO switch mode
+        switch (State_.mode()) {
+            case Mode::MP3:
+                SetMode(Mode::Radio);
+                break;
+            case Mode::Radio:
+                if (State_.wifiStatus() == WiFiStatus::Connected)
+                    SetMode(Mode::WalkieTalkie);
+                else
+                    SetMode(Mode::NightLight);
+                break;
+            case Mode::WalkieTalkie:
+                SetMode(Mode::NightLight);
+                break;
+            case Mode::NightLight:
+                SetMode(Mode::MP3);
+                break;
+        }
     }
 
     /** Volume knob always adjusts the volume. 
@@ -517,11 +543,10 @@ private:
             switch (State_.mode()) {
                 case Mode::MP3:
                 case Mode::Radio:
+                case Mode::NightLight:
                     Pause();
                     break;
                 case Mode::WalkieTalkie:
-                    break;
-                case Mode::NightLight:
                     break;
             }
 
@@ -531,36 +556,24 @@ private:
         switch (mode) {
             case Mode::MP3: {
                 LOG("Mode: MP3");
-                if (State_.mp3PlaylistSelection()) {
-                    State_.resetControl(State_.mp3PlaylistId(), NumPlaylists());
-                } else {
-                    State_.resetControl(State_.mp3TrackId(), NumTracks(State_.mp3PlaylistId()));
-                }
+                State_.resetControl(State_.mp3TrackId(), NumTracks(State_.mp3PlaylistId()));
                 Play();
                 break;
             }
             case Mode::Radio: {
                 LOG("Mode: radio");
-                if (State_.radioManualTuning()) {
-                    State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
-                } else {
-                    State_.resetControl(State_.radioStation(), NumRadioStations());
-                }
+                State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
                 Play();
                 break;
             }
             case Mode::WalkieTalkie: {
                 break;
-
             }
             case Mode::NightLight: {
                 LOG("Mode: NightLight");
                 Status_.powerOffCountdown = Settings_.nightLightsTimeout;
-                if (State_.nightLightHueSelection()) 
-                    State_.resetControl(0, 32);
-                else
-                    State_.resetControl(0, 5);
-                // TODO play a lullaby
+                State_.resetControl(0, 32);
+                // TODO play a lullaby ?
                 break;
             }
         }
@@ -575,6 +588,7 @@ private:
     static void Play() {
         switch (State_.mode()) {
             case Mode::MP3:
+                SetPlaylist(State_.mp3PlaylistId());
                 break;
             case Mode::Radio:
                 Radio_.init();
@@ -674,6 +688,7 @@ private:
         State_.setMp3PlaylistId(index);
         State_.setMp3TrackId(0);
         SetTrack(0);
+        State_.resetControl(0, NumTracks(State_.mp3PlaylistId()));
     }
 
     /** Starts playing the given track id within the current playlist. 
@@ -817,6 +832,7 @@ private:
             Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
             State_.setRadioFrequency(RadioStations_[index]);
             State_.setRadioStation(index);            
+            State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
         }
         msg::Send(msg::SetRadioSettings{State_});
     }

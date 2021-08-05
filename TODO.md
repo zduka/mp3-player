@@ -37,4 +37,6 @@
 
 # Walkie Talkie
 
-Sound recording: Adafruit MEMS do not work... Tried two and they produce pretty much garbage:(, sparkfun mems gives reasonably good results and so does electret microphone with a transimpedance amplifier. But the noise is still pretty high - maybe breadboard? neopixels?  
+Sound recording: Adafruit MEMS do not work... Tried two and they produce pretty much garbage:(, sparkfun mems gives reasonably good results and so does electret microphone with a transimpedance amplifier. The 8x oversampling really helps, there is still noise, but it is already usable. An actual circuit with all the noise reduction capacitors might help too. 
+
+Maybe add a silence reduction as well (i.e values close to center are center). 
