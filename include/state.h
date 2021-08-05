@@ -26,6 +26,10 @@
 #define ESP_VOLUME_STEP 0.1
 
 #define BUTTON_LONG_PRESS_TICKS 64
+
+/** Number of ticks for which the long press progress bar is not displayed. 
+ */
+#define BUTTON_LONG_PRESS_DELAY 20
 #define SPECIAL_LIGHTS_TIMEOUT 32
 #define IRQ_MAX_DELAY 32
 #define RADIO_FREQUENCY_OFFSET 760

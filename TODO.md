@@ -12,6 +12,7 @@
 
 # ATTiny
 
+- control lights don't seem to flash well
 - audiolights are a bit weird...
 - re-enable sleep
 - move code from ISRs to main loop where possible (tick)

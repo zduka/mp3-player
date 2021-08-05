@@ -605,8 +605,8 @@ private:
             uint8_t v = BUTTON_LONG_PRESS_TICKS - max(VolumeBtnCounter_, ControlBtnCounter_);
             if (v == BUTTON_LONG_PRESS_TICKS)
                 Lights_.fill(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
-            else
-                Lights_.showBar(v, BUTTON_LONG_PRESS_TICKS, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+            else if (v >= BUTTON_LONG_PRESS_DELAY)
+                Lights_.showBar(v - BUTTON_LONG_PRESS_DELAY, BUTTON_LONG_PRESS_TICKS - BUTTON_LONG_PRESS_DELAY, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
         // otherwise, if LightsCounter_ is non-zero, it means that the special lights are to be shown, in which case we simply perform the tick against the special lights buffer instead.   
         } else if (LightsCounter_ > 0) {
             Lights_.moveTowards(SpecialLights_, step);
