@@ -276,11 +276,13 @@ private:
             RecordedLength_ += 32;
             while (n-- > 1) 
                 AOut_.add(Wire.read());
-            if (RecordedLength_ >= 8000) {
+            if (RecordedLength_ >= 32000) {
                 Recording_ = false;
                 msg::Send(msg::StopRecording{});
                 AOut_.end();
                 LOG("Recording done");
+                WiFiStartAP();
+
             }
             // TODO actually read the state and determine if to stop the recording
             Wire.read(); 

@@ -34,3 +34,7 @@
  - walkie talkie mode
  - alarm clock
  - birthday reminder
+
+# Walkie Talkie
+
+Sound recording: Adafruit MEMS do not work... Tried two and they produce pretty much garbage:(, sparkfun mems gives reasonably good results and so does electret microphone with a transimpedance amplifier. But the noise is still pretty high - maybe breadboard? neopixels?  

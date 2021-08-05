@@ -98,8 +98,9 @@ public:
         // configure the event system - ADC1 to sample when triggered by TCB0
         EVSYS.SYNCCH0 = EVSYS_SYNCCH0_TCB0_gc;
         EVSYS.ASYNCUSER12 = EVSYS_ASYNCUSER12_SYNCCH0_gc;
-        // set ADC1 settings (mic & audio) - clkdiv by 4, internal voltage reference
-        ADC1.CTRLC = ADC_PRESC_DIV4_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
+        // set ADC1 settings (mic & audio) - clkdiv by 2, internal voltage reference
+        ADC1.CTRLB = ADC_SAMPNUM_ACC8_gc;
+        ADC1.CTRLC = ADC_PRESC_DIV2_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
         ADC1.EVCTRL = ADC_STARTEI_bm;
         // set ADC0 settings (vcc, temperature)
         // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 64 values
@@ -883,7 +884,7 @@ ISR(TWI0_TWIS_vect) {
 
 ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
-    Player::RecordingBuffer_[Player::RecordingWrite_++] = (ADC1.RES & 0xff);
+    Player::RecordingBuffer_[Player::RecordingWrite_++] = (ADC1.RES / 8) & 0xff;
     if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
         Player::SetIrq();
     //digitalWrite(AUDIO_SRC, LOW);
