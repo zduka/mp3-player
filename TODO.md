@@ -25,7 +25,7 @@
 - proper recording code, not just the proof-of-concept hack
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR
-- wifi_off does not inform about success
+- wifi_off (http) does not inform about success
 - check MDNS
 - add authentication
 

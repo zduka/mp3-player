@@ -304,6 +304,9 @@ private:
         bool tick : 1;
         bool secondTick : 1;
         uint8_t ticksCounter : 6; // 0..63
+        /** Indicates that the latest long press of either volume or control button happened when the other one was down and therefore can lead to a double long press. 
+         */
+        bool doubleLongPress : 1; 
         bool recording : 1; // indicates that we are recording 
     } Status_;
 
@@ -546,11 +549,25 @@ private:
             }
         } else if (State_.controlDown()) {
             State_.setControlDown(false);
-            if (ControlBtnCounter_ == 0) {
-                State_.setControlLongPress();
-            } else {
-                ControlBtnCounter_ = 0;
+            // if the counter is greater than 0, we are dealing with a short press
+            if (ControlBtnCounter_ > 0) {
+                if (Status_.doubleLongPress == true)
+                    State_.setVolumeLongPress();
                 State_.setControlPress();
+                ControlBtnCounter_ = 0;
+                Status_.doubleLongPress = false;
+            // if the counter is 0, we are looking at a long press
+            } else {
+                if (Status_.doubleLongPress == true) { // the other button has been long pressed
+                    State_.setDoubleLongPress();
+                    Status_.doubleLongPress = false;
+                } else if (State_.volumeDown()) { // this long press has to be delayed as it might be double
+                    Status_.doubleLongPress = true;
+                } else { // emit long press
+                    State_.setControlLongPress();
+                    // wake up from sleep if sleeping
+                    Status_.sleep = false;
+                }
             }
         }
         // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
@@ -570,13 +587,25 @@ private:
             }
         } else {
             State_.setVolumeDown(false);
-            if (VolumeBtnCounter_ == 0) {
-                State_.setVolumeLongPress();
-                // wake up from sleep if sleeping
-                Status_.sleep = false;
-            } else {
-                VolumeBtnCounter_ = 0;
+            // if the counter is greater than 0, we are dealing with a short press
+            if (VolumeBtnCounter_ > 0) {
+                if (Status_.doubleLongPress == true)
+                    State_.setControlLongPress();
                 State_.setVolumePress();
+                VolumeBtnCounter_ = 0;
+                Status_.doubleLongPress = false;
+            // if the counter is 0, we are looking at a long press
+            } else {
+                if (Status_.doubleLongPress == true) { // the other button has been long pressed
+                    State_.setDoubleLongPress();
+                    Status_.doubleLongPress = false;
+                } else if (State_.controlDown()) { // this long press has to be delayed as it might be double
+                    Status_.doubleLongPress = true;
+                } else { // emit long press
+                    State_.setVolumeLongPress();
+                    // wake up from sleep if sleeping
+                    Status_.sleep = false;
+                }
             }
         }
         // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up

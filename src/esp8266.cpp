@@ -8,11 +8,13 @@
 #include <SD.h>
 #include <DNSServer.h>
 #include <Hash.h>
+#include <WiFiClientSecure.h>
 
 #include <radio.h>
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
 #include <AudioGeneratorMP3.h>
+#include <AudioGeneratorOpus.h>
 #include <AudioOutputI2S.h>
 
 #include "state.h"
@@ -78,8 +80,6 @@ public:
         UpdateState();
         msg::Send(msg::LightsBar{2, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
-
-
         // initialize the SD card
         InitializeSDCard();
         msg::Send(msg::LightsBar{3, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
@@ -91,29 +91,13 @@ public:
         msg::Send(msg::SetMode{State_});
         msg::Send(msg::LightsBar{4, 5, Settings_.accentColor, DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
-
-        //SetMode(Mode::Radio);
-        //SetRadioStation(0);
-        //VolumeChange(3);
-
-        //Message::Send(Message::SetVolume{0, 16});
-        //UpdateState();
         InitializeWiFi();
         InitializeServer();
         PreviousSecondMillis_ = millis();
         msg::Send(msg::LightsBar{5, 5, Settings_.accentColor,DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
         LOG("Initialization done.");
-
-        //WiFiConnect();
         
-        SetMode(Mode::MP3);
-        //SetPlaylist(1);
-        //SetTrack(0);
-
-        //SetMode(Mode::Radio);
-        //SetRadioStation(0);
-
-        //SetMode(Mode::NightLight);
+        SetMode(State_.mode());
         LOG("End of setup");
         /*
         delay(100);
@@ -310,6 +294,8 @@ private:
                 VolumePress();
             if (State_.volumeLongPress())
                 VolumeLongPress();
+            if (State_.doubleLongPress())
+                DoubleLongPress();
             State_.clearButtonEvents();
         } else {
             LOG("I2C Err: " + n + (Recording_ ? " rec" : ""));
@@ -455,8 +441,6 @@ private:
     }
 
     /** Long press of the control button cycles through the available modes. 
-     
-        // TODO only if not volume down
      */ 
     static void ControlLongPress() {
         LOG("Control long press");
@@ -524,13 +508,21 @@ private:
     }
 
     /** Enables or disables the audio lights. 
-     
-        // TODO only if control not pressed as well
      */
     static void VolumeLongPress() {
         LOG("Volume long press");
         State_.setAudioLights(! State_.audioLights());
         msg::Send(msg::SetAudioLights{State_});
+    }
+
+    /** Enables or disables the WiFi and with it the walkie-talkie mode. 
+     */
+    static void DoubleLongPress() {
+        LOG("Double long press");
+        if (State_.wifiStatus() == WiFiStatus::Off) 
+            WiFiConnect();
+        else
+            WiFiDisconnect();
     }
 
 //@}
@@ -855,6 +847,7 @@ private:
 
 /** \name Night Lights
  */
+//@{
 
     static void SetNightLightEffect(NightLightEffect effect) {
         LOG("Night light effect: " + static_cast<int>(effect));
@@ -867,6 +860,20 @@ private:
         State_.setNightLightHue(hue);
         msg::Send(msg::SetNightLightSettings{State_});
     }
+//@}
+
+
+/** \name Walkie-Talkie
+ 
+    So actually it seems that walkie talkie can interact with telegram bots. Even looks like wavs can be sent and played back.
+
+    https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
+    https://core.telegram.org/bots/api#sending-files
+ */
+//@{
+    WiFiClientSecure WalkieTalkie_;
+
+//@}
 
 /** \name Webserver
  */

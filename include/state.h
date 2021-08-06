@@ -190,11 +190,22 @@ public:
             controlState_ &= ~VOLUME_LONG_PRESS_MASK;
     }
 
-    void clearButtonEvents() {
-        controlState_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK);
+    bool doubleLongPress() const {
+        return controlState_ & DOUBLE_LONG_PRESS_MASK;
     }
 
+    void setDoubleLongPress(bool value = true) {
+        if (value)
+            controlState_ |= DOUBLE_LONG_PRESS_MASK;
+        else
+            controlState_ &= ~DOUBLE_LONG_PRESS_MASK;
 
+    }
+
+    void clearButtonEvents() {
+        controlState_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK | DOUBLE_LONG_PRESS_MASK);
+    }
+  
     /** The current value of the control knob. 
      
         Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
@@ -259,6 +270,7 @@ private:
     static constexpr uint8_t VOLUME_PRESS_MASK = 8;
     static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 16;
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 32;
+    static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 64;
     volatile uint8_t controlState_ = 0;
 
     static constexpr uint16_t CONTROL_MASK = 1023;
