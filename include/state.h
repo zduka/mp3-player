@@ -263,7 +263,10 @@ public:
         controlValues_ |= value << 10; 
     }
 
+
 private:
+    friend class Player;
+        
     static constexpr uint8_t CONTROL_DOWN_MASK = 1;
     static constexpr uint8_t VOLUME_DOWN_MASK = 2;
     static constexpr uint8_t CONTROL_PRESS_MASK = 4;

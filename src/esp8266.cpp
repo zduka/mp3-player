@@ -99,21 +99,7 @@ public:
         
         SetMode(State_.mode());
         LOG("End of setup");
-        /*
-        delay(100);
-        if (!AOut_.begin("/test.wav")) {
-            LOG("Cannot open file");
-        } else {
-            msg::Send(msg::StartRecording{});
-            Recording_ = true;
-        } */
-
     }
-
-    // TODO update this for proper recording
-    static inline uint16_t RecordedLength_ = 0;
-    static inline WavWriter AOut_;
-    static inline bool Recording_ = false;
 
     static void Loop() {
         // update the running usage statistics
@@ -252,54 +238,56 @@ private:
 
     /** Gets the state from ATTiny. 
      */
-    // TODO update this for proper recording 
     static void UpdateState() {
         Status_.irq = false;
-        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, Recording_ ? 33 : sizeof(State));
-        if (Recording_ && n == 33) {
-            RecordedLength_ += 32;
-            while (n-- > 1) 
-                AOut_.add(Wire.read());
-            if (RecordedLength_ >= 32000) {
-                Recording_ = false;
-                msg::Send(msg::StopRecording{});
-                AOut_.end();
-                LOG("Recording done");
-                WiFiStartAP();
-
+        size_t n = 0;
+        if (Status_.recording) {
+            n = Wire.requestFrom(AVR_I2C_ADDRESS, 33);
+            if (n == 33) {
+                // add data to the output file
+                for (uint8_t i = 0; i < 32; ++i)
+                    Recording_.add(Wire.read());
+                // get the first bit of state and determine if we should stop recording or not
+                uint8_t controlState = Wire.read();
+                if (! (controlState & State::VOLUME_DOWN_MASK))
+                    WalkieTalkieStopRecording();
+                else if (controlState & State::CONTROL_DOWN_MASK)
+                    WalkieTalkieStopRecording(/* cancel */ true);
+                return;
             }
-            // TODO actually read the state and determine if to stop the recording
-            Wire.read(); 
-        } else if (! Recording_ && n == sizeof(State)) {
-            State old = State_;
-            Wire.readBytes(pointer_cast<uint8_t*>(& State_), n);
-            LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
-            // TODO charging 
-            // TODO headphones
-            // TODO alarm ...................
-
-            if (State_.control() != old.control())
-                ControlChange();
-            if (State_.controlDown() != old.controlDown())
-                State_.controlDown() ? ControlDown() : ControlUp();
-            if (State_.controlPress())
-                ControlPress();
-            if (State_.controlLongPress())
-                ControlLongPress();
-            if (State_.volume() != old.volume())
-                VolumeChange();
-            if (State_.volumeDown() != old.volumeDown())
-                State_.volumeDown() ? VolumeDown() : VolumeUp();
-            if (State_.volumePress())
-                VolumePress();
-            if (State_.volumeLongPress())
-                VolumeLongPress();
-            if (State_.doubleLongPress())
-                DoubleLongPress();
-            State_.clearButtonEvents();
         } else {
-            LOG("I2C Err: " + n + (Recording_ ? " rec" : ""));
+            n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
+            if (n == sizeof(State)) {
+                State old = State_;
+                Wire.readBytes(pointer_cast<uint8_t*>(& State_), sizeof(State));
+                LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
+                // TODO charging 
+                // TODO headphones
+                // TODO alarm ...................
+
+                if (State_.control() != old.control())
+                    ControlChange();
+                if (State_.controlDown() != old.controlDown())
+                    State_.controlDown() ? ControlDown() : ControlUp();
+                if (State_.controlPress())
+                    ControlPress();
+                if (State_.controlLongPress())
+                    ControlLongPress();
+                if (State_.volume() != old.volume())
+                    VolumeChange();
+                if (State_.volumeDown() != old.volumeDown())
+                    State_.volumeDown() ? VolumeDown() : VolumeUp();
+                if (State_.volumePress())
+                    VolumePress();
+                if (State_.volumeLongPress())
+                    VolumeLongPress();
+                if (State_.doubleLongPress())
+                    DoubleLongPress();
+                State_.clearButtonEvents();
+                return;
+            }
         }
+        LOG("I2C Err: " + n);
     }
 
 
@@ -308,6 +296,7 @@ private:
     static inline volatile struct {
         bool idle : 1;
         bool irq : 1;
+        bool recording : 1;
         unsigned powerOffCountdown : 12;
         unsigned wifiCountdown : 12;
     } Status_;
@@ -452,7 +441,9 @@ private:
                 if (State_.wifiStatus() == WiFiStatus::Connected)
                     SetMode(Mode::WalkieTalkie);
                 else
-                    SetMode(Mode::NightLight);
+                    // TODO change this to nightlight in production
+                    SetMode(Mode::WalkieTalkie);
+                    //SetMode(Mode::NightLight);
                 break;
             case Mode::WalkieTalkie:
                 SetMode(Mode::NightLight);
@@ -489,12 +480,14 @@ private:
 
     static void VolumeDown() {
         LOG("Volume down");
-
+        if (State_.mode() == Mode::WalkieTalkie) {
+            if (!State_.controlDown())
+                WalkieTalkieStartRecording();
+        }
     }
 
     static void VolumeUp() {
-        LOG("Volume down");
-
+        LOG("Volume up");
     }
 
     /** Play/Pause toggle.
@@ -871,7 +864,30 @@ private:
     https://core.telegram.org/bots/api#sending-files
  */
 //@{
-    WiFiClientSecure WalkieTalkie_;
+
+    static void WalkieTalkieStartRecording() {
+        if (!Recording_.begin("/test.wav")) {
+            LOG("Unable to open recording target file");
+        } else {
+            LOG("Recording...");
+            Status_.recording = true;
+            msg::Send(msg::StartRecording());
+        }
+    }
+
+    static void WalkieTalkieStopRecording(bool cancel = false) {
+        if (Status_.recording) {
+            msg::Send(msg::StopRecording{});
+            Status_.recording = false;
+            Recording_.end();
+            LOG("Recording done.");
+            // TODO remove this, only used now for testing purposes
+            WiFiStartAP();
+        }
+    }
+
+    static inline WiFiClientSecure TelegramBot_;
+    static inline WavWriter Recording_;
 
 //@}
 
