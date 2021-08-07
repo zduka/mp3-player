@@ -18,9 +18,11 @@ Tested on ubuntu 20.04.
 
 ## SD Card
 
-The SD card contains the following files:
+### Player settings
 
-#### `networks.txt` 
+These exist in the `player` folder and consist of the following files:
+
+`player/networks.txt` 
 
 Contains wifi networks and passwords the player will try to connect to when wifi is on. Each network occupies two lines, first line is network name, second line is network password. Leave the line blank for public networks:
 
@@ -31,20 +33,45 @@ Contains wifi networks and passwords the player will try to connect to when wifi
 
 When WiFi is activated, the networs are tried in order, first successful network on the list will be used. 
 
-#### `ap.txt`
+`player/ap.txt`
 
 Contains the SSID and password, each on separate line for the access point the player will create if none of the networks in the `wifi.txt` file can be found:
 
     PlayerAPSSID
     PlayerAPPassword
 
-#### `stations.txt`
+### Playlists
+
+The SD card contains the following files:
+
+
+### Radio Settingss
+
+`radio/stations.txt`
 
 Contains up to 8 predefined radio stations, one station per line. The line always starts with the station's frequency `[Mhzx10]`, followed by optional space and name of the station:
 
     1021 First Station 102.1 Mhz
     950 Second Station
 
+### Walkie-Talkie
+
+The walkie-talkie uses an unique telegram bot that must be assigned to each player. Its configuration files cover the bot identification and a list of telegram chat ids the player will react & send voice to:
+
+`bot/token.txt`
+
+This file contains the telegram bot identification on 2 lines with an optional certificate fingerprint of telegram's servers on line 3. First line contains the bot's id and token separated by `:` as reported by Telegram's bot creation API. The second line contains the chat_id from which commands to the player bot can be sent. The last line may contain the fingerprint for the HTTPS connection, or be left empty for bypassing the check (not secure, use at own risk):
+
+    123456789:AGDHDBDGhsg837498
+    674512
+    CF 05 98 89 CA FF 8E D8 5E 5C E0 C2 E4 F7 E6
+
+`bot/chats.txt`
+
+Contains up to 8 chat ids that the player can communicate with. Each chat has three elements: the chat id, the color used when playing/recording and the textual description for the ui:
+
+    -635437 0000ff The family
+    674512 ff0000 Admin
 
 ## Basic Design
 

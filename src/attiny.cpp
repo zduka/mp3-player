@@ -358,7 +358,7 @@ private:
         switch (I2C_RX_Buffer_[0]) {
             case msg::PowerOff::Id: {
                 // set sleep to true so that the sleep can be handled in main loop
-                //Status_.sleep = true;
+                Status_.sleep = true;
                 break;
             }
             case msg::SetMode::Id: {
@@ -571,7 +571,8 @@ private:
             }
         }
         // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
-        if (! Status_.sleep)
+        // when recording, don't notify either as it is always transmitted in the first state byte
+        if (! Status_.sleep && ! Status_.recording)
             SetIrq();
     }
 
@@ -609,7 +610,8 @@ private:
             }
         }
         // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
-        if (! Status_.sleep)
+        // when recording, don't notify either as it is always transmitted in the first state byte
+        if (! Status_.sleep && !Status_.recording)
             SetIrq();
     }
 
@@ -629,13 +631,17 @@ private:
     static void LightsTick() {
         // always start fresh
         uint8_t step = max(MaxBrightness_ / 32, 1);
-        // when a button is down then the strip shows the long press progress first and foremost
+        // when a button is down then the strip shows the long press progress first and foremost, unless we are recoding in which case display the audiolights of the recorded message
         if (State_.volumeDown() || State_.controlDown()) {
-            uint8_t v = BUTTON_LONG_PRESS_TICKS - max(VolumeBtnCounter_, ControlBtnCounter_);
-            if (v == BUTTON_LONG_PRESS_TICKS)
-                Lights_.fill(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
-            else if (v >= BUTTON_LONG_PRESS_DELAY)
-                Lights_.showBar(v - BUTTON_LONG_PRESS_DELAY, BUTTON_LONG_PRESS_TICKS - BUTTON_LONG_PRESS_DELAY, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+            if (Status_.recording) {
+                AudioLights(step);
+            } else {
+                uint8_t v = BUTTON_LONG_PRESS_TICKS - max(VolumeBtnCounter_, ControlBtnCounter_);
+                if (v == BUTTON_LONG_PRESS_TICKS)
+                    Lights_.fill(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+                else if (v >= BUTTON_LONG_PRESS_DELAY)
+                    Lights_.showBar(v - BUTTON_LONG_PRESS_DELAY, BUTTON_LONG_PRESS_TICKS - BUTTON_LONG_PRESS_DELAY, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
+            }
         // otherwise, if LightsCounter_ is non-zero, it means that the special lights are to be shown, in which case we simply perform the tick against the special lights buffer instead.   
         } else if (LightsCounter_ > 0) {
             Lights_.moveTowards(SpecialLights_, step);

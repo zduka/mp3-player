@@ -552,6 +552,7 @@ private:
                 break;
             }
             case Mode::WalkieTalkie: {
+                LOG("Mode: Walkie-talkie");
                 break;
             }
             case Mode::NightLight: {
@@ -562,7 +563,6 @@ private:
                 break;
             }
         }
-
 
         // finally, inform the AVR of the mode change and other updates
         msg::Send(msg::SetMode{State_});
@@ -785,7 +785,7 @@ private:
         LOG("Initializing radio stations...");
         for (int i = 0; i < 7; ++i)
             RadioStations_[i] = RADIO_STATION_NONE;
-        File f = SD.open("stations.txt", FILE_READ);
+        File f = SD.open("radio/stations.txt", FILE_READ);
         if (f) {
             int i = 0;
             while (i < 8) {
@@ -800,7 +800,7 @@ private:
             }
             f.close();
         } else {
-            LOG("  stations.txt file not found");
+            LOG("  radio/stations.txt file not found");
         }
     }
 
@@ -908,12 +908,12 @@ private:
         WiFi.disconnect();
         WiFi.scanNetworksAsync([](int n) {
             LOG("WiFi: Networks found: " + n);
-            File f = SD.open("networks.txt", FILE_READ);
+            File f = SD.open("player/networks.txt", FILE_READ);
             if (f) {
                 while (f.available()) {
                     String ssid = f.readStringUntil('\n');
                     String pass = f.readStringUntil('\n');
-                    if (ssid.isEmpty())
+                    if (ssid.isEmpty() || ssid[0] == '#')
                         break;
                     for (int i = 0; i < n; ++i) {
                         if (WiFi.SSID(i) == ssid) {
@@ -929,7 +929,7 @@ private:
                 }
                 f.close();
             } else {
-                LOG("WiFi: No networks.txt found");
+                LOG("WiFi: No player/networks.txt found");
             }
             WiFi.scanDelete();
             WiFiStartAP();
@@ -937,7 +937,7 @@ private:
     }
 
     static void WiFiStartAP() {
-        File f = SD.open("ap.txt", FILE_READ);
+        File f = SD.open("player/ap.txt", FILE_READ);
         String ssid;
         String pass;
         if (f) {
@@ -945,7 +945,7 @@ private:
             pass = f.readStringUntil('\n');
             f.close();
         } else {
-            LOG("WiFi: No ap.txt found");
+            LOG("WiFi: No player/ap.txt found");
         }
         if (ssid.isEmpty()) {
             ssid = DEFAULT_AP_SSID;
