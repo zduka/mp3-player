@@ -85,8 +85,9 @@ public:
         msg::Send(msg::LightsBar{3, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
         InitializeSettings();
-        InitializeRadioStations();
         InitializeMP3Playlists();
+        InitializeRadioStations();
+        InitializeTelegramBot();
         msg::Send(msg::SetAccentColor{Settings_.accentColor});
         msg::Send(msg::SetMode{State_});
         msg::Send(msg::LightsBar{4, 5, Settings_.accentColor, DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
@@ -438,7 +439,7 @@ private:
                 SetMode(Mode::Radio);
                 break;
             case Mode::Radio:
-                if (State_.wifiStatus() == WiFiStatus::Connected)
+                if (WalkieTalkieModeEnabled())
                     SetMode(Mode::WalkieTalkie);
                 else
                     // TODO change this to nightlight in production
@@ -865,6 +866,64 @@ private:
  */
 //@{
 
+    static void InitializeTelegramBot() {
+        File f = SD.open("bot/token.txt", FILE_READ);
+        if (f) {
+            TelegramBot_ = f.readStringUntil('\n');
+            if (!TelegramBot_.isEmpty() && TelegramBot_[0] != '#') {
+                BotId_ = TelegramBot_.substring(0, TelegramBot_.indexOf(':'));
+                BotAdminId_ = f.readStringUntil('\n');
+                HTTPSFingerprint_ = f.readStringUntil('\n');
+                if (! HTTPSFingerprint_.isEmpty() && HTTPSFingerprint_[0] == '#')
+                    HTTPSFingerprint_.clear();
+                if (HTTPSFingerprint_.isEmpty()) {
+                    LOG("Walkie-Talkie: No fingerprint provided, HTTPS will be insecure!");
+                    HTTPSClient_.setInsecure();
+                } else {
+                    LOG("Walkie-Talkie: Fingerprint: " + HTTPSFingerprint_);
+                }
+            } else {
+                TelegramBot_.clear();
+            }
+            f.close();
+            LOG("Walkie-Talkie: Bot token:   " + TelegramBot_);
+            LOG("Walkie-Talkie: Bot id:      " + BotId_);
+            LOG("Walkie-Talkie: Admin:       " + BotAdminId_);
+            // load the telegram chats
+            for (int i = 0; i < 8; ++i)
+                BotChannels_[i].clear();
+            f = SD.open("bot/chats.txt");
+            if (f) {
+                LOG("Walkie-Talkie: Channels:");
+                uint8_t i = 0;
+                for (int x = 0; x < 8; ++x) {
+                    String id = f.readStringUntil(' ');
+                    if (id.isEmpty())
+                        break;
+                    String colorText = f.readStringUntil('\n');
+                    if (id[0] == '#') {
+                        LOG("    skipping " + id + " " + colorText);
+                    } else {
+                        LOG("    " + i + ": " + id + " " + colorText);    
+                        colorText[6] = 0; // split string if longer than 6
+                        Color color{Color::HTML(colorText.c_str())};
+                        BotChannels_[i++] = BotChannel{id, color};
+                    }
+                }
+            } else {
+                LOG("Walkie-Talkie: No valid chats, file bot/chats.txt not found");
+            }
+        } else {
+            LOG("Walkie-Talkie: No bot/token.txt file. Walkie talkie mode is disabled.");
+        }
+    }
+
+    /** Returns true if the walkie talkie mode is enabled, i.e. the telegram bot has been configured and WiFi is connected. 
+     */
+    static bool WalkieTalkieModeEnabled() {
+        return (State_.wifiStatus() == WiFiStatus::Connected) && !TelegramBot_.isEmpty();
+    }
+
     static void WalkieTalkieStartRecording() {
         if (!Recording_.begin("/test.wav")) {
             LOG("Unable to open recording target file");
@@ -886,7 +945,27 @@ private:
         }
     }
 
-    static inline WiFiClientSecure TelegramBot_;
+    static void WalkieTalkieGetUpdate() {
+        HTTPSClient_.connect("api.telegram.org", 433);
+    }
+
+    struct BotChannel {
+        String id;
+        Color color;
+
+        void clear() {
+            id.clear();
+        }
+    }; // Player::BotChannel
+
+    static inline String TelegramBot_;
+    static inline String BotId_;
+    static inline String BotAdminId_;
+    static inline BotChannel BotChannels_[8];
+
+    static inline String HTTPSFingerprint_;
+    static inline WiFiClientSecure HTTPSClient_;
+
     static inline WavWriter Recording_;
 
 //@}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "helpers.h"
+
 class Color {
 public:
     uint8_t g = 0;
@@ -15,6 +17,15 @@ public:
         r{from.r},
         b{from.b} {
     }     
+
+    static Color HTML(char const * str) {
+        if (*str == '#') // optional #
+            ++str;
+        uint8_t r = FromHex(str[0]) * 16 + FromHex(str[1]);
+        uint8_t g = FromHex(str[2]) * 16 + FromHex(str[3]);
+        uint8_t b = FromHex(str[4]) * 16 + FromHex(str[5]);
+        return Color{r, g, b};
+    }
 
     static Color RGB(uint8_t r, uint8_t g, uint8_t b) {
         return Color{r, g, b};

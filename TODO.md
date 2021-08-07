@@ -20,6 +20,7 @@
 
 # ESP
 
+- radio stations can be disabled (#)
 - longer delay before power down in night light mode (done, check)
 - change strings to PSTR
 - wifi_off (http) does not inform about success
