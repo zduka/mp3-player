@@ -9,6 +9,7 @@
 #include <DNSServer.h>
 #include <Hash.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
 #include <radio.h>
 #include <RDA5807M.h>
@@ -61,13 +62,13 @@ public:
             ESP.deepSleep(0);
         // continue with normal initialization
         Serial.begin(74880);
-        LOG("Initializing ESP8266...");
-        LOG("  chip id:      " + ESP.getChipId());
-        LOG("  cpu_freq:     " + ESP.getCpuFreqMHz());
-        LOG("  core version: " + ESP.getCoreVersion());
-        LOG("  SDK version:  " + ESP.getSdkVersion());
-        LOG("  mac address:  " + WiFi.macAddress());
-        LOG("  wifi mode:    " + WiFi.getMode());
+        LOGF("Initializing ESP8266...");
+        LOGF("  chip id:      %u", ESP.getChipId());
+        LOGF("  cpu_freq:     %u", ESP.getCpuFreqMHz());
+        LOGF("  core version: %s", ESP.getCoreVersion());
+        LOGF("  SDK version:  %s", ESP.getSdkVersion());
+        LOGF("  mac address:  %s", WiFi.macAddress());
+        LOGF("  wifi mode:    %u", WiFi.getMode());
         // set the IRQ pin as input so that we can tell when AVR has an interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
@@ -96,10 +97,10 @@ public:
         InitializeServer();
         PreviousSecondMillis_ = millis();
         msg::Send(msg::LightsBar{5, 5, Settings_.accentColor,DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-        LOG("Initialization done.");
+        LOGF("Initialization done.");
         
         SetMode(State_.mode());
-        LOG("End of setup");
+        LOGF("End of setup");
     }
 
     static void Loop() {
@@ -127,7 +128,7 @@ public:
         if (MP3_.isRunning()) {
             if (!MP3_.loop()) {
                 MP3_.stop();
-                LOG("MP3 playback done");
+                LOGF("MP3 playback done");
                 PlayNextTrack();
             }
         }
@@ -136,7 +137,7 @@ public:
     /** Prepares the ESP to power off and informs AVR to cut power & go to sleep. 
      */
     static void PowerOff() {
-        LOG(PSTR("Powering off"));
+        LOGF("Powering off");
         msg::Send(msg::PowerOff{});
         // do nothing as AVR is supposed to power off the chip immediately
         while (true) { }
@@ -145,7 +146,7 @@ public:
 private:
 
     static void Error(uint8_t code = 0) {
-        LOG("ERROR: " + code);
+        LOGF("ERROR: %u", code);
         // TODO tell avr
     }
 
@@ -153,33 +154,33 @@ private:
         LittleFS.begin();
         FSInfo fs_info;
         LittleFS.info(fs_info); 
-        LOG("LittleFS Stats:");
-        LOG("  Total bytes:     " +fs_info.totalBytes);
-        LOG("  Used bytes:      " +fs_info.usedBytes);
-        LOG("  Block size:      " +fs_info.blockSize);
-        LOG("  Page size:       " +fs_info.pageSize);
-        LOG("  Max open files:  " +fs_info.maxOpenFiles);
-        LOG("  Max path length: " +fs_info.maxPathLength);
+        LOGF("LittleFS Stats:");
+        LOGF("  Total bytes:     %u", fs_info.totalBytes);
+        LOGF("  Used bytes:      %u", fs_info.usedBytes);
+        LOGF("  Block size:      %u", fs_info.blockSize);
+        LOGF("  Page size:       %u", fs_info.pageSize);
+        LOGF("  Max open files:  %u", fs_info.maxOpenFiles);
+        LOGF("  Max path length: %u", fs_info.maxPathLength);
     }
 
     static void InitializeSDCard() {
         if (SD.begin(CS, SPI_HALF_SPEED)) {
-            LOG("SD Card:");
+            LOGF("SD Card:");
             switch (SD.type()) {
                 case 0:
-                    LOG("  type: SD1");
+                    LOGF("  type: SD1");
                     break;
                 case 1:
-                    LOG("  type: SD2");
+                    LOGF("  type: SD2");
                     break;
                 case 2:
-                    LOG("  type: SDHC");
+                    LOGF("  type: SDHC");
                     break;
                 default:
-                    LOG("  type: unknown");
+                    LOGF("  type: unknown");
             }
-            LOG("  volume type: FAT" + SD.fatType());
-            LOG("  volume size: " + (static_cast<uint32_t>(SD.totalClusters()) * SD.clusterSize() / 1000000) + " [MB]");
+            LOGF("  volume type: FAT%u", SD.fatType());
+            LOGF("  volume size: %u [MB]",  (static_cast<uint32_t>(SD.totalClusters()) * SD.clusterSize() / 1000000));
         } else {
             LOG("Error reading from SD card");
             Error();
@@ -261,7 +262,7 @@ private:
             if (n == sizeof(State)) {
                 State old = State_;
                 Wire.readBytes(pointer_cast<uint8_t*>(& State_), sizeof(State));
-                LOG("I2C State: " + State_.voltage() + " [Vx100], " + State_.temp() + " [Cx10], CTRL: " + State_.control() + "/" + State_.maxControl() + ", VOL: " + State_.volume() + "/" + State_.maxVolume());
+                LOGF("I2C State: %u [Vx100], %u [Cx10], CTRL: %u/%u, VOL: %u/%u", State_.voltage(), State_.temp(), State_.control(), State_.maxControl(), State_.volume(), State_.maxVolume());
                 // TODO charging 
                 // TODO headphones
                 // TODO alarm ...................
@@ -288,7 +289,7 @@ private:
                 return;
             }
         }
-        LOG("I2C Err: " + n);
+        LOGF("I2C Err: %u", n);
     }
 
 
@@ -344,7 +345,7 @@ private:
 private:
 
     static void ControlChange() {
-        LOG("Control: " + State_.control());
+        LOGF("Control: %u", State_.control());
         switch (State_.mode()) {
             case Mode::MP3: {
                 SetTrack(State_.control());
@@ -378,11 +379,11 @@ private:
     }
 
     static void ControlDown() {
-        LOG("Control down");
+        LOGF("Control down");
     }
 
     static void ControlUp() {
-        LOG("Control up");
+        LOGF("Control up");
     }
 
     /** Depending on the current mode, short control press does the following:
@@ -390,7 +391,7 @@ private:
         MP3: Cycles through available playlists
      */
     static void ControlPress() {
-        LOG("Control press");
+        LOGF("Control press");
         switch (State_.mode()) {
             case Mode::MP3: {
                 uint8_t numPlaylists = NumPlaylists();
@@ -433,7 +434,7 @@ private:
     /** Long press of the control button cycles through the available modes. 
      */ 
     static void ControlLongPress() {
-        LOG("Control long press");
+        LOGF("Control long press");
         switch (State_.mode()) {
             case Mode::MP3:
                 SetMode(Mode::Radio);
@@ -465,7 +466,7 @@ private:
             State_.setVolume(maxVolume);
             msg::Send(msg::SetMode{State_});
         }
-        LOG("Volume: " + State_.volume());
+        LOGF("Volume: %u", State_.volume());
         switch (State_.mode()) {
             case Mode::MP3:
             case Mode::WalkieTalkie:
@@ -480,7 +481,7 @@ private:
     }
 
     static void VolumeDown() {
-        LOG("Volume down");
+        LOGF("Volume down");
         if (State_.mode() == Mode::WalkieTalkie) {
             if (!State_.controlDown())
                 WalkieTalkieStartRecording();
@@ -488,13 +489,13 @@ private:
     }
 
     static void VolumeUp() {
-        LOG("Volume up");
+        LOGF("Volume up");
     }
 
     /** Play/Pause toggle.
      */
     static void VolumePress() {
-        LOG("Volume press");
+        LOGF("Volume press");
         if (Status_.idle) 
             Play();
         else
@@ -504,7 +505,7 @@ private:
     /** Enables or disables the audio lights. 
      */
     static void VolumeLongPress() {
-        LOG("Volume long press");
+        LOGF("Volume long press");
         State_.setAudioLights(! State_.audioLights());
         msg::Send(msg::SetAudioLights{State_});
     }
@@ -512,7 +513,7 @@ private:
     /** Enables or disables the WiFi and with it the walkie-talkie mode. 
      */
     static void DoubleLongPress() {
-        LOG("Double long press");
+        LOGF("Double long press");
         if (State_.wifiStatus() == WiFiStatus::Off) 
             WiFiConnect();
         else
@@ -541,23 +542,23 @@ private:
         State_.setMode(mode);
         switch (mode) {
             case Mode::MP3: {
-                LOG("Mode: MP3");
+                LOGF("Mode: MP3");
                 State_.resetControl(State_.mp3TrackId(), NumTracks(State_.mp3PlaylistId()));
                 Play();
                 break;
             }
             case Mode::Radio: {
-                LOG("Mode: radio");
+                LOGF("Mode: radio");
                 State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
                 Play();
                 break;
             }
             case Mode::WalkieTalkie: {
-                LOG("Mode: Walkie-talkie");
+                LOGF("Mode: Walkie-talkie");
                 break;
             }
             case Mode::NightLight: {
-                LOG("Mode: NightLight");
+                LOGF("Mode: NightLight");
                 Status_.powerOffCountdown = Settings_.nightLightsTimeout;
                 State_.resetControl(0, 32);
                 // TODO play a lullaby ?
@@ -618,26 +619,25 @@ private:
         Up to 8 playlists are supported, which can be found in directories labelled 1..8. If the directory contains file `playlist.txt`, then it is a valid playlist. The file contains whether the playlist is enabled (1) or hidden (0) followed by the optional name of the playlist. 
      */
     static void InitializeMP3Playlists() {
-        LOG("Initializing MP3 Playlists...");
-        int pi = 0;
-        for (uint8_t i = 1; i <= 8; ++i) {
-            File f = SD.open(STR(i + "/playlist.txt"), FILE_READ);
-            if (f) {
-                int enabled = f.parseInt();
-                f.read(); // skip the space (assuming it is space...)
-                String name = f.readStringUntil('\n');
-                if (enabled) {
-                    uint16_t numTracks = GetPlaylistTracks(i);
-                    MP3Playlists_[pi] = PlaylistInfo{i, numTracks};
-                    ++pi;
-                    LOG("  " + i + ": " + name + " (" + numTracks + " tracks)");
-                } else {
-                    LOG("  " + i + ": " + name + " (disabled)");
+        LOGF("Initializing MP3 Playlists...");
+        for (size_t i = 0; i < 8; ++i)
+            MP3Playlists_[i].invalidate();
+        File f = SD.open("player/playlists.json", FILE_READ);
+        if (f) {
+            DynamicJsonDocument json{1024};
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                uint8_t i = 0;
+                for (JsonVariant playlist : json.as<JsonArray>()) {
+                    uint8_t id = playlist["id"];
+                    uint16_t numTracks = GetPlaylistTracks(id);
+                    MP3Playlists_[i++] = PlaylistInfo{id, numTracks};
+                    LOGF("  %u: %s (%u tracks)",id, playlist["name"].as<char const *>(), numTracks);
                 }
+            } else {
+
             }
+            f.close();
         }
-        for (; pi < 8; ++pi)
-            MP3Playlists_[pi].invalidate();
     }
 
     /** Returns the number of tracks available for given playlist. 
@@ -658,7 +658,7 @@ private:
                 ++result;
         }
         if (result > 1023) {
-            LOG("Error: Playlist " + playlist + " has " + result + " tracks where only 1023 is allowed");
+            LOGF("Error: Playlist %u has %u tracks where only 1023 is allowed", playlist, result);
             result = 1023;
         }
         d.close();
@@ -670,7 +670,7 @@ private:
         The index is the index to the runtime playlist table, not the id of the playlist on the SD card.  
      */
     static void SetPlaylist(uint8_t index) {
-        LOG("Playlist " + index + " (folder " + MP3Playlists_[index].id + ")");
+        LOGF("Playlist %u (folder %u)", index, MP3Playlists_[index].id);
         CurrentPlaylist_.close();
         CurrentPlaylist_ = SD.open(STR(MP3Playlists_[index].id));
         State_.setMp3PlaylistId(index);
@@ -716,7 +716,7 @@ private:
             } 
             f.close();
         }
-        LOG("No file found");
+        LOGF("No file found");
         // TODO error
     }
 
@@ -783,30 +783,29 @@ private:
         The stations are defined in the `stations.txt` file, one station per line, first the frequency and then optional name separated by a new line. 
      */
     static void InitializeRadioStations() {
-        LOG("Initializing radio stations...");
+        LOGF("Initializing radio stations...");
         for (int i = 0; i < 7; ++i)
             RadioStations_[i] = RADIO_STATION_NONE;
-        File f = SD.open("radio/stations.txt", FILE_READ);
+        File f = SD.open("radio/stations.json", FILE_READ);
         if (f) {
+            DynamicJsonDocument json{1024};
             int i = 0;
-            while (i < 8) {
-                uint16_t freq = static_cast<uint16_t>(f.parseInt());
-                if (freq == 0)
-                    break;
-                f.read(); // skip the space (assuming it is space...)
-                String name = f.readStringUntil('\n');
-                RadioStations_[i] = freq;
-                ++i;
-                LOG("  " + name + ": " + freq);
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                for (JsonVariant station : json.as<JsonArray>()) {
+                    RadioStations_[i++] = station["freq"];
+                    LOGF("  %s: %u", station["name"].as<char const *>(), station["freq"].as<unsigned>());
+                }
+            } else {
+                LOGF("  radio/stations.json file not found");
             }
             f.close();
         } else {
-            LOG("  radio/stations.txt file not found");
+            LOGF("  radio/stations.json file not found");
         }
     }
 
     static void SetRadioFrequency(uint16_t mhzx10) {
-        LOG("Radio frequency: " + mhzx10);
+        LOGF("Radio frequency: %u", mhzx10);
         if (State_.mode() == Mode::Radio) {
             Radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
             State_.setRadioFrequency(mhzx10);
@@ -815,7 +814,7 @@ private:
     }
 
     static void SetRadioStation(uint8_t index) {
-        LOG("Radio station: " + index);
+        LOGF("Radio station: %u", index);
         if (State_.mode() == Mode::Radio) {
             Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
             State_.setRadioFrequency(RadioStations_[index]);
@@ -844,13 +843,13 @@ private:
 //@{
 
     static void SetNightLightEffect(NightLightEffect effect) {
-        LOG("Night light effect: " + static_cast<int>(effect));
+        LOGF("Night light effect: %i", static_cast<int>(effect));
         State_.setNightLightEffect(effect);
         msg::Send(msg::SetNightLightSettings{State_});
     }
 
     static void SetNightLightHue(uint8_t hue) {
-        LOG("Night light hue: " + hue);
+        LOGF("Night light hue: %u", hue);
         State_.setNightLightHue(hue);
         msg::Send(msg::SetNightLightSettings{State_});
     }
@@ -867,6 +866,7 @@ private:
 //@{
 
     static void InitializeTelegramBot() {
+        /*
         File f = SD.open("bot/token.txt", FILE_READ);
         if (f) {
             TelegramBot_ = f.readStringUntil('\n');
@@ -916,6 +916,7 @@ private:
         } else {
             LOG("Walkie-Talkie: No bot/token.txt file. Walkie talkie mode is disabled.");
         }
+        */
     }
 
     /** Returns true if the walkie talkie mode is enabled, i.e. the telegram bot has been configured and WiFi is connected. 
@@ -926,9 +927,9 @@ private:
 
     static void WalkieTalkieStartRecording() {
         if (!Recording_.begin("/test.wav")) {
-            LOG("Unable to open recording target file");
+            LOGF("Unable to open recording target file");
         } else {
-            LOG("Recording...");
+            LOGF("Recording...");
             Status_.recording = true;
             msg::Send(msg::StartRecording());
         }
@@ -939,9 +940,9 @@ private:
             msg::Send(msg::StopRecording{});
             Status_.recording = false;
             Recording_.end();
-            LOG("Recording done.");
+            LOGF("Recording done.");
             // TODO remove this, only used now for testing purposes
-            WiFiStartAP();
+            WiFiConnect(/*forceAp */ true);
         }
     }
 
@@ -981,70 +982,63 @@ private:
         WiFiDisconnectedHandler_ = WiFi.onStationModeDisconnected(OnWiFiDisconnected);
     }
 
-    static void WiFiConnect() {
-        LOG("WiFi: Scanning networks...");
+    static void WiFiConnect(bool forceAp = false) {
+        LOGF("WiFi: Scanning networks...");
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
-        WiFi.scanNetworksAsync([](int n) {
-            LOG("WiFi: Networks found: " + n);
-            File f = SD.open("player/networks.txt", FILE_READ);
+        WiFi.scanNetworksAsync([forceAp](int n) {
+            LOGF("WiFi: Networks found: %i", n);
+            File f = SD.open("player/wifi.json", FILE_READ);
             if (f) {
-                while (f.available()) {
-                    String ssid = f.readStringUntil('\n');
-                    String pass = f.readStringUntil('\n');
-                    if (ssid.isEmpty() || ssid[0] == '#')
-                        break;
-                    for (int i = 0; i < n; ++i) {
-                        if (WiFi.SSID(i) == ssid) {
-                            LOG("WiFi: connecting to " + ssid + ", rssi: " + WiFi.RSSI(i) + ", channel " + WiFi.channel(i));
-                            State_.setWiFiStatus(WiFiStatus::Connecting);
-                            msg::Send(msg::SetWiFiStatus{State_});
-                            WiFi.begin(ssid, pass);
-                            WiFi.scanDelete();
-                            // so that we do not start the access point just yet
-                            return;
+                DynamicJsonDocument json{1024};
+                if (deserializeJson(json, f) == DeserializationError::Ok) {
+                    if (! forceAp) {
+                        for (JsonVariant network : json["networks"].as<JsonArray>()) {
+                            for (int i = 0; i < n; ++i) {
+                                if (WiFi.SSID(i) == network["ssid"]) {
+                                    LOGF("WiFi: connecting to %s, rssi: %i, channel: %u", WiFi.SSID(i), WiFi.RSSI(i), WiFi.channel(i));
+                                    State_.setWiFiStatus(WiFiStatus::Connecting);
+                                    msg::Send(msg::SetWiFiStatus{State_});
+                                    WiFi.begin(network["ssid"].as<char const *>(), network["password"].as<char const *>());
+                                    // so that we do not start the access point just yet
+                                    WiFi.scanDelete();
+                                    f.close();
+                                    return;
+                                }
+                            }
                         }
                     }
+                    // either we are forcing the AP mode, or no suitable networks were found
+                    char const * ssid = json["ap"]["ssid"];
+                    char const * pass = json["ap"]["pass"];
+                    if (ssid == nullptr || ssid[0] == 0) {
+                        ssid = DEFAULT_AP_SSID;
+                        if (pass == nullptr || pass[0] == 0)
+                            pass = DEFAULT_AP_PASSWORD;
+                    }
+                    LOGF("Initializing soft AP, ssid %s, password %p", ssid, pass);
+                    LOGF("    own ip: 10.0.0.1");
+                    LOGF("    subnet: 255.255.255.0");
+                    IPAddress ip{10,0,0,1};
+                    IPAddress subnet{255, 255, 255, 0};
+                    WiFi.softAPConfig(ip, ip, subnet);
+                    if (!WiFi.softAP(ssid, pass)) 
+                        return Error();            
+                    State_.setWiFiStatus(WiFiStatus::SoftAP);
+                    msg::Send(msg::SetWiFiStatus{State_});
+                } else {
+                    LOGF("");
                 }
                 f.close();
             } else {
-                LOG("WiFi: No player/networks.txt found");
+                LOGF("WiFi: No player/wifi.json found");
             }
             WiFi.scanDelete();
-            WiFiStartAP();
         });
     }
 
-    static void WiFiStartAP() {
-        File f = SD.open("player/ap.txt", FILE_READ);
-        String ssid;
-        String pass;
-        if (f) {
-            ssid = f.readStringUntil('\n');
-            pass = f.readStringUntil('\n');
-            f.close();
-        } else {
-            LOG("WiFi: No player/ap.txt found");
-        }
-        if (ssid.isEmpty()) {
-            ssid = DEFAULT_AP_SSID;
-            if (pass.isEmpty())
-                pass = DEFAULT_AP_PASSWORD;
-        }
-        LOG("Initializing soft AP, ssid " + ssid + ", password " + pass);
-        LOG("    own ip: 10.0.0.1");
-        LOG("    subnet: 255.255.255.0");
-        IPAddress ip{10,0,0,1};
-        IPAddress subnet{255, 255, 255, 0};
-        WiFi.softAPConfig(ip, ip, subnet);
-        if (!WiFi.softAP(ssid.c_str(), pass.c_str())) 
-            return Error();            
-        State_.setWiFiStatus(WiFiStatus::SoftAP);
-        msg::Send(msg::SetWiFiStatus{State_});
-    }
-
     static void WiFiDisconnect() {
-        LOG("WiFi: Disconnecting");
+        LOGF("WiFi: Disconnecting");
         WiFi.mode(WIFI_OFF);
         WiFi.forceSleepBegin();
         yield();
@@ -1053,7 +1047,7 @@ private:
     }
 
     static void OnWiFiConnected(WiFiEventStationModeConnected const & e) {
-        LOG("WiFi: connected to " + e.ssid + ", channel " + e.channel);
+        LOGF("WiFi: connected to %s, channel %u", e.ssid, e.channel);
     }
 
     static void OnWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
@@ -1065,7 +1059,7 @@ private:
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
      */
     static void OnWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
-        LOG("WiFi: disconnected, reason: " + e.reason);
+        LOGF("WiFi: disconnected, reason: %u", e.reason);
     }
 
     static void InitializeServer() {
@@ -1135,7 +1129,7 @@ private:
         } else {
             Server_.send(404, "text/json","{ \"response\": 404, \"unknownCommand\": \"" + cmd + "\" }");
         }
-        LOG("Cmd: " + cmd);
+        LOGF("Cmd: %s", cmd);
         Server_.send(200, "text/json","{\"response\":200}");
     }
 
@@ -1149,7 +1143,7 @@ private:
         String ctype = "text/plain";
         if (path.endsWith("mp3"))
             ctype = "audio/mp3";
-        LOG("WebServer: Serving file " + path);
+        LOGF("WebServer: Serving file %s", path);
         Server_.streamFile(f, ctype);
         f.close();
     }
@@ -1161,7 +1155,7 @@ private:
         File d = SD.open(path.c_str());
         if (!d || !d.isDirectory())
             return Http404();
-        LOG("WebServer: Listing directory " + path);
+        LOGF("WebServer: Listing directory %s", path);
         String r{"["};
         int n = 0;
         while(true) {
