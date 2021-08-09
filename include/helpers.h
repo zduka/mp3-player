@@ -42,24 +42,9 @@ public:
 }; // Log
 
 
-#define LOGF(FORMAT,...) Log::Print(PSTR(FORMAT) __VA_OPT__(,) __VA_ARGS__)
+#define LOG(FORMAT,...) Log::Print(PSTR(FORMAT) __VA_OPT__(,) __VA_ARGS__)
 
-/*
-#define LOGF(FMT, ...) do { \
-    snprintf_P(Log::Buffer, Log::BufferSize, PSTR(FMT), __VA_ARGS__); \
-    Serial.print(millis() / 1000); \
-    Serial.print(PSTR(": ")); \
-    Serial.write(pointer_cast<char*>(& Log::Buffer)); Serial.println(); \
-} while (false)
-*/
-
-#define LOG(...) Log_(String("") + __VA_ARGS__)
 #define STR(...) (String("") + __VA_ARGS__)
-
-inline void Log_(String const & str) {
-    Serial.print(String(millis() / 1000) + ": ");
-    Serial.println(str);
-}
 
 #endif
 

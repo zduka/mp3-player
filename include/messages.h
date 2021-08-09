@@ -39,7 +39,7 @@ namespace msg {
                 */
                 if (status == 0)
                     return;
-                LOG("I2C command failed: " + status);
+                LOG("I2C command failed: %u", status);
                 delay(3);
             } while (retries-- != 0);
             LOG("I2C command failed despite retries");
