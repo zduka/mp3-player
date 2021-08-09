@@ -22,27 +22,12 @@ inline T pointer_cast(W * from) {
 //@}
 
 
+
 #if (defined ARCH_ESP8266)
 
-class Log {
-public:
-    static constexpr size_t BufferSize = 256;
-    static inline char Buffer[BufferSize];
-
-    static void Print(char const * format, ...) { \
-        va_list args; \
-        va_start(args, format); \
-        snprintf_P(Buffer, BufferSize, format, args); \
-        va_end(args); \        
-        Serial.print(millis() / 1000); \
-        Serial.print(PSTR(": ")); \
-        Serial.write(pointer_cast<char*>(& Log::Buffer)); \
-        Serial.println(); \
-    }
-}; // Log
 
 
-#define LOG(FORMAT,...) Log::Print(PSTR(FORMAT) __VA_OPT__(,) __VA_ARGS__)
+#define LOG(FORMAT,...) do { Serial.printf_P(PSTR("%u: "), millis() / 1000); Serial.printf_P(PSTR(FORMAT) __VA_OPT__(,) __VA_ARGS__); Serial.println(); } while (false)
 
 #define STR(...) (String("") + __VA_ARGS__)
 

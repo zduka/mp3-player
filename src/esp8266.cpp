@@ -65,9 +65,9 @@ public:
         LOG("Initializing ESP8266...");
         LOG("  chip id:      %u", ESP.getChipId());
         LOG("  cpu_freq:     %u", ESP.getCpuFreqMHz());
-        LOG("  core version: %s", ESP.getCoreVersion());
+        LOG("  core version: ", ESP.getCoreVersion().c_str());
         LOG("  SDK version:  %s", ESP.getSdkVersion());
-        LOG("  mac address:  %s", WiFi.macAddress());
+        LOG("  mac address:  %s", WiFi.macAddress().c_str());
         LOG("  wifi mode:    %u", WiFi.getMode());
         // set the IRQ pin as input so that we can tell when AVR has an interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
@@ -706,7 +706,7 @@ private:
                     MP3File_.open(filename.c_str());
                     I2S_.SetGain(State_.volume() * ESP_VOLUME_STEP);
                     MP3_.begin(& MP3File_, & I2S_);
-                    LOG("Track %u, file: %s", index, filename);
+                    LOG("Track %u, file: %s", index, filename.c_str());
                     State_.setMp3TrackId(index);
                     msg::Send(msg::SetMP3Settings{State_});
                     return;
@@ -866,57 +866,40 @@ private:
 //@{
 
     static void InitializeTelegramBot() {
-        /*
-        File f = SD.open("bot/token.txt", FILE_READ);
+        File f = SD.open("bot/bot.json", FILE_READ);
         if (f) {
-            TelegramBot_ = f.readStringUntil('\n');
-            if (!TelegramBot_.isEmpty() && TelegramBot_[0] != '#') {
-                BotId_ = TelegramBot_.substring(0, TelegramBot_.indexOf(':'));
-                BotAdminId_ = f.readStringUntil('\n');
-                HTTPSFingerprint_ = f.readStringUntil('\n');
-                if (! HTTPSFingerprint_.isEmpty() && HTTPSFingerprint_[0] == '#')
-                    HTTPSFingerprint_.clear();
-                if (HTTPSFingerprint_.isEmpty()) {
-                    LOG("Walkie-Talkie: No fingerprint provided, HTTPS will be insecure!");
-                    HTTPSClient_.setInsecure();
-                } else {
-                    LOG("Walkie-Talkie: Fingerprint: " + HTTPSFingerprint_);
-                }
+            DynamicJsonDocument json{1024};
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                String id = json["id"];
+                String token = json["token"];
+                BotAdminId_ = json["adminId"].as<char const *>();
+                BotFingerprint_ = json["fingerprint"].as<char const *>();
+                LOG("Walkie-Talkie:\n  Bot %s\n  Token: %s\n  AdminId: %s\n  Fingerprint: %s", id.c_str(), token.c_str(), BotAdminId_.c_str(), BotFingerprint_.c_str());
             } else {
-                TelegramBot_.clear();
+                LOG("Deserialization error");
             }
             f.close();
-            LOG("Walkie-Talkie: Bot token:   " + TelegramBot_);
-            LOG("Walkie-Talkie: Bot id:      " + BotId_);
-            LOG("Walkie-Talkie: Admin:       " + BotAdminId_);
-            // load the telegram chats
-            for (int i = 0; i < 8; ++i)
-                BotChannels_[i].clear();
-            f = SD.open("bot/chats.txt");
-            if (f) {
-                LOG("Walkie-Talkie: Channels:");
-                uint8_t i = 0;
-                for (int x = 0; x < 8; ++x) {
-                    String id = f.readStringUntil(' ');
-                    if (id.isEmpty())
+        } 
+        for (int i = 0; i < 8; ++i)
+            BotChannels_[i].clear();
+        f = SD.open("bot/chats.json");
+        if (f) {
+            DynamicJsonDocument json{1024};
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                unsigned i = 0;
+                for (JsonVariant item : json.as<JsonArray>()) {
+                    String id = item["id"];
+                    Color color = Color::HTML(item["color"]);
+                    LOG("  %u : chat id %s, color %s - %s",i, id.c_str(), item["color"].as<char const *>(), item["name"].as<char const *>());
+                    BotChannels_[i++] = BotChannel{std::move(id), color};
+                    if (i >= 8)
                         break;
-                    String colorText = f.readStringUntil('\n');
-                    if (id[0] == '#') {
-                        LOG("    skipping " + id + " " + colorText);
-                    } else {
-                        LOG("    " + i + ": " + id + " " + colorText);    
-                        colorText[6] = 0; // split string if longer than 6
-                        Color color{Color::HTML(colorText.c_str())};
-                        BotChannels_[i++] = BotChannel{id, color};
-                    }
                 }
             } else {
-                LOG("Walkie-Talkie: No valid chats, file bot/chats.txt not found");
+                LOG("Deserialization error");
             }
-        } else {
-            LOG("Walkie-Talkie: No bot/token.txt file. Walkie talkie mode is disabled.");
+            f.close();
         }
-        */
     }
 
     /** Returns true if the walkie talkie mode is enabled, i.e. the telegram bot has been configured and WiFi is connected. 
@@ -954,6 +937,16 @@ private:
         String id;
         Color color;
 
+        BotChannel() = default;
+
+        BotChannel(String && id, Color const & color):
+            id{std::move(id)},
+            color{color} {
+        }
+
+        BotChannel & operator = (BotChannel const &) = delete;
+        BotChannel & operator = (BotChannel &&) = default;
+
         void clear() {
             id.clear();
         }
@@ -964,7 +957,7 @@ private:
     static inline String BotAdminId_;
     static inline BotChannel BotChannels_[8];
 
-    static inline String HTTPSFingerprint_;
+    static inline String BotFingerprint_;
     static inline WiFiClientSecure HTTPSClient_;
 
     static inline WavWriter Recording_;
@@ -996,7 +989,7 @@ private:
                         for (JsonVariant network : json["networks"].as<JsonArray>()) {
                             for (int i = 0; i < n; ++i) {
                                 if (WiFi.SSID(i) == network["ssid"]) {
-                                    LOG("WiFi: connecting to %s, rssi: %i, channel: %u", WiFi.SSID(i), WiFi.RSSI(i), WiFi.channel(i));
+                                    LOG("WiFi: connecting to %s, rssi: %i, channel: %i", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
                                     State_.setWiFiStatus(WiFiStatus::Connecting);
                                     msg::Send(msg::SetWiFiStatus{State_});
                                     WiFi.begin(network["ssid"].as<char const *>(), network["password"].as<char const *>());
@@ -1047,11 +1040,11 @@ private:
     }
 
     static void OnWiFiConnected(WiFiEventStationModeConnected const & e) {
-        LOG("WiFi: connected to %s, channel %u", e.ssid, e.channel);
+        LOG("WiFi: connected to %s, channel %u", e.ssid.c_str(), e.channel);
     }
 
     static void OnWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
-        LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString(), e.gw.toString());
+        LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
         State_.setWiFiStatus(WiFiStatus::Connected);
         msg::Send(msg::SetWiFiStatus{State_});
     }
@@ -1117,6 +1110,7 @@ private:
             PSTR(",\"radioStation\":") + State_.radioStation() +
             PSTR(",\"espLoopCount\":") + LoopCount_ +
             PSTR(",\"espMaxLoopTime\":") + MaxLoopTime_ +
+            PSTR(",\"freeMem\":") + ESP.getFreeHeap() +
         PSTR("}")));
     }
 
@@ -1129,7 +1123,7 @@ private:
         } else {
             Server_.send(404, "text/json","{ \"response\": 404, \"unknownCommand\": \"" + cmd + "\" }");
         }
-        LOG("Cmd: %s", cmd);
+        LOG("Cmd: %s", cmd.c_str());
         Server_.send(200, "text/json","{\"response\":200}");
     }
 
@@ -1143,7 +1137,7 @@ private:
         String ctype = "text/plain";
         if (path.endsWith("mp3"))
             ctype = "audio/mp3";
-        LOG("WebServer: Serving file %s", path);
+        LOG("WebServer: Serving file %s", path.c_str());
         Server_.streamFile(f, ctype);
         f.close();
     }
@@ -1155,7 +1149,7 @@ private:
         File d = SD.open(path.c_str());
         if (!d || !d.isDirectory())
             return Http404();
-        LOG("WebServer: Listing directory %s", path);
+        LOG("WebServer: Listing directory %s", path.c_str());
         String r{"["};
         int n = 0;
         while(true) {

@@ -24,7 +24,7 @@
 - wifi_off (http) does not inform about success
 - check MDNS
 - add authentication
-- remove uses of String class(!)
+- remove uses of String class, although perhaps not practical, see the memory usage
 
  # Missing Features
 
