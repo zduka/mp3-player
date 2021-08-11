@@ -20,6 +20,7 @@
 
 # ESP
 
+- check time and update it
 - longer delay before power down in night light mode (done, check)
 - wifi_off (http) does not inform about success
 - check MDNS

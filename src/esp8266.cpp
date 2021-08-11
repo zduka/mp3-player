@@ -8,7 +8,6 @@
 #include <SD.h>
 #include <DNSServer.h>
 #include <Hash.h>
-#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 
 #include <radio.h>
@@ -21,6 +20,7 @@
 #include "state.h"
 #include "messages.h"
 #include "esp8266/wav_writer.h"
+#include "esp8266/telegram_bot.h"
 
 /* ESP8266 PINOUT
 
@@ -873,8 +873,19 @@ private:
                 String id = json["id"];
                 String token = json["token"];
                 BotAdminId_ = json["adminId"].as<char const *>();
-                BotFingerprint_ = json["fingerprint"].as<char const *>();
-                LOG("Walkie-Talkie:\n  Bot %s\n  Token: %s\n  AdminId: %s\n  Fingerprint: %s", id.c_str(), token.c_str(), BotAdminId_.c_str(), BotFingerprint_.c_str());
+                String fingerprint = json["fingerprint"].as<char const *>();
+                LOG("Walkie-Talkie:\n  Bot %s\n  Token: %s\n  AdminId: %s\n  Fingerprint: %s", id.c_str(), token.c_str(), BotAdminId_.c_str(), fingerprint.c_str());
+                File cf = SD.open("/bot/cert.txt", FILE_READ);
+                if (cf && cf.size() < 2048) {
+                    String cert = cf.readString();
+                    // TODO security is hard, the certificate only works if time is proper...
+                    TelegramBot_.initialize(std::move(id), std::move(token) /*, cert.c_str() */);
+                    LOG("%s", cert.c_str());
+                } else {
+                    TelegramBot_.initialize(std::move(id), std::move(token));
+                    LOG("No certificate found, telegram bot will be INSECURE!!!");
+                }
+                cf.close();
             } else {
                 LOG("Deserialization error");
             }
@@ -905,7 +916,7 @@ private:
     /** Returns true if the walkie talkie mode is enabled, i.e. the telegram bot has been configured and WiFi is connected. 
      */
     static bool WalkieTalkieModeEnabled() {
-        return (State_.wifiStatus() == WiFiStatus::Connected) && !TelegramBot_.isEmpty();
+        return (State_.wifiStatus() == WiFiStatus::Connected) && TelegramBot_.isValid();
     }
 
     static void WalkieTalkieStartRecording() {
@@ -925,12 +936,9 @@ private:
             Recording_.end();
             LOG("Recording done.");
             // TODO remove this, only used now for testing purposes
-            WiFiConnect(/*forceAp */ true);
+            //WiFiConnect(/*forceAp */ true);
+            TelegramBot_.sendMessage(BotAdminId_.c_str(), "I am on!");
         }
-    }
-
-    static void WalkieTalkieGetUpdate() {
-        HTTPSClient_.connect("api.telegram.org", 433);
     }
 
     struct BotChannel {
@@ -952,13 +960,9 @@ private:
         }
     }; // Player::BotChannel
 
-    static inline String TelegramBot_;
-    static inline String BotId_;
+    static inline TelegramBot TelegramBot_;
     static inline String BotAdminId_;
     static inline BotChannel BotChannels_[8];
-
-    static inline String BotFingerprint_;
-    static inline WiFiClientSecure HTTPSClient_;
 
     static inline WavWriter Recording_;
 
