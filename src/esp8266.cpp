@@ -100,6 +100,9 @@ public:
         LOG("Initialization done.");
         
         SetMode(State_.mode());
+        // if wifi was turned on last time, turn it on as well
+        if (State_.wifiStatus() != WiFiStatus::Off)
+            WiFiConnect();
         LOG("End of setup");
     }
 
@@ -935,9 +938,10 @@ private:
             Status_.recording = false;
             Recording_.end();
             LOG("Recording done.");
-            // TODO remove this, only used now for testing purposes
-            //WiFiConnect(/*forceAp */ true);
-            TelegramBot_.sendMessage(BotAdminId_.c_str(), "I am on!");
+            //TelegramBot_.sendMessage(BotAdminId_.c_str(), "I am on!");
+            File f = SD.open("/test.wav", FILE_READ);
+            TelegramBot_.sendFile(BotAdminId_.c_str(), f, "test.wav", "audio/wav");
+            f.close();
         }
     }
 

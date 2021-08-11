@@ -5,6 +5,8 @@
 
 #include "helpers.h"
 
+//#define HTTPS_SEND(...) Serial.printf_P(__VA_ARGS__); https_.printf_P(__VA_ARGS__)
+#define HTTPS_SEND(...) https_.printf_P(__VA_ARGS__)
 class TelegramBot {
 public:
     /** Sent or received message.
@@ -42,21 +44,52 @@ public:
     bool sendMessage(char const * chatId, char const * text) {
         if (!connect())
             return false;
-        https_.printf_P(PSTR("GET /bot%s:%s/sendMessage?chat_id=%s&text="), id_.c_str(), token_.c_str(), chatId);
+        HTTPS_SEND(PSTR("GET /bot%s:%s/sendMessage?chat_id=%s&text="), id_.c_str(), token_.c_str(), chatId);
         UrlEncode(https_, text);
-        https_.printf_P(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n\r\n"));
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        return responseOk();
+    }
+
+    bool sendFile(char const * chatId, File & f, char const * filename, char const * mime) {
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("POST /bot%s:%s/sendDocument"), id_.c_str(), token_.c_str());
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("Content-Type: multipart/form-data; boundary=%s\r\n"), BOUNDARY);
+        uint32_t contentLength = 44 + 50 + 2 + strlen(chatId) + 44 + 62 + strlen(filename) + 18 + strlen(mime) + f.size() + 48;
+        //LOG("Sending document, contents length: %u, file size: %u", contentLength, f.size());
+        HTTPS_SEND(PSTR("Content-Length: %u\r\n"), contentLength);
+        HTTPS_SEND(PSTR("\r\n"));
+        // body
+        HTTPS_SEND(PSTR("--%s\r\n"), BOUNDARY); // 44
+        HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n")); // 50
+        HTTPS_SEND(PSTR("%s\r\n"), chatId); // 2 + strlen(chatId)
+        HTTPS_SEND(PSTR("--%s\r\n"), BOUNDARY); // 44
+        HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"document\"; filename=\"%s\"\r\n"), filename); // 62 + strlen(filename)
+        HTTPS_SEND(PSTR("Content-Type: %s\r\n\r\n"), mime); // 18 + strlen(mime)
+        uint8_t buffer[256];
+        while (f.available()) {
+            size_t n = f.readBytes(pointer_cast<char *>(&buffer), 256);
+            https_.write(buffer, n);
+            Serial.print(".");
+        }
+        //https_.write(f); // f.size()
+        HTTPS_SEND(PSTR("\r\n--%s--\r\n"), BOUNDARY); // 48
         return responseOk();
     }
 
     /** All is good.
      */
-    static constexpr uint16_t HTTP_OK = 200;
+    static inline constexpr uint16_t HTTP_OK = 200;
     /** Network timeout (anywhere). 
      */
-    static constexpr uint16_t HTTP_TIMEOUT = 504;
+    static inline constexpr uint16_t HTTP_TIMEOUT = 504;
     /** Simplified any other state. 
      */
-    static constexpr uint16_t HTTP_ERROR = 400;
+    static inline constexpr uint16_t HTTP_ERROR = 400;
+
+    static inline constexpr char const * PROGMEM BOUNDARY = "------------73e5a323s031399w96f31669we93";
 
 private:
 
@@ -76,6 +109,7 @@ private:
         uint32_t t = millis() + timeout_;
         uint16_t result = skipResponseHeaders();
         skipResponseBody();
+        https_.stop();
         return result == HTTP_OK;
     }    
 
@@ -107,6 +141,7 @@ private:
                 delay(1);
             }
         } while (millis() < t);
+        LOG("Response headers timeout");
         return HTTP_TIMEOUT;
     }
 
@@ -133,3 +168,5 @@ private:
     WiFiClientSecure https_;    
     uint32_t timeout_ = 2000;
 };
+
+#undef HTTPS_SEND
