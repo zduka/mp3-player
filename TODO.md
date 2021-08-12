@@ -21,6 +21,9 @@
 # ESP
 
 - approaching memory limit for ESP...
+- recordings sent as audio so that they can be played from within telefram. Update comments & names & size of the message
+- getting telegram messages does not work
+- fix the 1 minute tick properly
 - check time and update it
 - longer delay before power down in night light mode (done, check)
 - wifi_off (http) does not inform about success

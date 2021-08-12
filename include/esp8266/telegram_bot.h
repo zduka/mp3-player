@@ -7,6 +7,7 @@
 
 //#define HTTPS_SEND(...) Serial.printf_P(__VA_ARGS__); https_.printf_P(__VA_ARGS__)
 #define HTTPS_SEND(...) https_.printf_P(__VA_ARGS__)
+
 class TelegramBot {
 public:
     /** Sent or received message.
@@ -51,13 +52,13 @@ public:
         return responseOk();
     }
 
-    bool sendFile(char const * chatId, File & f, char const * filename, char const * mime) {
+    bool sendDocument(char const * chatId, File & f, char const * filename, char const * mime) {
         if (!connect())
             return false;
-        HTTPS_SEND(PSTR("POST /bot%s:%s/sendDocument"), id_.c_str(), token_.c_str());
+        HTTPS_SEND(PSTR("POST /bot%s:%s/sendAudio"), id_.c_str(), token_.c_str());
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("Content-Type: multipart/form-data; boundary=%s\r\n"), BOUNDARY);
-        uint32_t contentLength = 44 + 50 + 2 + strlen(chatId) + 44 + 62 + strlen(filename) + 18 + strlen(mime) + f.size() + 48;
+        uint32_t contentLength = 44 + 50 + 2 + strlen(chatId) + 44 + 62 + strlen(filename) + 18 + strlen(mime) + f.size() + 48 - 3;
         //LOG("Sending document, contents length: %u, file size: %u", contentLength, f.size());
         HTTPS_SEND(PSTR("Content-Length: %u\r\n"), contentLength);
         HTTPS_SEND(PSTR("\r\n"));
@@ -66,7 +67,7 @@ public:
         HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n")); // 50
         HTTPS_SEND(PSTR("%s\r\n"), chatId); // 2 + strlen(chatId)
         HTTPS_SEND(PSTR("--%s\r\n"), BOUNDARY); // 44
-        HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"document\"; filename=\"%s\"\r\n"), filename); // 62 + strlen(filename)
+        HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"audio\"; filename=\"%s\"\r\n"), filename); // 62 + strlen(filename)
         HTTPS_SEND(PSTR("Content-Type: %s\r\n\r\n"), mime); // 18 + strlen(mime)
         uint8_t buffer[256];
         while (f.available()) {
@@ -77,6 +78,27 @@ public:
         //https_.write(f); // f.size()
         HTTPS_SEND(PSTR("\r\n--%s--\r\n"), BOUNDARY); // 48
         return responseOk();
+    }
+
+    bool getUpdate(JsonDocument & into, uint32_t offset = 0) {
+        into.clear();
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("GET /bot%s:%s/getUpdates?limit=1&offset=%u"), id_.c_str(), token_.c_str(), offset);
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        if (skipResponseHeaders() == HTTP_OK) {
+            deserializeJson(into, https_);
+            https_.stop();
+            return true;
+        } else {
+            https_.stop();
+            return false;
+        }
+    }
+
+    bool getFile(char const * id, File & into) {
+        return false;
     }
 
     /** All is good.
@@ -106,16 +128,15 @@ private:
     /** Waits for the response to the initiated request and verifies that it is a success. Returns true if success, false otherwise. 
      */
     bool responseOk() {
-        uint32_t t = millis() + timeout_;
-        uint16_t result = skipResponseHeaders();
-        skipResponseBody();
-        https_.stop();
-        return result == HTTP_OK;
+        if (skipResponseHeaders() == HTTP_OK) {
+            skipResponseBody();
+            https_.stop();
+            return true;
+        } else {
+            https_.stop();
+            return false;
+        }
     }    
-
-    static const uint8_t WAIT_FOR_SPACE = 0;
-    static const uint8_t WORKING = 1;
-    static const uint8_t DONE = 2;
 
     /** Skips the response headers entirely, but returns the status code
      */

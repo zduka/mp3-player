@@ -14,7 +14,7 @@
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
 #include <AudioGeneratorMP3.h>
-#include <AudioGeneratorOpus.h>
+#include <AudioGeneratorWAV.h>
 #include <AudioOutputI2S.h>
 
 #include "state.h"
@@ -62,6 +62,7 @@ public:
             ESP.deepSleep(0);
         // continue with normal initialization
         Serial.begin(74880);
+        LOG("Free heap: %u", ESP.getFreeHeap());
         LOG("Initializing ESP8266...");
         LOG("  chip id:      %u", ESP.getChipId());
         LOG("  cpu_freq:     %u", ESP.getCpuFreqMHz());
@@ -75,20 +76,24 @@ public:
         // start the I2C comms
         Wire.begin(I2C_SDA, I2C_SCL);
         Wire.setClock(400000);
+        LOG("Free heap: %u", ESP.getFreeHeap());
         // initialize the on-chip filesystem
         InitializeLittleFS();
+        LOG("Free heap: %u", ESP.getFreeHeap());
         // tell AVR that we are awake by requesting initial state
         UpdateState();
         msg::Send(msg::LightsBar{2, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
         // initialize the SD card
         InitializeSDCard();
+        LOG("Free heap: %u", ESP.getFreeHeap());
         msg::Send(msg::LightsBar{3, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
 
         InitializeSettings();
         InitializeMP3Playlists();
         InitializeRadioStations();
         InitializeTelegramBot();
+        LOG("Free heap: %u", ESP.getFreeHeap());
         msg::Send(msg::SetAccentColor{Settings_.accentColor});
         msg::Send(msg::SetMode{State_});
         msg::Send(msg::LightsBar{4, 5, Settings_.accentColor, DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
@@ -98,6 +103,7 @@ public:
         PreviousSecondMillis_ = millis();
         msg::Send(msg::LightsBar{5, 5, Settings_.accentColor,DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
         LOG("Initialization done.");
+        LOG("Free heap: %u", ESP.getFreeHeap());
         
         SetMode(State_.mode());
         // if wifi was turned on last time, turn it on as well
@@ -221,6 +227,7 @@ private:
     /** Called every time a second passes.
      */
     static void SecondTick() {
+        static uint8_t seconds = 0;
         LoopCount_ = RunningLoopCount_;
         MaxLoopTime_ = RunningMaxLoopTime_;
         RunningLoopCount_ = 0;
@@ -231,6 +238,9 @@ private:
             WiFiDisconnect();
         if (Status_.idle && State_.wifiStatus() == WiFiStatus::Off && --Status_.powerOffCountdown == 0)
             PowerOff();
+        seconds = (seconds + 1) % 60;
+        if (State_.mode() == Mode::WalkieTalkie && seconds == 0)
+            WalkieTalkieCheckUpdates();
     }
 
     /** Handler for the state update requests.
@@ -775,6 +785,7 @@ private:
     }; // 
 
     static inline AudioGeneratorMP3 MP3_;
+    static inline AudioGeneratorWAV WAV_;
     static inline AudioOutputI2S I2S_;
     static inline AudioFileSourceSD MP3File_;
     static inline PlaylistInfo MP3Playlists_[8];
@@ -940,8 +951,50 @@ private:
             LOG("Recording done.");
             //TelegramBot_.sendMessage(BotAdminId_.c_str(), "I am on!");
             File f = SD.open("/test.wav", FILE_READ);
-            TelegramBot_.sendFile(BotAdminId_.c_str(), f, "test.wav", "audio/wav");
+            TelegramBot_.sendDocument(BotAdminId_.c_str(), f, "test.wav", "audio/wav");
             f.close();
+        }
+    }
+
+    static void WalkieTalkieCheckUpdates() {
+        uint32_t offset = 0;
+        StaticJsonDocument<1024> json;
+        while (TelegramBot_.getUpdate(json, offset)) {
+            if (json["ok"] != true) {
+                LOG("Telegram update error (ok: false)");
+                return;
+            }
+            if (! json["result"].is<JsonArray>()) {
+                LOG("Telegram update result is not an array");
+                return;
+            }
+            JsonArray const & result = json["result"];
+            if (result.size() == 0) {
+                LOG("No more updates");
+                break;
+            }
+            JsonObject const & update = result[0];
+            offset = update["offset"].as<uint32_t>() + 1;
+            LOG("Update: %u", update);
+            if (! update.containsKey("message")) {
+                LOG("Update is not a message");
+                continue;
+            }
+            JsonObject const & msg = update["message"];
+            // check that it belongs to a valid chat
+            uint64_t chatId = msg["chat"]["id"];
+            if (msg.containsKey("text")) {
+                LOG("text: %s", msg["text"].as<char const *>());
+            } else if (msg.containsKey("audio")) {
+                JsonObject const & audio = msg["audio"];
+                if (audio["mime_type"] != "audio/wav") {
+                    LOG("audio of unsupported mimetype %s", audio["mime_type"].as<char const *>());
+                } else {
+                    LOG("audio message!");
+                }
+            } else {
+                LOG("Unsupported message type");
+            }
         }
     }
 
