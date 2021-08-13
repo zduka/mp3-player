@@ -882,13 +882,12 @@ private:
     static void InitializeTelegramBot() {
         File f = SD.open("bot/bot.json", FILE_READ);
         if (f) {
-            DynamicJsonDocument json{1024};
+            StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
                 String id = json["id"];
                 String token = json["token"];
-                BotAdminId_ = json["adminId"].as<char const *>();
-                String fingerprint = json["fingerprint"].as<char const *>();
-                LOG("Walkie-Talkie:\n  Bot %s\n  Token: %s\n  AdminId: %s\n  Fingerprint: %s", id.c_str(), token.c_str(), BotAdminId_.c_str(), fingerprint.c_str());
+                BotAdminId_ = json["adminId"].as<int64_t>();
+                LOG("Walkie-Talkie:\n  Bot %s\n  Token: %s\n  AdminId: %i", id.c_str(), token.c_str(), BotAdminId_);
                 File cf = SD.open("/bot/cert.txt", FILE_READ);
                 if (cf && cf.size() < 2048) {
                     String cert = cf.readString();
@@ -909,14 +908,15 @@ private:
             BotChannels_[i].clear();
         f = SD.open("bot/chats.json");
         if (f) {
-            DynamicJsonDocument json{1024};
+            StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
+                serializeJson(json, Serial);
                 unsigned i = 0;
                 for (JsonVariant item : json.as<JsonArray>()) {
-                    String id = item["id"];
+                    int64_t id = item["id"];
                     Color color = Color::HTML(item["color"]);
-                    LOG("  %u : chat id %s, color %s - %s",i, id.c_str(), item["color"].as<char const *>(), item["name"].as<char const *>());
-                    BotChannels_[i++] = BotChannel{std::move(id), color};
+                    LOG("  %u : chat id %i, color %s - %s",i, id, item["color"].as<char const *>(), item["name"].as<char const *>());
+                    BotChannels_[i++] = BotChannel{id, color};
                     if (i >= 8)
                         break;
                 }
@@ -951,7 +951,7 @@ private:
             LOG("Recording done.");
             //TelegramBot_.sendMessage(BotAdminId_.c_str(), "I am on!");
             File f = SD.open("/test.wav", FILE_READ);
-            TelegramBot_.sendDocument(BotAdminId_.c_str(), f, "test.wav", "audio/wav");
+            TelegramBot_.sendAudio(BotAdminId_, f, "test.wav", "audio/wav");
             f.close();
         }
     }
@@ -974,7 +974,7 @@ private:
                 break;
             }
             JsonObject const & update = result[0];
-            offset = update["offset"].as<uint32_t>() + 1;
+            offset = update["update_id"].as<uint32_t>() + 1;
             LOG("Update: %u", update);
             if (! update.containsKey("message")) {
                 LOG("Update is not a message");
@@ -999,13 +999,15 @@ private:
     }
 
     struct BotChannel {
-        String id;
+        int64_t id;
         Color color;
 
-        BotChannel() = default;
+        BotChannel():
+            id{std::numeric_limits<int64_t>::max()} {
+        }
 
-        BotChannel(String && id, Color const & color):
-            id{std::move(id)},
+        BotChannel(int64_t id, Color const & color):
+            id{id},
             color{color} {
         }
 
@@ -1013,12 +1015,12 @@ private:
         BotChannel & operator = (BotChannel &&) = default;
 
         void clear() {
-            id.clear();
+            id = std::numeric_limits<int64_t>::max();
         }
     }; // Player::BotChannel
 
     static inline TelegramBot TelegramBot_;
-    static inline String BotAdminId_;
+    static inline int64_t BotAdminId_;
     static inline BotChannel BotChannels_[8];
 
     static inline WavWriter Recording_;

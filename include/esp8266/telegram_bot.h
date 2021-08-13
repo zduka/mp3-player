@@ -52,22 +52,23 @@ public:
         return responseOk();
     }
 
-    bool sendDocument(char const * chatId, File & f, char const * filename, char const * mime) {
+    bool sendAudio(int64_t chatId, File & f, char const * filename, char const * mime) {
         if (!connect())
             return false;
         HTTPS_SEND(PSTR("POST /bot%s:%s/sendAudio"), id_.c_str(), token_.c_str());
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("Content-Type: multipart/form-data; boundary=%s\r\n"), BOUNDARY);
-        uint32_t contentLength = 44 + 50 + 2 + strlen(chatId) + 44 + 62 + strlen(filename) + 18 + strlen(mime) + f.size() + 48 - 3;
+        char buf[22];
+        uint32_t contentLength = 44 + 50 + 2 + snprintf_P(buf, 21, PSTR("%i"), chatId) + 44 + 59 + strlen(filename) + 18 + strlen(mime) + f.size() + 48;
         //LOG("Sending document, contents length: %u, file size: %u", contentLength, f.size());
         HTTPS_SEND(PSTR("Content-Length: %u\r\n"), contentLength);
         HTTPS_SEND(PSTR("\r\n"));
         // body
         HTTPS_SEND(PSTR("--%s\r\n"), BOUNDARY); // 44
         HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n")); // 50
-        HTTPS_SEND(PSTR("%s\r\n"), chatId); // 2 + strlen(chatId)
+        HTTPS_SEND(PSTR("%s\r\n"), buf); // 2 + strlen(chatId)
         HTTPS_SEND(PSTR("--%s\r\n"), BOUNDARY); // 44
-        HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"audio\"; filename=\"%s\"\r\n"), filename); // 62 + strlen(filename)
+        HTTPS_SEND(PSTR("Content-Disposition: form-data; name=\"audio\"; filename=\"%s\"\r\n"), filename); // 59 + strlen(filename)
         HTTPS_SEND(PSTR("Content-Type: %s\r\n\r\n"), mime); // 18 + strlen(mime)
         uint8_t buffer[256];
         while (f.available()) {
@@ -87,18 +88,44 @@ public:
         HTTPS_SEND(PSTR("GET /bot%s:%s/getUpdates?limit=1&offset=%u"), id_.c_str(), token_.c_str(), offset);
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("\r\n"));
-        if (skipResponseHeaders() == HTTP_OK) {
-            deserializeJson(into, https_);
-            https_.stop();
-            return true;
-        } else {
+        if (skipResponseHeaders() != HTTP_OK) {
             https_.stop();
             return false;
         }
+        deserializeJson(into, https_);
+        https_.stop();
+        return true;
     }
 
-    bool getFile(char const * id, File & into) {
-        return false;
+    /** Getting a file is a two-step process.
+     */
+    bool getFile(char const * fileId, JsonDocument &fileInfo, File & into) {
+        fileInfo.clear();
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("GET /bot%s:%s/getFile?file_id=%u"), id_.c_str(), token_.c_str(), fileId);
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        if (skipResponseHeaders() != HTTP_OK) {
+            https_.stop();
+            return false;
+        }
+        deserializeJson(fileInfo, https_);
+        https_.stop();
+        // actually request the file
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("GET /file/bot%s:%s/%s"), id_.c_str(), token_.c_str(), fileInfo["result"]["file_path"].as<char const *>());
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        if (skipResponseHeaders() != HTTP_OK) {
+            https_.stop();
+            return false;
+        }
+        // TODO actually store the file
+
+
+        return true;
     }
 
     /** All is good.
@@ -152,7 +179,7 @@ private:
                     last = (last << 8) | c;
                     if (last == 0x0d0a0d0a)
                         return result;
-                    if (result == 0 && (last & 0x20000000) == 0x20000000) {
+                    if (result == 0 && (last & 0xff000000) == 0x20000000) {
                         result = ((last >> 16) & 0xff) - '0';
                         result = result * 10 + (((last >> 8) & 0xff) - '0');
                         result = result * 10 + ((last & 0xff) - '0');
