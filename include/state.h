@@ -53,8 +53,8 @@
 #include "color.h"
 #include "datetime.h"
 
-
-
+/* Forward declarations for messages so that they can tap the internals of the state directly when transferring its parts from ESP to ATTiny. 
+ */
 namespace msg {
     class SetMode;
     class SetWiFiStatus;
@@ -62,13 +62,16 @@ namespace msg {
     class SetMP3Settings;
     class SetRadioSettings;
     class SetNightLightSettings;
- } // namespace msg forward declarations
+ } // namespace msg
 
 enum class Mode : uint8_t {
     MP3,
     Radio,
     WalkieTalkie,
     NightLight,
+    // the alarm clock and birthday greeting modes are not directly accessible via controls, but are automatically selected by the system when appropriate
+    AlarmClock,
+    BirthdayGreeting,
 }; // Mode
 
 enum class WiFiStatus : uint8_t {
@@ -112,10 +115,11 @@ class State {
     friend class msg::SetMP3Settings;
     friend class msg::SetRadioSettings;
     friend class msg::SetNightLightSettings;
+private:
+    friend class Player;
 
-/** \name Controls
- 
-    Contains the actual information about the control and volume knob values and the state of their buttons.
+
+/** \name Knob button states & events
  */
 //@{
 public:
@@ -199,13 +203,30 @@ public:
             controlState_ |= DOUBLE_LONG_PRESS_MASK;
         else
             controlState_ &= ~DOUBLE_LONG_PRESS_MASK;
-
     }
 
     void clearButtonEvents() {
         controlState_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK | DOUBLE_LONG_PRESS_MASK);
     }
-  
+
+private:
+
+    static constexpr uint8_t CONTROL_DOWN_MASK = 1;
+    static constexpr uint8_t VOLUME_DOWN_MASK = 2;
+    static constexpr uint8_t CONTROL_PRESS_MASK = 4;
+    static constexpr uint8_t VOLUME_PRESS_MASK = 8;
+    static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 16;
+    static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 32;
+    static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 64;
+    volatile uint8_t controlState_ = 0;
+//@}
+
+/** \name Knob values and ranges. 
+ 
+    Contains the current values of the control & volume knobs and their allowed maximums (minimum is always 0). 
+ */
+//@{
+public:
     /** The current value of the control knob. 
      
         Can be anywhere between 0 and maxControl() value, which may not exceed 1023. 
@@ -263,18 +284,7 @@ public:
         controlValues_ |= value << 10; 
     }
 
-
 private:
-    friend class Player;
-        
-    static constexpr uint8_t CONTROL_DOWN_MASK = 1;
-    static constexpr uint8_t VOLUME_DOWN_MASK = 2;
-    static constexpr uint8_t CONTROL_PRESS_MASK = 4;
-    static constexpr uint8_t VOLUME_PRESS_MASK = 8;
-    static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 16;
-    static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 32;
-    static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 64;
-    volatile uint8_t controlState_ = 0;
 
     static constexpr uint16_t CONTROL_MASK = 1023;
     static constexpr uint16_t VOLUME_MASK = 63 << 10;
@@ -436,8 +446,13 @@ private:
     // 1 bit left
 
     volatile uint8_t mode_ = 0;
+//@}
 
-
+/** \name MP3 Mode Settings
+ 
+    The mp3 mode remembers the current playlist & track id so that playback can resume where it left. 
+ */
+//@{
 public:
 
     uint8_t mp3PlaylistId() const {
@@ -457,12 +472,19 @@ public:
         mp3_ &= ~TRACK_ID_MASK;
         mp3_ |= (value & TRACK_ID_MASK);
     }
+private:
 
     // TODO allow playlist change? 
     static constexpr uint16_t PLAYLIST_ID_MASK = 7 << 10;
     static constexpr uint16_t TRACK_ID_MASK = 1023;
     volatile uint16_t mp3_;
+//@}
 
+/** \name Radio Settings. 
+ 
+    Radio settings remember the preset station index and the manualy tuned frequency.
+ */
+//@{
 public:
 
     uint16_t radioFrequency() const {
@@ -485,11 +507,18 @@ public:
 
 private:
 
-    // TODO allow manual tuning ?
     static constexpr uint16_t STATION_MASK = 7 << 9;
     static constexpr uint16_t FREQUENCY_MASK = 511;
     volatile uint16_t radio_ = 0;
 
+//@}
+
+
+/** \name Night-Lights Settings
+ 
+    Remembers the effect being used and its color. Each effect has its own speed hardwired so is not part of the settings. 
+ */
+//@{
 public:
 
     static constexpr uint8_t NIGHTLIGHT_WHITE_HUE = 0;
@@ -535,7 +564,24 @@ private:
     static constexpr uint16_t NIGHT_LIGHT_HUE_MASK = 31 << 4;
 
     volatile uint16_t nightLight_ = 0;
+//@}
 
+/** \name Walkie-Talkie
+ 
+    Walkie talkie remembers the latest update id. 
+ */
+//@{
+public:
+    uint32_t telegramBotLatestUpdate() const {
+        return telegramBotLatestUpdate_;
+    }
+
+    void setTelegramBotLatestUpdate(uint32_t value) {
+        telegramBotLatestUpdate_ = value;
+    }
+
+private:
+    uint32_t telegramBotLatestUpdate_;
 //@}
 
 } __attribute__((packed)); // State 

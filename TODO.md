@@ -12,6 +12,7 @@
 
 # ATTiny
 
+- where to store if walkie-talkie is set (maybe message sth like PeriodicWTSync(on/off))
 - control lights don't seem to flash well
 - audiolights are a bit weird...
 - move code from ISRs to main loop where possible (tick)
@@ -20,6 +21,7 @@
 
 # ESP
 
+- only one channel for the Walkie-Talkie bot 
 - approaching memory limit for ESP...
 - actually implement downloading telegram file
 - wifi connecting gauge is wrong direction

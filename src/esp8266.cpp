@@ -466,6 +466,9 @@ private:
             case Mode::NightLight:
                 SetMode(Mode::MP3);
                 break;
+            // in all other cases, namely alarm clock & birthday greeter, move to the mp3 player
+            default:
+                SetMode(Mode::MP3);
         }
     }
 
