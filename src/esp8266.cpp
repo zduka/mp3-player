@@ -910,12 +910,11 @@ private:
         if (f) {
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
-                serializeJson(json, Serial);
                 unsigned i = 0;
                 for (JsonVariant item : json.as<JsonArray>()) {
                     int64_t id = item["id"];
                     Color color = Color::HTML(item["color"]);
-                    LOG("  %u : chat id %i, color %s - %s",i, id, item["color"].as<char const *>(), item["name"].as<char const *>());
+                    LOG("  %u : chat id %lli, color %s - %s",i, id, item["color"].as<char const *>(), item["name"].as<char const *>());
                     BotChannels_[i++] = BotChannel{id, color};
                     if (i >= 8)
                         break;

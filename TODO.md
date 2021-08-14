@@ -21,7 +21,6 @@
 # ESP
 
 - approaching memory limit for ESP...
-- store chat id as int64_t, code done, print does not seem to work 
 - actually implement downloading telegram file
 - wifi connecting gauge is wrong direction
 - fix the 1 minute tick properly
@@ -34,7 +33,6 @@
 
  # Missing Features
 
- - walkie talkie mode
  - alarm clock
  - birthday reminder
 

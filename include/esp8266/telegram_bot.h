@@ -59,7 +59,7 @@ public:
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("Content-Type: multipart/form-data; boundary=%s\r\n"), BOUNDARY);
         char buf[22];
-        uint32_t contentLength = 44 + 50 + 2 + snprintf_P(buf, 21, PSTR("%i"), chatId) + 44 + 59 + strlen(filename) + 18 + strlen(mime) + f.size() + 48;
+        uint32_t contentLength = 44 + 50 + 2 + snprintf_P(buf, 21, PSTR("%lli"), chatId) + 44 + 59 + strlen(filename) + 18 + strlen(mime) + f.size() + 48;
         //LOG("Sending document, contents length: %u, file size: %u", contentLength, f.size());
         HTTPS_SEND(PSTR("Content-Length: %u\r\n"), contentLength);
         HTTPS_SEND(PSTR("\r\n"));
