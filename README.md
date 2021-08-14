@@ -1,6 +1,36 @@
 # MP3 Player
 
-A simple and pretty low quality mp3 and fm radio player with the following main features:
+A simple and pretty low quality mp3 player, fm radio and a walkie-talkie with some extra features. With stereo headphones (where supported) and a single even lower quality speaker in the box. MP3 files are stored on an SD card, powered by a single Li-Ion 18650 cell, with USB-C port for charging (power only). 
+
+The player can be controlled via two push-button knobs and more advanced settings can be specified via either the player's webpage, or the telegram bot used for the walkie-talkie mode (see below). 
+
+### MP3 Player
+
+Up to 8 playlists can be created, each playlist can handle up to 1024 files. The player imposes no order on the files. 
+
+### Radio
+
+Up to 8 stations can be preset and manual tuning over the applicable range is supported. 
+
+### Walkie-Talkie
+
+Using a dedicated telegram bot, the player can receive WAV files and send recorded WAV files to the same telegram chat, thus effectively working as a walkie-talkie. While audio sent from the player can be played by the telegram clients on android, recording voice in telegram will not be playable on the player as the OGG/Opus codec requires too much memory to fit within ESP8266 limits. Mono uncompressed WAV files must be sent instead. 
+
+New messages are checked every minute when the player is connected, or in between tracks when playing mp3 files (and connected). 
+
+### Night Lights
+
+Flashes the LED strip in various patterns. Can also play specific mp3 file. Alternatively the night-lights 
+
+### Alarm Clock
+
+The alarm clock can only be set from within the web interface, or telegram. At the given time, the player will wake up from sleep and start playing given file (mp3). The alarm is turned off by any button action. 
+
+### Birthay Greeter
+
+Upon first power-on at given date the player will play specified greeting (mp3). Can be set via the web interface or telegram and is supposed to be an easter egg. 
+
+
 
 ## Setup & Build
 

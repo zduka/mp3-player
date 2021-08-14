@@ -123,8 +123,20 @@ public:
             return false;
         }
         // TODO actually store the file
-
-
+        uint32_t count = 0;
+        do {
+            if (https_.available()) {
+                while (https_.available()) {
+                    char c = https_.read();
+                    into.write(c);
+                    ++count;
+                    // TODO callback
+                }
+            } else {
+                delay(1);
+            }
+        } while (https_.connected());
+        https_.stop(); // just to be sure
         return true;
     }
 
@@ -200,7 +212,6 @@ private:
             if (https_.available()) {
                 while (https_.available()) {
                     char c = https_.read();
-                    Serial.print(c);
                     ++count;
                 }
             } else {

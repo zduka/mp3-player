@@ -1,1 +1,82 @@
-Hello world, I am the thing
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <link rel="icon" href="favicon.ico">
+
+    <title>MP3 & Radio Player</title>
+
+    <link href="bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            padding-top: 55px;
+        }
+
+    </style>
+  </head>
+
+  <body>
+
+    <nav class="navbar navbar-inverse navbar-fixed-top">
+      <div class="container">
+
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+            <span class="sr-only">Toggle navigation</span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class="navbar-brand">
+            <span class="glyphicon glyphicon-oil"></span><!-- battery level -->
+            <span class="glyphicon glyphicon-flash"></span><!-- charging -->
+            <span class="glyphicon glyphicon-headphones"></span><!-- headphones -->
+            <span class="glyphicon glyphicon-signal"></span> <!-- wifi signal strength -->
+            <span class="glyphicon glyphicon-play"></span><!-- currently playing -->
+            <span class="glyphicon glyphicon-pause"></span><!-- idle -->
+
+            <span class="glyphicon glyphicon-music"></span><!-- mp3 mode -->
+            <span class="glyphicon glyphicon-scale"></span><!-- radio mode -->
+            <span class="glyphicon glyphicon-lamp"></span><!-- night light mode -->
+            <span class="glyphicon glyphicon-earphone"></span><!-- walkie talkie mode -->
+          </a>
+        </div>
+        <div id="navbar" class="collapse navbar-collapse">
+          <ul class="nav navbar-nav">
+            <li class="active"><a href="#">Home</a></li>
+            <li><a href="#">About</a></li>
+            <li><a href="#">Contact</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </nav>
+
+    <div class="container">
+
+        <!-- The generated alerts go here -->
+        <h1>MP3 Mode</h1>
+
+        <h1>Radio Mode</h1>
+
+        <h1>Walkie-Talkie Mode</h1>
+
+
+
+
+    </div><!-- /.container -->
+
+
+    <!-- Bootstrap core JavaScript
+    ================================================== -->
+    <!-- Placed at the end of the document so the pages load faster -->
+    <script src="jquery-1.12.4.min.js"></script>
+    <script src="app.js"></script>
+    <script src="bootstrap.min.js"></script>
+  </body>
+</html>
