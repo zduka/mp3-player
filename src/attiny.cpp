@@ -49,6 +49,166 @@ extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
+
+class Player {
+public:
+    static void Initialize() {
+
+    }
+
+    static void Loop() {
+
+    }
+
+private:
+
+    /** \name I2C Transmissible data
+     
+     */
+    //@{
+    inline static volatile State State_;
+    inline static volatile Measurements Measurements_; 
+    inline static volatile MP3Settings MP3Settings_;
+    inline static volatile RadioSettings RadioSettings_;
+    inline static volatile WalkieTalkieSettings WalkieTalkieSettings_;
+    inline static volatile NightLightSettings NightLightSettings_;
+    //@}
+
+    /** Number of bytes to be sent from the I2C TX buffer. 
+     */
+    friend void TWI0_TWIS_vect();
+    inline static uint8_t I2CTxLength_ = 0;
+    inline static uint8_t * I2CTxBuffer_ = nullptr;
+
+
+    /** \name Audio Recording information & buffer. 
+     
+     */
+    //@{ 
+    inline static volatile uint8_t RecordingWrite_ = 0;
+    inline static volatile uint8_t RecordingRead_ = 0;
+    inline static volatile uint8_t RecordingBuffer_[256];
+    //@}
+
+} __attribute__((packed)); // Player
+
+
+#define I2C_DATA_MASK (TWI_DIF_bm | TWI_DIR_bm) 
+#define I2C_DATA_TX (TWI_DIF_bm | TWI_DIR_bm)
+#define I2C_DATA_RX (TWI_DIF_bm)
+#define I2C_START_MASK (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm)
+#define I2C_START_TX (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm)
+#define I2C_START_RX (TWI_APIF_bm | TWI_AP_bm)
+#define I2C_STOP_MASK (TWI_APIF_bm | TWI_DIR_bm)
+#define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm)
+#define I2C_STOP_RX (TWI_APIF_bm)
+
+ISR(TWI0_TWIS_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
+    uint8_t status = TWI0.SSTATUS;
+    // sending data to accepting master is on our fastpath as is checked first
+    if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
+        // if there is a byte to be sent as part of current transaction, do that and ack
+        if (Player::I2CTxLength_ > 0) {
+            --Player::I2CTxLength_;
+            TWI0.SDATA = *(Player::I2CTxBuffer_++);
+            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+            // if we have just sent the events part of the state, clear them so that new events can be written - as we do this inside an IRQ that just copied the particular byte, this is the best way of making sure new events can be added after these were sent
+            // of course, if the I2C transmission would fail, then we have lost the events, but if the transmission fails, the software has bigger problems to think about
+            if (Player::I2CTxLength_ == 2 && Player::I2CTxBuffer_ == (uint8_t *)(& Player::State_) + 2)
+                Player::State_.clearEvents();
+        // after the transaction has been trasnmitted, switch to sending the state, if not already sending it
+        } else if (Player::I2CTxBuffer_ != (uint8_t*)(& Player::State_ + 1)) {
+            // if we have successfully sent a recording buffer, increment the read index accordingly
+            if (Player::I2CTxBuffer_ > Player::RecordingBuffer_)
+                Player::RecordingRead_ += 32;
+            // move the tx buffer to state and start sending
+            Player::I2CTxBuffer_ = (uint8_t*)(& Player::State_);
+            Player::I2CTxLength_ = sizeof(State);
+            TWI0.SDATA = *(Player::I2CTxBuffer_++);
+            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+        // otherwise there is nothing more to send, nack
+        } else {
+            TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
+        }
+    // a byte has been received from master. Store it and send either ACK if we can store more, or NACK if we can't store more
+    } else if ((status & I2C_DATA_MASK) == I2C_DATA_RX) {
+        Player::I2C_RX_Buffer_[Player::I2C_RX_Offset_++] = TWI0.SDATA;
+        TWI0.SCTRLB = (Player::I2C_RX_Offset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
+    // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
+    } else if ((status & I2C_START_MASK) == I2C_START_TX) {
+        Player::ClearIrq();
+        Player::I2C_Current_TX_Mode_ = Player::I2C_TX_Mode_;
+        switch (Player::I2C_Current_TX_Mode_) {
+            case Player::I2C_TX_Mode::State: 
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
+                Player::I2C_TX_Offset_ = 0;
+                Player::I2C_TX_Length_ = sizeof(State);
+                // if in the middle of recording, switch back to recording mode for the next request
+                if (Player::Status_.recording)
+                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
+                break;
+            case Player::I2C_TX_Mode::Recording: 
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::RecordingBuffer_) + Player::RecordingRead_;
+                Player::I2C_TX_Offset_ = 0;
+                Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
+                break;
+            // when sending time, set the buffer properly and revert back to the default TX mode
+            case Player::I2C_TX_Mode::Time:
+                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::Time_);
+                Player::I2C_TX_Offset_ = 0;
+                Player::I2C_TX_Length_ = sizeof(DateTime);
+                if (Player::Status_.recording)
+                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
+                else
+                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::State;
+                break;
+        }
+        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) 
+            TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
+        else 
+            TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
+    // master requests to write data itself. ACK if the buffer is empty (we do not support multiple commands in same buffer), NACK otherwise.
+    } else if ((status & I2C_START_MASK) == I2C_START_RX) {
+        if (Player::I2C_RX_Offset_ == 0)
+            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
+        else
+            TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
+    // when a transmission finishes we must see if another transmission required and re-raise the irq flag for ESP. While recording this means we need to see if there is another 32 bytes available yet
+    } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
+        if (Player::Status_.recording) {
+            // if the read and write offsets are into the same 32 bit partition, then the flag will be raised when more samples are available, otherwise raise the flag now
+            if (Player::RecordingRead_ / 32 != Player::RecordingWrite_ / 32)
+                Player::SetIrq();
+        }
+        TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
+    } else if ((status & I2C_STOP_MASK) == I2C_STOP_RX) {
+        Player::Irq_.i2cRx = true;
+        TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
+    } else {
+        Player::ShowByte(status, Color::Red());
+    }
+    //digitalWrite(AUDIO_SRC, LOW);
+}
+
+
+
+
+
+void setup() {
+    Player::Initialize();
+}
+
+void loop() {
+    Player::Loop();
+}
+
+
+
+#ifdef HAHA
+
+
+
 /** ATTiny part of the player.     
     
  */
@@ -943,12 +1103,9 @@ ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
-void setup() {
-    Player::Initialize();
-}
 
-void loop() {
-    Player::Loop();
-}
+
+
+#endif // HAHA
 
 #endif // ARCH_ATTINY
