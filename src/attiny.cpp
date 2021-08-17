@@ -50,35 +50,208 @@ extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
 
+#define IRQ_RESPONSE_TIMEOUT 64
+#define AVR_I2C_ADDRESS 67
+
 class Player {
 public:
     static void Initialize() {
+        // disable power to other systems
+        pinMode(DCDC_PWR, INPUT);
+        // enable the AVR_IRQ as input so that we can observe if ESP wants something
+        pinMode(AVR_IRQ, INPUT);
+        // headphones are input pin as well
+        pinMode(HEADPHONES, INPUT);
+        // audio source is output, set it low by default
+        pinMode(AUDIO_SRC, OUTPUT);
+        digitalWrite(AUDIO_SRC, LOW);
+        // set sleep to full power down and enable sleep feature
+        set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+        sleep_enable();     
+        // configure the real time clock
+        RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
+        RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
 
     }
 
     static void Loop() {
+        if (Status_.tick) {
+            if (Status_.irq)
+                if (--Status_.irqTimer == 0)
+                    ResetESP();
+        }
+        if (Status_.i2cRxReady)
+            ProcessCommand();
 
     }
 
 private:
 
-    /** \name I2C Transmissible data
-     
+/** \name ATTiny Management. 
+ */
+//@{
+
+    /** Puts the AVR to sleep. 
      */
-    //@{
+    static void Sleep() {
+        do { // wrapped in a loop to account to allow wakeup to re-enter sleep immediately (such as when low volatge, etc.)
+            // disable rotary encoder interrupts so that they do not wake us from sleep
+            Control_.clearInterrupt();
+            Volume_.clearInterrupt();
+            // turn off neopixels and esp
+            pinMode(DCDC_PWR, INPUT);
+            // enable RTC interrupt every second so that the time can be kept
+            while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
+            RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
+            // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
+            Status_.sleep = true;
+            while (Status_.sleep) {
+                sleep_cpu();
+            }
+            // clear the button events that led to the wakeup
+            // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
+            State_.clearEvents();
+            // if we are not longer sleeping, wakeup
+            Wakeup();
+        } while (Status_.sleep);
+    }
+
+    static void Wakeup() {
+        
+
+    }
+//@}
+
+/** \name Controls
+ */
+//@{
+
+
+    inline static RotaryEncoder Control_{CTRL_A, CTRL_B, 256};
+    inline static RotaryEncoder Volume_{VOL_A, VOL_B, 16};
+    inline static Button ControlBtn_{CTRL_BTN};
+    inline static Button VolumeBtn_{VOL_BTN};
+
+//@}
+
+/** \name Lights
+ */
+//@{
+
+//@}
+
+/** \name Communication with ESP8266
+ 
+    Communication with the ESP is done via I2C, where ATTiny is slave and ESP is master. ESP can send commands and read status & information from the ATTiny. 
+
+    To send a command the following must be sent, whereas the command id + payload must not exceed 32 bytes. Only one command at a time can be sent and no further commands can be sent before the command is processed (this includes explicitly offset reads - see below):
+    
+    START, address+W, the command id and optional payload, STOP. 
+    
+    Reading from the ATTiny retuns by default the state, or if recording audio the audio buffer followed by the State. However, at any time, the offset from which data will be sent can be specified explicitly via the repeated start condition, i.e.: 
+
+    START, address+W, offset, START, address+R, read the bytes, STOP
+
+    Setting the offset only affects the repeated start read. Setting the offset to 0 will always return state. Starting the transaction without the offset write does the default action (state / recorded audio). 
+
+    When there is any change in the peripherals controlled by the ATTiny, it signals the ESP by pulling the AVR_IRQ pin low. Once set, the ESP must initiate slave write operation within the specified ammount of ticks, or AVR will perform a hard reset.   
+ */
+//@{
+
+    static void InitializeI2C() {
+        // make sure that the pins are nout out - HW issue with the chip, will fail otherwise
+        PORTB.OUTCLR = 0x03; // PB0, PB1
+        // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
+        TWI0.SADDR = AVR_I2C_ADDRESS << 1;
+        TWI0.SADDRMASK = 0;
+        // enable the TWI in slave mode, enable all interrupts
+        TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
+        // bus Error Detection circuitry needs Master enabled to work 
+        // TODO not sure why we need it
+        TWI0.MCTRLA = TWI_ENABLE_bm;   
+    }
+
+    static void SetIrq() {
+        if (! Status_.irq) {
+            Status_.irq = true;
+            Status_.irqTimer = IRQ_RESPONSE_TIMEOUT;
+            pinMode(AVR_IRQ, OUTPUT);
+            digitalWrite(AVR_IRQ, LOW);
+        }
+    }
+
+    static void ClearIrq() {
+        if (Status_.irq) {
+            pinMode(AVR_IRQ, INPUT);
+            Status_.irq = false;
+        }
+    }
+
+    /** Hard-resets the ESP8266. 
+     */
+    static void ResetESP() {
+        ClearIrq(); // this is necessary so that ESP boots into a normal mode
+
+    }
+
+    static void ProcessCommand() {
+        // TODO process the I2C commands from ESP
+
+        // clear the ready flag and reset the buffer offset - the bitfield can only be set by the IRQ after first passing the RxOffset being zero, and the RxOffset update is atomic so there is no possibility of a race here
+        Status_.i2cRxReady = false;
+        I2CRxOffset_ = 0;
+    }
+
+    friend void TWI0_TWIS_vect();
+
+    /** The offset from State at which the transmission should start. 
+     
+        Offset of 0 (default) indicates transmission of State, or if recording transmission of the recording buffer at appropriate position. 
+     */
+    //inline static uint8_t I2CTxOffset_ = 0;
+    /** Number of bytes to be sent from the I2C TX buffer. 
+     */
+    inline static uint8_t I2CTxLength_ = 0;
+    inline static uint8_t * I2CTxBuffer_ = nullptr;
+    inline static uint8_t I2CRxBuffer_[32];
+    inline static uint8_t I2CRxOffset_ = 0;
+
+
+//@}
+
+/** \name Diagnostic functions
+ */
+//@{
+    static void ShowByte(uint8_t value, Color const & color) {
+
+    }
+//@}
+
+
+
+
+/** \name I2C Transmissible data
+ 
+    */
+//@{
+
+    inline static constexpr uint8_t I2C_TRANSMISSIBLE_DATA_SIZE =
+        sizeof(State) +
+        sizeof(Measurements) +
+        sizeof(MP3Settings) +
+        sizeof(RadioSettings) +
+        sizeof(WalkieTalkieSettings) +
+        sizeof(NightLightSettings);
     inline static volatile State State_;
     inline static volatile Measurements Measurements_; 
     inline static volatile MP3Settings MP3Settings_;
     inline static volatile RadioSettings RadioSettings_;
     inline static volatile WalkieTalkieSettings WalkieTalkieSettings_;
     inline static volatile NightLightSettings NightLightSettings_;
-    //@}
+//@}
 
-    /** Number of bytes to be sent from the I2C TX buffer. 
-     */
-    friend void TWI0_TWIS_vect();
-    inline static uint8_t I2CTxLength_ = 0;
-    inline static uint8_t * I2CTxBuffer_ = nullptr;
+
+
 
 
     /** \name Audio Recording information & buffer. 
@@ -89,6 +262,25 @@ private:
     inline static volatile uint8_t RecordingRead_ = 0;
     inline static volatile uint8_t RecordingBuffer_[256];
     //@}
+
+    inline static volatile struct {
+        /** If true, AVR should sleep, or is currently sleeping.
+         */
+        bool sleep : 1;
+        /** If true, the IRQ flag is currently raised, which is a notification to ESP that it should read the state and react to the changes (or recording buffer if we are recording).
+         */        
+        bool irq : 1;
+        /** If true, there has been 1/64th of a second tick. 
+         */
+        bool tick: 1;
+        /** If true, there is a command received from ESP in the I2C tx buffer that should be processed. 
+         */
+        bool i2cRxReady : 1;
+        bool recording : 1;
+
+
+        uint8_t irqTimer;
+    } Status_;
 
 } __attribute__((packed)); // Player
 
@@ -133,44 +325,33 @@ ISR(TWI0_TWIS_vect) {
         }
     // a byte has been received from master. Store it and send either ACK if we can store more, or NACK if we can't store more
     } else if ((status & I2C_DATA_MASK) == I2C_DATA_RX) {
-        Player::I2C_RX_Buffer_[Player::I2C_RX_Offset_++] = TWI0.SDATA;
-        TWI0.SCTRLB = (Player::I2C_RX_Offset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
-    // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
+        Player::I2CRxBuffer_[Player::I2CRxOffset_++] = TWI0.SDATA;
+        TWI0.SCTRLB = (Player::I2CRxOffset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
+    // master requests slave to write data, determine what data to send, send ACK if there is data to be transmitted, NACK if there is no data to send
     } else if ((status & I2C_START_MASK) == I2C_START_TX) {
         Player::ClearIrq();
-        Player::I2C_Current_TX_Mode_ = Player::I2C_TX_Mode_;
-        switch (Player::I2C_Current_TX_Mode_) {
-            case Player::I2C_TX_Mode::State: 
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
-                Player::I2C_TX_Offset_ = 0;
-                Player::I2C_TX_Length_ = sizeof(State);
-                // if in the middle of recording, switch back to recording mode for the next request
-                if (Player::Status_.recording)
-                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
-                break;
-            case Player::I2C_TX_Mode::Recording: 
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::RecordingBuffer_) + Player::RecordingRead_;
-                Player::I2C_TX_Offset_ = 0;
-                Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
-                break;
-            // when sending time, set the buffer properly and revert back to the default TX mode
-            case Player::I2C_TX_Mode::Time:
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::Time_);
-                Player::I2C_TX_Offset_ = 0;
-                Player::I2C_TX_Length_ = sizeof(DateTime);
-                if (Player::Status_.recording)
-                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
-                else
-                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::State;
-                break;
+        // if i2cready is not set, and rx offset is 1, we have previously received one byte, but STOP condition has not been sent, i.e. this is repeated start, and the received byte is TxOffset
+        if (Player::I2CRxOffset_ == 1 && ! Player::Status_.i2cRxReady) {
+            Player::I2CTxBuffer_ = (uint8_t*)(& Player::State_) + Player::I2CRxBuffer_[0];
+            Player::I2CTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE - Player::I2CRxBuffer_[0];
+            Player::I2CRxOffset_ = 0;
+        // otherwise, if currently recording, prepare to send next 32 bytes of audio, if available        
+        } else if (Player::Status_.recording) {
+            Player::I2CTxBuffer_ = (uint8_t *)(& Player::RecordingBuffer_) + Player::RecordingRead_;
+            Player::I2CTxLength_ = (((Player::RecordingRead_ + 32) & 0xff) <= Player::RecordingWrite_) ? 32 : 0;
+        // or if not recording, do the default action, which is to send the state
+        } else {
+            Player::I2CTxBuffer_ = (uint8_t*)(& Player::State_);
+            Player::I2CTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE;
         }
-        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) 
+        // depending on the available length of data to be sent either ACK or NACK if there is nothing to send
+        if (Player::I2CTxLength_ > 0) 
             TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
         else 
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
     // master requests to write data itself. ACK if the buffer is empty (we do not support multiple commands in same buffer), NACK otherwise.
     } else if ((status & I2C_START_MASK) == I2C_START_RX) {
-        if (Player::I2C_RX_Offset_ == 0)
+        if (Player::I2CRxOffset_ == 0)
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         else
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
@@ -183,8 +364,8 @@ ISR(TWI0_TWIS_vect) {
         }
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_RX) {
-        Player::Irq_.i2cRx = true;
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
+        Player::Status_.i2cRxReady = true;
     } else {
         Player::ShowByte(status, Color::Red());
     }
@@ -219,28 +400,13 @@ public:
     /** Initializes the chip. 
      */
     static void Initialize() {
-        // disable power to other systems
-        pinMode(DCDC_PWR, INPUT);
-        // enable the AVR_IRQ as input so that we can observe if ESP wants something
-        pinMode(AVR_IRQ, INPUT);
-        // headphones are input pin as well
-        pinMode(HEADPHONES, INPUT);
-        // audio source is output, set it low by default
-        pinMode(AUDIO_SRC, OUTPUT);
-        digitalWrite(AUDIO_SRC, LOW);
         // disable the peripheral clock divider
         //CPU_CCP = CCP_IOREG_gc;
         //CLKCTRL.MCLKCTRLB &= ~ CLKCTRL_PEN_bm; 
-        // configure the real time clock
-        RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
-        RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
         // configure the timer we use for 8kHz audio sampling
         TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
         TCB0.CTRLB = TCB_CNTMODE_INT_gc;
         TCB0.CCMP = 1000; // for 8kHz
-        // set sleep to full power down and enable sleep feature
-        set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-        sleep_enable();     
         // setup the ADC pins (microphone input & audio out)
         static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
         PORTC.PIN2CTRL &= ~PORT_ISC_gm;
@@ -479,39 +645,6 @@ private:
 //@{
 private:
 
-    static void InitializeI2C() {
-        // make sure that the pins are nout out - HW issue with the chip, will fail otherwise
-        PORTB.OUTCLR = 0x03; // PB0, PB1
-        // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
-        TWI0.SADDR = AVR_I2C_ADDRESS << 1;
-        TWI0.SADDRMASK = 0;
-        // enable the TWI in slave mode, enable all interrupts
-        TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
-        // bus Error Detection circuitry needs Master enabled to work 
-        // TODO not sure why we need it
-        TWI0.MCTRLA = TWI_ENABLE_bm;   
-    }
-
-    static void SetIrq() {
-        if (!Irq_.enabled) {
-            Irq_.enabled = true;
-            Irq_.timer = IRQ_MAX_DELAY;
-            pinMode(AVR_IRQ, OUTPUT);
-            digitalWrite(AVR_IRQ, LOW);
-        }
-    }
-
-    static void ClearIrq() {
-        if (Irq_.enabled) {
-            Irq_.enabled = false;
-            pinMode(AVR_IRQ, INPUT);
-        }
-    }
-
-    static void ResetESP() {
-        // this is necessary so that ESP boots into normal mode
-        ClearIrq();
-    }
 
     static void I2CReceive() {
         // TODO check that numBytes <= message length or accept corrupted messages?
@@ -650,24 +783,6 @@ private:
         bool i2cRx : 1; // indicates that I2C message has been received
     } Irq_;
 
-    enum class I2C_TX_Mode : uint8_t {
-        State,
-        Recording,
-        Time,
-    }; 
-
-    inline static volatile I2C_TX_Mode I2C_TX_Mode_ = I2C_TX_Mode::State;
-    /** The mode of current TX in progress (if any). 
-     */
-    inline static I2C_TX_Mode I2C_Current_TX_Mode_;
-    inline static uint8_t I2C_TX_Offset_ = 0;
-    inline static uint8_t I2C_TX_Length_ = 0;
-    inline static uint8_t * I2C_TX_Buffer_ = nullptr;
-
-    inline static uint8_t I2C_RX_Offset_ = 0;
-    inline static uint8_t I2C_RX_Buffer_[32];
-
-
 //@}
 
 
@@ -678,10 +793,6 @@ private:
  */
 //@{
 
-    inline static RotaryEncoder Control_{CTRL_A, CTRL_B, 256};
-    inline static RotaryEncoder Volume_{VOL_A, VOL_B, 16};
-    inline static Button ControlBtn_{CTRL_BTN};
-    inline static Button VolumeBtn_{VOL_BTN};
     inline static uint8_t ControlBtnCounter_ = 0;
     inline static uint8_t VolumeBtnCounter_ = 0;
 

@@ -98,6 +98,14 @@ public:
         return events_ & VOLUME_LONG_PRESS_MASK;
     }
 
+    /** Clears the events flags. 
+     
+        This is called automatically every time the state is transmitted so that new events can occur. 
+     */ 
+    void clearEvents() volatile {
+        events_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK);
+    }
+
     /** Returns the current mode of the player. 
      
         When ESP starts, this is also the last mode that was used.
@@ -113,7 +121,7 @@ private:
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 1 << 3;
     // 1 bit free
     static constexpr uint8_t MODE_MASK = 7 << 5;
-    volatile uint8_t events_;
+    uint8_t events_;
 //@}
 
 /** \name Control and Volume knob values. 
@@ -139,7 +147,7 @@ public:
 private:
     static constexpr uint16_t CONTROL_KNOB_MASK = 1023;
     static constexpr uint16_t VOLUME_KNOB_MASK = 63 << 10;
-    volatile uint16_t knobValues_;
+    uint16_t knobValues_;
 //@}
 } __attribute__((packed)); // State 
 

@@ -21,6 +21,7 @@ inline T pointer_cast(W * from) {
 }
 //@}
 
+#define assert(...)
 
 
 #if (defined ARCH_ESP8266)
