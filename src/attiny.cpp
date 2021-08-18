@@ -52,6 +52,13 @@ extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
 #define IRQ_RESPONSE_TIMEOUT 64
 #define AVR_I2C_ADDRESS 67
+#define BATTERY_CRITICAL_VCC 340
+/** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 
+ 
+    Currently set to 2 seconds
+ */
+#define POWER_ON_PRESS_TICKS 128
+#define BUTTON_LONG_PRESS_TICKS 128
 
 class Player {
 public:
@@ -68,17 +75,32 @@ public:
         // set sleep to full power down and enable sleep feature
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
         sleep_enable();     
-        // configure the real time clock
-        RTC.CLKSEL = RTC_CLKSEL_INT32K_gc; // select internal oscillator
-        RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
+        
+        InitializeRTC();
 
+        // Initialize ADC0
+        InitializeMeasurementsADC();
+
+        InitializeRecording();
+        
+
+
+        // enable control interrupts for buttons
+        ControlBtn_.setInterrupt(ControlButtonChanged);
+        VolumeBtn_.setInterrupt(VolumeButtonChanged);
+        // initialize comms
+        InitializeI2C();
+
+
+
+        Wakeup();
     }
 
     static void Loop() {
         if (Status_.tick) {
-            if (Status_.irq)
-                if (--Status_.irqTimer == 0)
-                    ResetESP();
+            // the possibly data-racy decrement and compare of irq countdown wrt Status irq is ok, it can only fail if ESP gets to the state at the very end of the interval... At which point it deserves reset anyways
+            if (Status_.irq && --IrqCountdown_ == 0) 
+                ResetESP();
         }
         if (Status_.i2cRxReady)
             ProcessCommand();
@@ -91,6 +113,31 @@ private:
  */
 //@{
 
+    /** Initializes the real-time clock. 
+     
+     */
+    static void InitializeRTC() {
+        // configure the real time clock
+        RTC.CLKSEL = RTC_CLKSEL_INT1K_gc; // select internal oscillator divided by 32
+        RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
+    }
+
+    /** Initializes ADC0 used to take voltage & temperature measurements. 
+     */
+    static void InitializeMeasurementsADC() {
+        // setup ADC voltage references to 1.1V (internal)
+        VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
+        VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
+        // set ADC0 settings (vcc, temperature)
+        // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 64 values
+        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc;
+        ADC0.CTRLB = ADC_SAMPNUM_ACC64_gc;
+        ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+        ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
+        ADC0.SAMPCTRL = 31;
+    }
+
+
     /** Puts the AVR to sleep. 
      */
     static void Sleep() {
@@ -99,10 +146,10 @@ private:
             Control_.clearInterrupt();
             Volume_.clearInterrupt();
             // turn off neopixels and esp
-            pinMode(DCDC_PWR, INPUT);
+            PeripheralPowerOff();
             // enable RTC interrupt every second so that the time can be kept
             while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-            RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
+            RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
             // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
             Status_.sleep = true;
             while (Status_.sleep) {
@@ -117,14 +164,185 @@ private:
     }
 
     static void Wakeup() {
-        
-
+        // enable RTC interrupt every 1/64th of a second
+        while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
+        RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
+        // start ADC0 to measure the VCC and wait for the first measurement to be done
+        ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+        ADC0.COMMAND = ADC_STCONV_bm;
+        // wait for the voltage measurement to finish
+        while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
+        }
+        if (Measurements_.vcc <= BATTERY_CRITICAL_VCC) {
+            CriticalBatteryWarning();
+            Status_.sleep = true;
+        } else {
+            // enable interrupts for rotary encoders
+            Control_.setInterrupt(ControlKnobChanged);
+            Volume_.setInterrupt(VolumeKnobChanged);
+            // enable power to neopixels, esp8266 and other circuits
+            PeripheralPowerOn();
+            // TODO show the wakeup progressbar *if* not in silent mode
+            // TODO silent mode
+        }
     }
+
+    /** Shows a critical battery warning before going back to sleep. 
+     
+        Powers on peripherals with both SDA and SCL held low, which puts ESP immediately in deep sleep and then flashes the full LED strip red three times. 
+     */
+    static void CriticalBatteryWarning(uint8_t brightness = 255) {
+        // disable I2C
+        TWI0.SCTRLA = 0;
+        TWI0.MCTRLA = 0;
+        // set SDA SCL low so that ESP goes to sleep immediately
+        pinMode(SDA, OUTPUT);
+        pinMode(SCL, OUTPUT);
+        digitalWrite(SDA, LOW);
+        digitalWrite(SCL, LOW);
+        // turn on peripheral voltage & flash the strip
+        PeripheralPowerOn();
+        Neopixels_.fill(Color::Red().withBrightness(brightness));
+        Neopixels_.update();
+        delay(50);
+        Neopixels_.fill(Color::Black());
+        Neopixels_.update();
+        delay(100);
+        Neopixels_.fill(Color::Red().withBrightness(brightness));
+        Neopixels_.update();
+        delay(50);
+        Neopixels_.fill(Color::Black());
+        Neopixels_.update();
+        delay(100);
+        Neopixels_.fill(Color::Red().withBrightness(brightness));
+        Neopixels_.update();
+        delay(50);
+        // this also makes the strip look black;)
+        PeripheralPowerOff(); 
+        // initialize I2C back so that we are ready once the power stabilizes
+        InitializeI2C();
+    }
+
+    static void PeripheralPowerOn() {
+        pinMode(DCDC_PWR, OUTPUT);
+        digitalWrite(DCDC_PWR, LOW);
+        // add a delay so that the capacitor can be charged and voltage stabilized
+        delay(50);
+    }
+
+    static void PeripheralPowerOff() {
+        pinMode(DCDC_PWR, INPUT);
+    }
+
+    /** Processes the voltage, temperature and headphones measurements. 
+     
+        Sets the appropriate flags in state. 
+     */
+    static void MeasurementsADCReady() {
+        uint16_t value = ADC0.RES / 64;
+        switch (ADC0.MUXPOS) {
+            case ADC_MUXPOS_INTREF_gc: { // VCC Sense
+                // convert value to voltage * 100, using the x = 1024 / value * 110 equation. Multiply by 512 only, then divide and multiply by two so that we always stay within uint16_t
+                value = 110 * 512 / value;
+                value = value * 2;
+                cli();
+                Measurements_.vcc = value;
+                sei();
+                // switch the ADC to be ready to measure the temperature
+                ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+            }
+            case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
+                // TODO calculate the value properly
+                cli();
+                Measurements_.temp = value;
+                sei();
+                // fallthrough to the default where we set the next measurement to be that of input voltage
+            }
+            default:
+                // switch the ADC to be ready to measure the VCC
+                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+        }
+        // start new conversion
+        ADC0.COMMAND = ADC_STCONV_bm;
+    }
+
+    friend void ::RTC_PIT_vect();
+
 //@}
 
 /** \name Controls
  */
 //@{
+
+    /** \name Button Change Events  [ISR] [sleep]
+     
+        How to determine if long enough to power on w/o changing the RTC frequency? 
+
+
+     */
+    //@{
+    static void ControlButtonChanged() {
+        ControlBtn_.poll();
+        if (Status_.sleep) {
+            CheckButtonWakeup(ControlBtn_.pressed());
+        } else if (ControlBtn_.pressed()) {
+            ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
+            State_.setControlButtonDown();
+            SetIrq();
+        } else if (State_.controlButtonDown()) { // released & previous press recorded
+            State_.setControlButtonDown(false);
+            if (ControlBtnCounter_ > 0) {
+                State_.setControlButtonPress();
+                if (Status_.longPressPending) {
+                    Status_.longPressPending = false;
+                    State_.setVolumeButtonLongPress();
+                }
+                Status_.longPressPending = false;
+            } else if (Status_.longPressPending) {
+                State_.setDoubleButtonLongPress();
+                Status_.longPressPending = false;
+            } else if (State_.volumeButtonDown()) {
+                Status_.longPressPending = true;
+            } else {
+                State_.setControlButtonLongPress();
+            }
+            SetIrq();
+        }
+    }
+
+    static void ControlKnobChanged() {
+
+    }
+    //@}
+
+    /** [ISR]
+     */
+    static void VolumeButtonChanged() {
+        VolumeBtn_.poll();
+        if (Status_.sleep) {
+            CheckButtonWakeup(VolumeBtn_.pressed());
+        }
+
+    }
+
+    /** [ISR]
+     */
+    static void VolumeKnobChanged() {
+
+    }
+
+    static void CheckButtonWakeup(bool down) {
+        if (down) {
+            PowerOnCountdown_ = POWER_ON_PRESS_TICKS << 16; // from 1/64th of a second to 1/1024th
+            PowerOnRTCValue_ = RTC.CNT; 
+        } else if (PowerOnCountdown_ == 0) {
+            Status_.sleep = false;
+        }
+    }
 
 
     inline static RotaryEncoder Control_{CTRL_A, CTRL_B, 256};
@@ -137,6 +355,8 @@ private:
 /** \name Lights
  */
 //@{
+
+    inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
 
 //@}
 
@@ -174,7 +394,7 @@ private:
     static void SetIrq() {
         if (! Status_.irq) {
             Status_.irq = true;
-            Status_.irqTimer = IRQ_RESPONSE_TIMEOUT;
+            IrqCountdown_ = IRQ_RESPONSE_TIMEOUT;
             pinMode(AVR_IRQ, OUTPUT);
             digitalWrite(AVR_IRQ, LOW);
         }
@@ -219,17 +439,6 @@ private:
 
 //@}
 
-/** \name Diagnostic functions
- */
-//@{
-    static void ShowByte(uint8_t value, Color const & color) {
-
-    }
-//@}
-
-
-
-
 /** \name I2C Transmissible data
  
     */
@@ -248,20 +457,76 @@ private:
     inline static volatile RadioSettings RadioSettings_;
     inline static volatile WalkieTalkieSettings WalkieTalkieSettings_;
     inline static volatile NightLightSettings NightLightSettings_;
+    static inline DateTime Time_;
+    static inline DateTime Alarm_;
 //@}
 
 
 
 
 
-    /** \name Audio Recording information & buffer. 
-     
-     */
-    //@{ 
+/** \name Audio Recording information & buffer. 
+ 
+    */
+//@{ 
+
+    static_assert(AUDIO_ADC == 12, "Must be PC2, ADC1 input 8");
+    static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
+
+
+    static void InitializeRecording() {
+        // configure the timer we use for 8kHz audio sampling
+        TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
+        TCB0.CTRLB = TCB_CNTMODE_INT_gc;
+        TCB0.CCMP = 1000; // for 8kHz
+        // setup the ADC pins (microphone input & audio out)
+        static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
+        PORTC.PIN2CTRL &= ~PORT_ISC_gm;
+        PORTC.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTC.PIN2CTRL &= ~PORT_PULLUPEN_bm;
+        static_assert(MIC == 10, "Must be PC0"); // ADC1 input 6
+        PORTC.PIN0CTRL &= ~PORT_ISC_gm;
+        PORTC.PIN0CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTC.PIN0CTRL &= ~PORT_PULLUPEN_bm;
+        // setup ADC voltage references to 1.1V (internal)
+        VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
+        VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
+        // configure the event system - ADC1 to sample when triggered by TCB0
+        EVSYS.SYNCCH0 = EVSYS_SYNCCH0_TCB0_gc;
+        EVSYS.ASYNCUSER12 = EVSYS_ASYNCUSER12_SYNCCH0_gc;
+        // set ADC1 settings (mic & audio) - clkdiv by 2, internal voltage reference
+        ADC1.CTRLB = ADC_SAMPNUM_ACC8_gc;
+        ADC1.CTRLC = ADC_PRESC_DIV2_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
+        ADC1.EVCTRL = ADC_STARTEI_bm;
+    }
+
     inline static volatile uint8_t RecordingWrite_ = 0;
     inline static volatile uint8_t RecordingRead_ = 0;
     inline static volatile uint8_t RecordingBuffer_[256];
-    //@}
+//@}
+
+/** \name Diagnostic functions
+ */
+//@{
+
+    /** Shows the given byte displayed on the neopixels strip and freezes. 
+     
+        The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
+     */
+    static void ShowByte(uint8_t value, Color const & color) {
+        cli();
+        Neopixels_[7] = (value & 1) ? color : Color::Black();
+        Neopixels_[6] = (value & 2) ? color : Color::Black();
+        Neopixels_[5] = (value & 4) ? color : Color::Black();
+        Neopixels_[4] = (value & 8) ? color : Color::Black();
+        Neopixels_[3] = (value & 16) ? color : Color::Black();
+        Neopixels_[2] = (value & 32) ? color : Color::Black();
+        Neopixels_[1] = (value & 64) ? color : Color::Black();
+        Neopixels_[0] = (value & 128) ? color : Color::Black();
+        Neopixels_.update();
+        while (true) { };
+    }
+//@}
 
     inline static volatile struct {
         /** If true, AVR should sleep, or is currently sleeping.
@@ -273,14 +538,25 @@ private:
         /** If true, there has been 1/64th of a second tick. 
          */
         bool tick: 1;
+
         /** If true, there is a command received from ESP in the I2C tx buffer that should be processed. 
          */
         bool i2cRxReady : 1;
         bool recording : 1;
 
+        bool longPressPending : 1;
 
-        uint8_t irqTimer;
+
     } Status_;
+
+    static inline uint8_t IrqCountdown_;
+    static inline uint8_t TickCountdown_; 
+    static inline uint16_t PowerOnCountdown_ = 0;
+    static inline uint16_t PowerOnRTCValue_ = 0;
+    static inline uint8_t ControlBtnCounter_ = 0;
+    static inline uint8_t VolumeBtnCounter_ = 0;
+
+
 
 } __attribute__((packed)); // Player
 
@@ -295,6 +571,29 @@ private:
 #define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm)
 #define I2C_STOP_RX (TWI_APIF_bm)
 
+/** RTC Timer Tick [ISR]
+
+
+ */
+ISR(RTC_PIT_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
+    RTC.PITINTFLAGS = RTC_PI_bm;
+    if (Player::Status_.sleep) {
+        uint16_t x = 1024 - Player::PowerOnRTCValue_;
+        Player::PowerOnCountdown_ = (x > Player::PowerOnCountdown_) ? 0 : (Player::PowerOnCountdown_ - x);
+        Player::PowerOnRTCValue_ = 0;
+        // do one second tick
+        Player::Time_.secondTick();
+
+        // TODO check alarm, set wakeup bits and wake up? 
+    } else {
+        Player::Status_.tick = true;
+    }
+    //digitalWrite(AUDIO_SRC, LOW);
+}
+
+/** [ISR]
+ */
 ISR(TWI0_TWIS_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
     uint8_t status = TWI0.SSTATUS;
@@ -560,37 +859,6 @@ private:
     /** Flashes the strip three times with red as a critical battery indicator. 
      */
     static void CriticalBattery() {
-        // disable I2C
-        TWI0.SCTRLA = 0;
-        TWI0.MCTRLA = 0;
-        // set SDA SCL low so that ESP goes to sleep immediately
-        pinMode(SDA, OUTPUT);
-        pinMode(SCL, OUTPUT);
-        digitalWrite(SDA, LOW);
-        digitalWrite(SCL, LOW);
-        // turn on peripheral voltage & flash the strip
-        pinMode(DCDC_PWR, OUTPUT);
-        digitalWrite(DCDC_PWR, LOW);
-        delay(50);
-        Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
-        Neopixels_.update();
-        delay(50);
-        Neopixels_.fill(Color::Black());
-        Neopixels_.update();
-        delay(100);
-        Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
-        Neopixels_.update();
-        delay(50);
-        Neopixels_.fill(Color::Black());
-        Neopixels_.update();
-        delay(100);
-        Neopixels_.fill(Color::Red().withBrightness(DEFAULT_NOTIFICATION_BRIGHTNESS));
-        Neopixels_.update();
-        delay(50);
-        Neopixels_.fill(Color::Black());
-        Neopixels_.update();
-        // initialize I2C back and go to sleep
-        InitializeI2C();
         Status_.sleep = true;
     }
 
@@ -1022,25 +1290,6 @@ private:
         }
     }
 
-    /** Shows the given byte displayed on the neopixels strip and freezes. 
-     
-        The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
-     */
-    static void ShowByte(uint8_t value, Color const & color) {
-        cli();
-        Neopixels_[7] = (value & 1) ? color : Color::Black();
-        Neopixels_[6] = (value & 2) ? color : Color::Black();
-        Neopixels_[5] = (value & 4) ? color : Color::Black();
-        Neopixels_[4] = (value & 8) ? color : Color::Black();
-        Neopixels_[3] = (value & 16) ? color : Color::Black();
-        Neopixels_[2] = (value & 32) ? color : Color::Black();
-        Neopixels_[1] = (value & 64) ? color : Color::Black();
-        Neopixels_[0] = (value & 128) ? color : Color::Black();
-        Neopixels_.update();
-        while (true) { };
-    }
-
-
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
     inline static ColorStrip<8> Lights_;
     inline static ColorStrip<8> SpecialLights_;
@@ -1066,8 +1315,6 @@ private:
         Mic = ADC_MUXPOS_AIN6_gc
     }; // AudioADCSource
 
-    static_assert(AUDIO_ADC == 12, "Must be PC2, ADC1 input 8");
-    static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
 
     static void StartAudioADC(AudioADCSource channel) {
         AudioLightsMin_ = 255;

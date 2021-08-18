@@ -100,6 +100,10 @@ public:
         }
     }
 
+    bool timeEqualTo(DateTime const & other) const {
+        return (raw_ & (HOUR_MASK | MINUTE_MASK | SECOND_MASK)) == (other.raw_ & (HOUR_MASK | MINUTE_MASK | SECOND_MASK));
+    }
+
     static uint8_t DaysInMonth(uint16_t year, uint8_t month) {
         switch (month) {
             case 1: // Jan
@@ -130,6 +134,6 @@ private:
     static constexpr uint32_t MINUTE_MASK = 63 << 6;
     static constexpr uint32_t SECOND_MASK = 63;
 
-    volatile uint32_t raw_ = 0;
+    uint32_t raw_ = 0;
 
 } __attribute__((packed));

@@ -34,31 +34,31 @@ class State {
 //@{
 public:
 
-    bool controlButtonDown() const {
+    bool controlButtonDown() const volatile {
         return peripherals_ & CONTROL_DOWN_MASK;
     }
 
-    bool volumeButtonDown() const {
+    bool volumeButtonDown() const volatile {
         return peripherals_ & VOLUME_DOWN_MASK;
     }
 
-    bool headphonesConnected() const {
+    bool headphonesConnected() const volatile {
         return peripherals_ & HEADPHONES_MASK;
     }
 
-    bool charging() const {
+    bool charging() const volatile {
         return peripherals_ & CHARGING_MASK;
     }
 
-    bool batteryMode() const {
+    bool batteryMode() const volatile {
         return peripherals_ & BATTERY_MASK;
     }
 
-    WiFiStatus wifiStatus() const {
+    WiFiStatus wifiStatus() const volatile {
         return static_cast<WiFiStatus>((peripherals_ & WIFI_STATUS_MASK) >> 6);
     }
 
-    void setControlButtonDown(bool value = true) {
+    void setControlButtonDown(bool value = true) volatile {
         if (value)
             peripherals_ |= CONTROL_DOWN_MASK;
         else
@@ -82,20 +82,24 @@ private:
  */
 //@{
 public:
-    bool controlButtonPress() const {
+    bool controlButtonPress() const volatile {
         return events_ & CONTROL_PRESS_MASK;
     }
 
-    bool controlButtonLongPress() const {
+    bool controlButtonLongPress() const volatile {
         return events_ & CONTROL_LONG_PRESS_MASK;
     }
 
-    bool volumeButtonPress() const {
+    bool volumeButtonPress() const volatile {
         return events_ & VOLUME_PRESS_MASK;
     }
 
-    bool volumeButtonLongPress() const {
+    bool volumeButtonLongPress() const volatile {
         return events_ & VOLUME_LONG_PRESS_MASK;
+    }
+
+    bool doubleButtonLongPress() const volatile {
+        return events_ & DOUBLE_LONG_PRESS_MASK;
     }
 
     /** Clears the events flags. 
@@ -103,7 +107,42 @@ public:
         This is called automatically every time the state is transmitted so that new events can occur. 
      */ 
     void clearEvents() volatile {
-        events_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK);
+        events_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK | DOUBLE_LONG_PRESS_MASK);
+    }
+
+    void setControlButtonPress(bool value = true) volatile {
+        if (value)
+            events_ |= CONTROL_PRESS_MASK;
+        else
+            events_ &= ~CONTROL_PRESS_MASK;
+    }
+
+    void setVolumeButtonPress(bool value = true) volatile {
+        if (value)
+            events_ |= VOLUME_PRESS_MASK;
+        else
+            events_ &= ~VOLUME_PRESS_MASK;
+    }
+
+    void setControlButtonLongPress(bool value = true) volatile {
+        if (value)
+            events_ |= CONTROL_LONG_PRESS_MASK;
+        else
+            events_ &= ~CONTROL_LONG_PRESS_MASK;
+    }
+
+    void setVolumeButtonLongPress(bool value = true) volatile {
+        if (value)
+            events_ |= VOLUME_LONG_PRESS_MASK;
+        else
+            events_ &= ~VOLUME_LONG_PRESS_MASK;
+    }
+
+    void setDoubleButtonLongPress(bool value = true) volatile {
+        if (value)
+            events_ |= DOUBLE_LONG_PRESS_MASK;
+        else
+            events_ &= ~DOUBLE_LONG_PRESS_MASK;
     }
 
     /** Returns the current mode of the player. 
@@ -119,7 +158,7 @@ private:
     static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 1 << 1;
     static constexpr uint8_t VOLUME_PRESS_MASK = 1 << 2;
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 1 << 3;
-    // 1 bit free
+    static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 1 << 4;
     static constexpr uint8_t MODE_MASK = 7 << 5;
     uint8_t events_;
 //@}
@@ -159,7 +198,7 @@ class Measurements {
 public:
     /** The VCC voltage as measured on AVR multiplied by 100. 
      
-        Supported values are 250 (2.5V, BOD) to 500 (5V, charger).
+        Supported values are 250 (2.5V, BOD) to 500 (5V, charger), other values are possible, but usually indicate an error. 
      */
     uint16_t vcc;
 
