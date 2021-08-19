@@ -8,6 +8,7 @@
 
 #include <avr/sleep.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 
 #include "state.h"
 #include "messages.h"
@@ -98,9 +99,13 @@ public:
 
     static void Loop() {
         if (Status_.tick) {
-            // the possibly data-racy decrement and compare of irq countdown wrt Status irq is ok, it can only fail if ESP gets to the state at the very end of the interval... At which point it deserves reset anyways
-            if (Status_.irq && --IrqCountdown_ == 0) 
+            // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
+            if (Status_.irq && IrqCountdown_ == 0)
                 ResetESP();
+
+            cli();
+            Status_.tick = false;
+            sei();
         }
         if (Status_.i2cRxReady)
             ProcessCommand();
@@ -278,7 +283,7 @@ private:
  */
 //@{
 
-    /** \name Button Change Events  [ISR] [sleep]
+    /** \name Button Change Events  [ISR, sleep]
      
         How to determine if long enough to power on w/o changing the RTC frequency? 
 
@@ -319,7 +324,7 @@ private:
     }
     //@}
 
-    /** [ISR]
+    /** [ISR, sleep]
      */
     static void VolumeButtonChanged() {
         VolumeBtn_.poll();
@@ -390,20 +395,25 @@ private:
         // TODO not sure why we need it
         TWI0.MCTRLA = TWI_ENABLE_bm;   
     }
-
+    
     static void SetIrq() {
-        if (! Status_.irq) {
-            Status_.irq = true;
-            IrqCountdown_ = IRQ_RESPONSE_TIMEOUT;
-            pinMode(AVR_IRQ, OUTPUT);
-            digitalWrite(AVR_IRQ, LOW);
+        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+            if (! Status_.irq) {
+                Status_.irq = true;
+                IrqCountdown_ = IRQ_RESPONSE_TIMEOUT;
+                pinMode(AVR_IRQ, OUTPUT);
+                digitalWrite(AVR_IRQ, LOW);
+            }
         }
     }
 
     static void ClearIrq() {
-        if (Status_.irq) {
-            pinMode(AVR_IRQ, INPUT);
-            Status_.irq = false;
+        ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+            if (Status_.irq) {
+                pinMode(AVR_IRQ, INPUT);
+                Status_.irq = false;
+                // let the countdown to reach 0 naturally
+            }
         }
     }
 
@@ -417,8 +427,10 @@ private:
     static void ProcessCommand() {
         // TODO process the I2C commands from ESP
 
-        // clear the ready flag and reset the buffer offset - the bitfield can only be set by the IRQ after first passing the RxOffset being zero, and the RxOffset update is atomic so there is no possibility of a race here
+        // clear the ready flag and reset the buffer offset - since the bitfield is shared, we must protect its writes
+        cli();
         Status_.i2cRxReady = false;
+        sei();
         I2CRxOffset_ = 0;
     }
 
@@ -535,6 +547,7 @@ private:
         /** If true, the IRQ flag is currently raised, which is a notification to ESP that it should read the state and react to the changes (or recording buffer if we are recording).
          */        
         bool irq : 1;
+
         /** If true, there has been 1/64th of a second tick. 
          */
         bool tick: 1;
@@ -553,8 +566,8 @@ private:
     static inline uint8_t TickCountdown_; 
     static inline uint16_t PowerOnCountdown_ = 0;
     static inline uint16_t PowerOnRTCValue_ = 0;
-    static inline uint8_t ControlBtnCounter_ = 0;
-    static inline uint8_t VolumeBtnCounter_ = 0;
+    static inline uint8_t ControlBtnCounter_ = 0; // [isr]
+    static inline uint8_t VolumeBtnCounter_ = 0; // [isr]
 
 
 
@@ -587,7 +600,16 @@ ISR(RTC_PIT_vect) {
 
         // TODO check alarm, set wakeup bits and wake up? 
     } else {
+        // set the tick flag so that more resource demanding periodic tasks can be done in the loop
         Player::Status_.tick = true;
+        // decrement irq
+        if (Player::IrqCountdown_ > 0)
+            --Player::IrqCountdown_;
+        // decrement button long press counters
+        if (Player::ControlBtnCounter_ > 0)
+            --Player::ControlBtnCounter_;
+        if (Player::VolumeBtnCounter_ > 0)
+            --Player::VolumeBtnCounter_;
     }
     //digitalWrite(AUDIO_SRC, LOW);
 }
