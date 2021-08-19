@@ -285,9 +285,6 @@ private:
 
     /** \name Button Change Events  [ISR, sleep]
      
-        How to determine if long enough to power on w/o changing the RTC frequency? 
-
-
      */
     //@{
     static void ControlButtonChanged() {
@@ -315,22 +312,55 @@ private:
             } else {
                 State_.setControlButtonLongPress();
             }
+            ControlBtnCounter_ = 0;
             SetIrq();
         }
     }
-
-    static void ControlKnobChanged() {
-
-    }
-    //@}
 
     /** [ISR, sleep]
      */
     static void VolumeButtonChanged() {
         VolumeBtn_.poll();
+        // if we are sleeping check if we should wake up 
         if (Status_.sleep) {
             CheckButtonWakeup(VolumeBtn_.pressed());
+        // if this is a press, reset the long press counter and update the state
+        } else if (VolumeBtn_.pressed()) {
+            VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
+            State_.setVolumeButtonDown();
+            SetIrq();
+        // if this is a valid release (i.e. previous press recorded), we must determine whether its a short press, long press, if it's a double long press, or if there is a possibility of a long press in the future
+        } else if (State_.volumeButtonDown()) { 
+            State_.setVolumeButtonDown(false);
+            // not a long press, if there was a possibility of double long press we have to also emit the pending long press of the other button
+            if (VolumeBtnCounter_ > 0) {
+                State_.setVolumeButtonPress();
+                if (Status_.longPressPending) {
+                    Status_.longPressPending = false;
+                    State_.setControlButtonLongPress();
+                }
+                Status_.longPressPending = false;
+            // it's a long press now, if there is possibility of a double long press, emit the double long press
+            } else if (Status_.longPressPending) {
+                State_.setDoubleButtonLongPress();
+                Status_.longPressPending = false;
+            // if the other button is down, don't emit long press yet, but set double long press possibility, the other button will either emit double long press, or emit our long press upon its release
+            } else if (State_.controlButtonDown()) {
+                Status_.longPressPending = true;
+            } else {
+                State_.setVolumeButtonLongPress();
+            }
+            VolumeBtnCounter_ = 0;
+            SetIrq();
         }
+
+    }
+    //@}
+
+
+    /** [ISR]
+     */
+    static void ControlKnobChanged() {
 
     }
 

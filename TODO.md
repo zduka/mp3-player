@@ -12,6 +12,8 @@
 
 # ATTiny
 
+- change double long press so that both buttons have to be double long pressed for the appropriate time together
+
 - where to store if walkie-talkie is set (maybe message sth like PeriodicWTSync(on/off))
 - control lights don't seem to flash well
 - audiolights are a bit weird...

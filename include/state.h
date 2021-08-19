@@ -65,6 +65,13 @@ public:
             peripherals_ &= ~CONTROL_DOWN_MASK;
     }
 
+    void setVolumeButtonDown(bool value = true) volatile {
+        if (value)
+            peripherals_ |= VOLUME_DOWN_MASK;
+        else
+            peripherals_ &= ~VOLUME_DOWN_MASK;
+    }
+
 
 
 
