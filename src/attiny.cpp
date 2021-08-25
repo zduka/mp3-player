@@ -82,7 +82,7 @@ public:
         // Initialize ADC0
         InitializeMeasurementsADC();
 
-        InitializeRecording();
+        InitializeAudioCapture();
         
 
 
@@ -141,7 +141,6 @@ private:
         ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
         ADC0.SAMPCTRL = 31;
     }
-
 
     /** Puts the AVR to sleep. 
      */
@@ -284,7 +283,10 @@ private:
 //@{
 
     /** \name Button Change Events  [ISR, sleep]
-     
+
+        Control and volume buttons are handled inside an interrupt handler and can run even when the attiny sleeps, which is handled by a special function. 
+
+        During normal operation, short and long press of a button, or a double long press of both buttons are detected and raised as events.   
      */
     //@{
     static void ControlButtonChanged() {
@@ -292,33 +294,28 @@ private:
         if (Status_.sleep) {
             CheckButtonWakeup(ControlBtn_.pressed());
         } else if (ControlBtn_.pressed()) {
-            ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
+            LongPressCounter_ = BUTTON_LONG_PRESS_TICKS;
             State_.setControlButtonDown();
             SetIrq();
         } else if (State_.controlButtonDown()) { // released & previous press recorded
             State_.setControlButtonDown(false);
-            if (ControlBtnCounter_ > 0) {
+            // if not a long press, emit short press, reset volume down so that if down & later released, no event will be fired
+            if (LongPressCounter_ > 0) {
+                State_.setVolumeButtonDown(false);
                 State_.setControlButtonPress();
-                if (Status_.longPressPending) {
-                    Status_.longPressPending = false;
-                    State_.setVolumeButtonLongPress();
-                }
-                Status_.longPressPending = false;
-            } else if (Status_.longPressPending) {
-                State_.setDoubleButtonLongPress();
-                Status_.longPressPending = false;
-            } else if (State_.volumeButtonDown()) {
-                Status_.longPressPending = true;
-            } else {
+            // if this is long press and volume is not down, emit control button long press 
+            } else if (! State_.volumeButtonDown()) {
                 State_.setControlButtonLongPress();
+            // if volume is down as well, this is double button long press, emit & reset volume down so that it's up won't trigger any other event
+            } else {
+                State_.setVolumeButtonDown(false);
+                State_.setDoubleButtonLongPress();
             }
-            ControlBtnCounter_ = 0;
+            LongPressCounter_ = 0;
             SetIrq();
         }
     }
 
-    /** [ISR, sleep]
-     */
     static void VolumeButtonChanged() {
         VolumeBtn_.poll();
         // if we are sleeping check if we should wake up 
@@ -326,48 +323,26 @@ private:
             CheckButtonWakeup(VolumeBtn_.pressed());
         // if this is a press, reset the long press counter and update the state
         } else if (VolumeBtn_.pressed()) {
-            VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
+            LongPressCounter_ = BUTTON_LONG_PRESS_TICKS;
             State_.setVolumeButtonDown();
             SetIrq();
-        // if this is a valid release (i.e. previous press recorded), we must determine whether its a short press, long press, if it's a double long press, or if there is a possibility of a long press in the future
-        } else if (State_.volumeButtonDown()) { 
+        } else if (State_.volumeButtonDown()) { // released & previous press recorded
             State_.setVolumeButtonDown(false);
-            // not a long press, if there was a possibility of double long press we have to also emit the pending long press of the other button
-            if (VolumeBtnCounter_ > 0) {
+            // if not a long press, emit short press, reset control down so that if down & later released, no event will be fired
+            if (LongPressCounter_ > 0) {
+                State_.setControlButtonDown(false);
                 State_.setVolumeButtonPress();
-                if (Status_.longPressPending) {
-                    Status_.longPressPending = false;
-                    State_.setControlButtonLongPress();
-                }
-                Status_.longPressPending = false;
-            // it's a long press now, if there is possibility of a double long press, emit the double long press
-            } else if (Status_.longPressPending) {
-                State_.setDoubleButtonLongPress();
-                Status_.longPressPending = false;
-            // if the other button is down, don't emit long press yet, but set double long press possibility, the other button will either emit double long press, or emit our long press upon its release
-            } else if (State_.controlButtonDown()) {
-                Status_.longPressPending = true;
-            } else {
+            // if this is long press and control is not down, emit volume button long press 
+            } else if (! State_.controlButtonDown()) {
                 State_.setVolumeButtonLongPress();
+            // if control is down as well, this is double button long press, emit & reset control down so that it's up won't trigger any other event
+            } else {
+                State_.setControlButtonDown(false);
+                State_.setDoubleButtonLongPress();
             }
-            VolumeBtnCounter_ = 0;
+            LongPressCounter_ = 0;
             SetIrq();
         }
-
-    }
-    //@}
-
-
-    /** [ISR]
-     */
-    static void ControlKnobChanged() {
-
-    }
-
-    /** [ISR]
-     */
-    static void VolumeKnobChanged() {
-
     }
 
     static void CheckButtonWakeup(bool down) {
@@ -378,7 +353,26 @@ private:
             Status_.sleep = false;
         }
     }
+    //@}
 
+
+    /** \name Knob value changes [ISR]
+     
+        Corresponds to the the change of rotation encoders' position. Runs in ISR.
+     */
+    //@{
+    static void ControlKnobChanged() {
+        Control_.poll();
+        State_.setControlValue(Control_.value());
+        SetIrq();
+    }
+
+    static void VolumeKnobChanged() {
+        Volume_.poll();
+        State_.setVolumeValue(Volume_.value());
+        SetIrq();
+    }
+    //@}
 
     inline static RotaryEncoder Control_{CTRL_A, CTRL_B, 256};
     inline static RotaryEncoder Volume_{VOL_A, VOL_B, 16};
@@ -387,9 +381,31 @@ private:
 
 //@}
 
-/** \name Lights
+/** \name RGB LED Light Strip
+ 
+    The strip displays various effects and notifications. For better visibility the notifications don't overlay themselves over the effects, but block the neopixels for themselves. The following notifications are supported:
+
+    - low battery
+    - waiting message 
+    
  */
 //@{
+
+    /** Starts the audio lights. 
+
+        Resets the bookkeeping and starts the audio capture with audio source.  
+     */
+    void StartAudioLights() {
+        //AudioLightsMin_ = 255;
+        //AudioLightsMax_ = 0;
+        StartAudioCapture(AudioADCSource::Audio);
+    }
+
+    /** Stops the audio lights. 
+     */
+    void StopAudioLights() {
+        StopAudioCapture();
+    }
 
     inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
 
@@ -464,20 +480,14 @@ private:
         I2CRxOffset_ = 0;
     }
 
-    friend void TWI0_TWIS_vect();
+    friend void ::TWI0_TWIS_vect();
 
-    /** The offset from State at which the transmission should start. 
-     
-        Offset of 0 (default) indicates transmission of State, or if recording transmission of the recording buffer at appropriate position. 
-     */
-    //inline static uint8_t I2CTxOffset_ = 0;
     /** Number of bytes to be sent from the I2C TX buffer. 
      */
     inline static uint8_t I2CTxLength_ = 0;
     inline static uint8_t * I2CTxBuffer_ = nullptr;
     inline static uint8_t I2CRxBuffer_[32];
     inline static uint8_t I2CRxOffset_ = 0;
-
 
 //@}
 
@@ -503,10 +513,6 @@ private:
     static inline DateTime Alarm_;
 //@}
 
-
-
-
-
 /** \name Audio Recording information & buffer. 
  
     */
@@ -515,8 +521,12 @@ private:
     static_assert(AUDIO_ADC == 12, "Must be PC2, ADC1 input 8");
     static_assert(MIC == 10, "Must be PC0, ADC1 input 6");
 
+    enum class AudioADCSource : uint8_t {
+        Audio = ADC_MUXPOS_AIN8_gc,
+        Mic = ADC_MUXPOS_AIN6_gc
+    }; // AudioADCSource
 
-    static void InitializeRecording() {
+    static void InitializeAudioCapture() {
         // configure the timer we use for 8kHz audio sampling
         TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
         TCB0.CTRLB = TCB_CNTMODE_INT_gc;
@@ -541,6 +551,26 @@ private:
         ADC1.CTRLC = ADC_PRESC_DIV2_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
         ADC1.EVCTRL = ADC_STARTEI_bm;
     }
+
+    static void StartAudioCapture(AudioADCSource source) {
+        RecordingRead_ = 0;
+        RecordingWrite_ = 0;
+        // select ADC channel to either MIC or audio ADC
+        ADC1.MUXPOS  = static_cast<uint8_t>(source);
+        // enable and use 8bit resolution, freerun mode
+        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc /*| ADC_FREERUN_bm */;
+        // enable the interrupt
+        ADC1.INTCTRL |= ADC_RESRDY_bm;
+        // start the timer
+        TCB0.CTRLA |= TCB_ENABLE_bm;
+    }
+
+    static void StopAudioCapture() {
+        ADC1.CTRLA = 0;
+        TCB0.CTRLA &= ~TCB_ENABLE_bm;
+    }
+
+    friend void ::ADC1_RESRDY_vect();
 
     inline static volatile uint8_t RecordingWrite_ = 0;
     inline static volatile uint8_t RecordingRead_ = 0;
@@ -585,6 +615,9 @@ private:
         /** If true, there is a command received from ESP in the I2C tx buffer that should be processed. 
          */
         bool i2cRxReady : 1;
+
+        /** If true, audio recording is in progress. Transmit requests will transmit the recording buffer by default and having new 32 recorded values triggers the irq. 
+         */
         bool recording : 1;
 
         bool longPressPending : 1;
@@ -596,8 +629,7 @@ private:
     static inline uint8_t TickCountdown_; 
     static inline uint16_t PowerOnCountdown_ = 0;
     static inline uint16_t PowerOnRTCValue_ = 0;
-    static inline uint8_t ControlBtnCounter_ = 0; // [isr]
-    static inline uint8_t VolumeBtnCounter_ = 0; // [isr]
+    static inline uint8_t LongPressCounter_ = 0; // [isr]
 
 
 
@@ -635,11 +667,9 @@ ISR(RTC_PIT_vect) {
         // decrement irq
         if (Player::IrqCountdown_ > 0)
             --Player::IrqCountdown_;
-        // decrement button long press counters
-        if (Player::ControlBtnCounter_ > 0)
-            --Player::ControlBtnCounter_;
-        if (Player::VolumeBtnCounter_ > 0)
-            --Player::VolumeBtnCounter_;
+        // decrement button long press counter
+        if (Player::LongPressCounter_ > 0)
+            --Player::LongPressCounter_;
     }
     //digitalWrite(AUDIO_SRC, LOW);
 }
@@ -723,9 +753,13 @@ ISR(TWI0_TWIS_vect) {
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
-
-
-
+ISR(ADC1_RESRDY_vect) {
+    //digitalWrite(AUDIO_SRC, HIGH);
+    Player::RecordingBuffer_[Player::RecordingWrite_++] = (ADC1.RES / 8) & 0xff;
+    if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
+        Player::SetIrq();
+    //digitalWrite(AUDIO_SRC, LOW);
+}
 
 void setup() {
     Player::Initialize();
@@ -1381,11 +1415,6 @@ private:
         ADC1.INTCTRL |= ADC_RESRDY_bm;
         // start the timer
         TCB0.CTRLA |= TCB_ENABLE_bm;
-}
-
-    static void StopAudioADC() {
-        ADC1.CTRLA = 0;
-        TCB0.CTRLA &= ~TCB_ENABLE_bm;
     }
 
     static bool AudioADCRunning() {
