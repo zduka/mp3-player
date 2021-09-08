@@ -7,7 +7,7 @@
 
 # ATTiny
 
-- change double long press so that both buttons have to be double long pressed for the appropriate time together
+- what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
 - where to store if walkie-talkie is set (maybe message sth like PeriodicWTSync(on/off))
 - control lights don't seem to flash well

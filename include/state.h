@@ -166,7 +166,7 @@ private:
     static constexpr uint8_t VOLUME_PRESS_MASK = 1 << 2;
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 1 << 3;
     static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 1 << 4;
-    static constexpr uint8_t MODE_MASK = 7 << 5;
+    static constexpr uint8_t MODE_MASK = 7 << 6;
     uint8_t events_;
 //@}
 
@@ -182,12 +182,23 @@ public:
         return knobValues_ & CONTROL_KNOB_MASK;
     }
 
+    void setControlValue(uint16_t value) volatile {
+        knobValues_ &= ~CONTROL_KNOB_MASK;
+        knobValues_ |= value & CONTROL_KNOB_MASK;
+    }
+
     /** Value of the volume knob. 
      
         Values from 0 to 63 (inclusive) are supported.
      */
     uint16_t volumeValue() const {
         return (knobValues_ & VOLUME_KNOB_MASK) >> 10;
+    }
+
+    void setVolumeValue(uint16_t value) volatile {
+        value <<= 10;
+        knobValues_ &= ~VOLUME_KNOB_MASK;
+        knobValues_ |= value & VOLUME_KNOB_MASK;
     }
 
 private:
