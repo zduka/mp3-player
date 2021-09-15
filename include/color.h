@@ -4,10 +4,14 @@
 
 class Color {
 public:
-    uint8_t g = 0;
-    uint8_t r = 0;
-    uint8_t b = 0;
+    uint8_t g;
+    uint8_t r;
+    uint8_t b;
 
+    /** Creates new color. 
+     
+        Does not initialize the color to any particular value so that the constructor is trivial and color can be part of anonymous structs & unions.
+     */
     Color() = default;
 
     Color(Color const &) = default;
@@ -257,7 +261,7 @@ public:
 
     /** Shows a bar at given value that grows symmetrically from the center. 
      */
-    void showCenteredBar(uint16_t value, uint16_t max, Color const & color, uint8_t step = 255) {
+    void showBarCentered(uint16_t value, uint16_t max, Color const & color, uint8_t step = 255) {
         uint32_t v = static_cast<uint32_t>(value) * (SIZE * 255) / max;
         uint32_t offset = (SIZE * 255 - v) / 2;
         for (uint8_t i = 0; i < SIZE; ++i) {

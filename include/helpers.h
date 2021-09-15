@@ -34,6 +34,16 @@ inline T pointer_cast(W * from) {
 #endif
 
 
+/** Returns true if given string ends with the given suffix. 
+ 
+    Does not use the evil string object. 
+ */
+inline bool EndsWith(char const * str, char const * suffix) {
+    unsigned l1 = strlen(str);
+    unsigned l2 = strlen(suffix);
+    return strncmp(str + (l1 - l2), suffix, l2) == 0;
+}
+
 
 inline uint8_t FromHex(char c) {
     if (c >= '0' && c <= '9')

@@ -14,6 +14,8 @@ enum class Mode : uint8_t {
     // the alarm clock and birthday greeting modes are not directly accessible via controls, but are automatically selected by the system when appropriate
     AlarmClock,
     BirthdayGreeting,
+    // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
+    Sync,
 }; // Mode
 
 enum class WiFiStatus : uint8_t {
@@ -22,7 +24,6 @@ enum class WiFiStatus : uint8_t {
     Connected = 2,
     SoftAP = 3
 }; // WiFiStatus
-
 
 /** Current state of the player controls 
  
@@ -71,9 +72,6 @@ public:
         else
             peripherals_ &= ~VOLUME_DOWN_MASK;
     }
-
-
-
 
 private:
     static constexpr uint8_t CONTROL_DOWN_MASK = 1 << 0;
@@ -156,8 +154,13 @@ public:
      
         When ESP starts, this is also the last mode that was used.
      */
-    Mode mode() const {
+    Mode mode() volatile {
         return static_cast<Mode>((events_ & MODE_MASK) >> 5);
+    }
+
+    void setMode(Mode value) volatile {
+        events_ &= ~MODE_MASK;
+        events_ |= (static_cast<uint8_t>(value) << 5) & MODE_MASK;
     }
 
 private:
@@ -166,7 +169,7 @@ private:
     static constexpr uint8_t VOLUME_PRESS_MASK = 1 << 2;
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 1 << 3;
     static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 1 << 4;
-    static constexpr uint8_t MODE_MASK = 7 << 6;
+    static constexpr uint8_t MODE_MASK = 7 << 5;
     uint8_t events_;
 //@}
 
@@ -233,11 +236,12 @@ static_assert(sizeof(Measurements) == 4);
  */
 class MP3Settings {
 public:
+    uint8_t numPlaylists;
     uint8_t playlistId;
     uint16_t trackId;
 } __attribute__((packed)); // MP3Settings
 
-static_assert(sizeof(MP3Settings) == 3);
+static_assert(sizeof(MP3Settings) == 4);
 
 /** Settings for the FM Radio mode. 
  */
@@ -245,36 +249,121 @@ class RadioSettings {
 public:
     uint8_t stationId;
     uint16_t frequency;
-} __attribute__((packed)); // MP3Settings
+    bool forceMono;
+} __attribute__((packed)); // RadioSettings
 
-static_assert(sizeof(RadioSettings) == 3);
+static_assert(sizeof(RadioSettings) == 4);
 
 /** Settings for the Walkie-Talkie mode. 
  */
 class WalkieTalkieSettings {
 public:
+    uint8_t enabled;
     uint32_t updateId;
 } __attribute__((packed)); // WalkieTalkieSettings
 
-static_assert(sizeof(WalkieTalkieSettings) == 4);
+static_assert(sizeof(WalkieTalkieSettings) == 5);
 
 /** The various night light effects the player supports. 
  */
 enum class NightLightEffect : uint8_t {
-    Color, // single color
-    Breathe, // breathing effect with single color, whole strip
-    BreatheBar, // breathing effect, centered bar, single color
-    KnightRider, // larson scanner, single color
-    Running, // running lights, single color
-    Sentinel // sentinel value indicating the end of effects
+    Off = 0, 
+    AudioLights, 
+    Breathe, 
+    BreatheBar,
+    KnightRider, 
+    StarryNight,
+    SolidColor,
 }; // NightLightEffect
 
 /** Settings for the night light mode. 
  */
 class NightLightSettings {
 public:
+    static constexpr uint8_t HUE_RAINBOW = 32;
     NightLightEffect effect;
     uint8_t hue;
 } __attribute__((packed)); // NightLightSettings
 
 static_assert(sizeof(NightLightSettings) == 2);
+
+/** Active notifications. 
+ */
+class Notifications {
+public:
+    /** Returns true if there is at least one notification to be displayed. 
+     */
+    bool active() const {
+        return raw_ != 0;
+    }
+
+    bool lowBattery() const {
+        return raw_ & LOW_BATTERY;
+    }
+
+    bool messageReady() const {
+        return raw_ & MESSAGE_READY;
+    }
+
+    bool apActive() const {
+        return raw_ & AP_ACTIVE;
+    }
+
+    bool noWiFi() const {
+        return raw_ & NO_WIFI;
+    }
+
+    bool airplaneMode() const {
+        return raw_ & AIRPLANE_MODE;
+    }
+private:
+    static constexpr uint8_t LOW_BATTERY = 1;
+    static constexpr uint8_t MESSAGE_READY = 2;
+    static constexpr uint8_t AP_ACTIVE = 4;
+    static constexpr uint8_t NO_WIFI = 8;
+    static constexpr uint8_t AIRPLANE_MODE = 16;
+
+    uint8_t raw_;
+} __attribute__((packed)); // Notifications
+
+static_assert(sizeof(Notifications) == 1);
+
+
+
+
+class ExtendedState {
+public:
+    Measurements measurements; 
+    MP3Settings mp3Settings;
+    RadioSettings radioSettings;
+    WalkieTalkieSettings walkieTalkieSettings;
+    NightLightSettings nightLightSettings;
+    Notifications notifications;
+    DateTime time;
+    DateTime alarm;
+
+    /** Returns the next mode. 
+     
+        This is usually straightforward unless the walkie-talkie mode is disabled. We need to know this inside the extended state as this function is used both by AVR and ESP and the extended state has enough information to determine whether a mode is active or not.
+     */
+    Mode getNextMode(Mode current) volatile {
+        switch (current) {
+            case Mode::MP3:
+                return Mode::Radio;
+            case Mode::Radio:
+                return (walkieTalkieSettings.enabled) ? Mode::WalkieTalkie : Mode::NightLight;
+            case Mode::WalkieTalkie:
+                return Mode::NightLight;
+            case Mode::NightLight:
+            default:
+                return (mp3Settings.numPlaylists > 0) ? Mode::MP3 : Mode::Radio;
+        }
+    }
+
+} __attribute__((packed)); // ExtendedState
+
+static_assert(sizeof(ExtendedState) == 28);
+
+
+
+
