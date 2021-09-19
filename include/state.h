@@ -228,9 +228,82 @@ public:
         Supported range is -300 (-30.0 C) to 800 (80 C)
      */
     int16_t temp;    
+
+    void log() const {
+        LOG("Measurements:");
+        LOG("    vcc: %u", vcc);
+        LOG("    temp: %i", temp);
+    }
 } __attribute__((packed)); // Measurements
 
 static_assert(sizeof(Measurements) == 4);
+
+class Settings {
+public:
+
+    bool mp3Enabled() const {
+        return raw_ & ENABLE_MP3;
+    }
+    bool radioEnabled() const {
+        return raw_ & ENABLE_RADIO;
+    }
+    bool walkieTalkieEnabled() const {
+        return raw_ & ENABLE_WALKIE_TALKIE;
+    }
+    bool nightLightsEnabled() const {
+        return raw_ & ENABLE_NIGHT_LIGHTS;
+    }
+    bool radioManualTuningEnabled() const {
+        return raw_ & RADIO_ENABLE_MANUAL_TUNING;
+    }
+
+    bool radioForceMono() const {
+        return raw_ & RADIO_FORCE_MONO;
+
+    }
+
+    
+
+    bool lowBattery() const {
+        return raw_ & LOW_BATTERY;
+    }
+
+    bool messageReady() const {
+        return raw_ & MESSAGE_READY;
+    }
+
+    bool apActive() const {
+        return raw_ & AP_ACTIVE;
+    }
+
+    bool noWiFi() const {
+        return raw_ & NO_WIFI;
+    }
+
+    bool airplaneMode() const {
+        return raw_ & AIRPLANE_MODE;
+    }
+
+private:
+    static constexpr uint16_t ENABLE_MP3 = 1 << 0;
+    static constexpr uint16_t ENABLE_RADIO = 1 << 1;
+    static constexpr uint16_t ENABLE_WALKIE_TALKIE = 1 << 2;
+    static constexpr uint16_t ENABLE_NIGHT_LIGHTS = 1 << 3;
+    static constexpr uint16_t RADIO_ENABLE_MANUAL_TUNING = 1 << 4;
+    static constexpr uint16_t RADIO_FORCE_MONO = 1 << 5;
+
+    static constexpr uint16_t LOW_BATTERY = 1 << 11;
+    static constexpr uint16_t MESSAGE_READY = 1 << 12;
+    static constexpr uint16_t AP_ACTIVE = 1 << 13;
+    static constexpr uint16_t NO_WIFI = 1 << 14;
+    static constexpr uint16_t AIRPLANE_MODE = 1 << 15;
+
+    uint16_t raw_;
+
+} __attribute__((packed)); // Settings
+
+static_assert(sizeof(Settings) == 2);
+
 
 /** Settings for the MP3 mode. 
  */
@@ -239,6 +312,12 @@ public:
     uint8_t numPlaylists;
     uint8_t playlistId;
     uint16_t trackId;
+
+    void log() const {
+        LOG("MP3 Settings:");
+        LOG("    playlist: %u (total %u)", playlistId, numPlaylists);
+        LOG("    track: %u", trackId);
+    }
 } __attribute__((packed)); // MP3Settings
 
 static_assert(sizeof(MP3Settings) == 4);
@@ -249,20 +328,31 @@ class RadioSettings {
 public:
     uint8_t stationId;
     uint16_t frequency;
-    bool forceMono;
+
+    void log() const {
+        LOG("Radio Settings:");
+        LOG("    stationId: %u", stationId);
+        LOG("    frequency: %u", frequency);
+    }
+
 } __attribute__((packed)); // RadioSettings
 
-static_assert(sizeof(RadioSettings) == 4);
+static_assert(sizeof(RadioSettings) == 3);
 
 /** Settings for the Walkie-Talkie mode. 
  */
 class WalkieTalkieSettings {
 public:
-    uint8_t enabled;
     uint32_t updateId;
+
+    void log() const {
+        LOG("Walkie-Talkie Settings:");
+        LOG("    updateId: %lli", updateId);
+    }
+
 } __attribute__((packed)); // WalkieTalkieSettings
 
-static_assert(sizeof(WalkieTalkieSettings) == 5);
+static_assert(sizeof(WalkieTalkieSettings) == 4);
 
 /** The various night light effects the player supports. 
  */
@@ -281,11 +371,25 @@ enum class NightLightEffect : uint8_t {
 class NightLightSettings {
 public:
     static constexpr uint8_t HUE_RAINBOW = 32;
-    NightLightEffect effect;
-    uint8_t hue;
+    NightLightEffect effect = NightLightEffect::KnightRider;
+    uint8_t hue = HUE_RAINBOW;
+    uint8_t maxBrightness = DEFAULT_BRIGHTNESS; 
+
+    Color color() const {
+        return Color::HSV(static_cast<uint16_t>(hue) << 11, 255, maxBrightness);
+    }
+
+    void log() const {
+        LOG("Night Light Settings:");
+        LOG("    effect: %u", effect);
+        LOG("    hue: %u", hue);
+        LOG("    maxBrightness: %u", maxBrightness);
+    }
+
+    
 } __attribute__((packed)); // NightLightSettings
 
-static_assert(sizeof(NightLightSettings) == 2);
+static_assert(sizeof(NightLightSettings) == 3);
 
 /** Active notifications. 
  */
@@ -315,6 +419,20 @@ public:
 
     bool airplaneMode() const {
         return raw_ & AIRPLANE_MODE;
+    }
+
+    void log() const {
+        LOG("Notifications:");
+        if (lowBattery())
+            LOG("    low battery");
+        if (messageReady())
+            LOG("    message ready");
+        if (apActive())
+            LOG("    AP active");
+        if (noWiFi())
+            LOG("    no WiFi");
+        if (airplaneMode())
+            LOG("    airplane mode");
     }
 private:
     static constexpr uint8_t LOW_BATTERY = 1;
@@ -360,9 +478,18 @@ public:
         }
     }
 
+    void log() const {
+        measurements.log();
+        mp3Settings.log();
+        radioSettings.log();
+        walkieTalkieSettings.log();
+        nightLightSettings.log();
+        notifications.log();
+    }
+
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 28);
+static_assert(sizeof(ExtendedState) == 29);
 
 
 

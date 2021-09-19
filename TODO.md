@@ -1,10 +1,13 @@
 # HW
 
-- PINS changed for ATTiny to free TXD port
-- enlarge footprints for all ICs (?)
-- update the audio src, tpa power, and attiny serial port accordingly
-- see PCB based connectors for pwr, neopixels and speaker
+- check charging detection & charging power dissipation, low battery, AC power
 
+# SW
+
+- replace stuff with settings
+
+- PINS changed for ATTiny to free TXD port
+- set radio frequency to first radio station upon complete start
 
 # ATTiny
 
@@ -15,6 +18,7 @@
 - determine decent speed settings for the night light effects
 
 # ESP
+
 
 - only one channel for the Walkie-Talkie bot 
 - approaching memory limit for ESP...

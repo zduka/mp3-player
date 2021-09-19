@@ -69,8 +69,8 @@ public:
         updateState();
         //send(msg::LightsBar{2,8,DEFAULT_COLOR.withBrightness(ex_.nightmaxBrightness_)});
         // get the whole extended state, making sure we fit in the buffer
-        static_assert(sizeof(ExtendedState) < 32);
         getExtendedState(ex_);
+        ex_.log();
         // Initialize the core subsystems and report back
         initializeESP();
         initializeLittleFS();
@@ -79,6 +79,9 @@ public:
         initializePlaylists();
         initializeRadioStations();
 
+
+        // the extended state could have changed when initializing from the SD card, store it all
+        setExtendedState(ex_);
 
         setMode(Mode::Radio);
 
@@ -171,15 +174,16 @@ private:
     template<typename T>
     static void setExtendedState(T const & part) {
         Wire.beginTransmission(AVR_I2C_ADDRESS);
+        uint8_t offset = static_cast<uint8_t>((uint8_t*)(& part) - (uint8_t *)(& ex_));
         msg::SetExtendedState msg{
-            static_cast<uint8_t>((uint8_t*)(& part) - (uint8_t *)(& ex_)),
+            offset,
             sizeof(T)
         };
-        Wire.write(pointer_cast<uint8_t const *>(& msg), sizeof(T));
+        Wire.write(pointer_cast<uint8_t const *>(& msg), sizeof(msg::SetExtendedState));
         Wire.write(pointer_cast<unsigned char const *>(& part), sizeof(T));
         uint8_t status = Wire.endTransmission();
         if (status != 0)
-            ERROR("I2C set extended state failed: %u", status);
+            ERROR("I2C set extended state failed: %u, sending %u bytes", status, sizeof(T));
     }
 
     template<typename T>
@@ -261,6 +265,7 @@ private:
                 if (i >= ex_.mp3Settings.numPlaylists)
                     i = 0;
                 setPlaylist(i);
+                send(msg::LightsPoint{i, ex_.mp3Settings.numPlaylists - 1, MODE_COLOR_MP3});
                 break;
             }
             case Mode::Radio: {
@@ -268,10 +273,20 @@ private:
                 if (i >= numRadioStations_)
                     i = 0;
                 setRadioStation(i);
+                send(msg::LightsPoint{i, numRadioStations_ - 1, MODE_COLOR_RADIO});
                 break;
             }
-            case Mode::WalkieTalkie:
-            case Mode::NightLight:
+            case Mode::WalkieTalkie: {
+                break;
+            }
+            case Mode::NightLight: {
+                uint8_t i = static_cast<uint8_t>(ex_.nightLightSettings.effect) + 1;
+                if (i == 7)
+                    i = 0;
+                setNightLightEffect(static_cast<NightLightEffect>(i));
+                send(msg::LightsPoint{i, 6, MODE_COLOR_NIGHT_LIGHT});
+                break;
+            }
             default:
                 break;
         }
@@ -300,11 +315,27 @@ private:
                 setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
                 break;
             case Mode::WalkieTalkie:
-            case Mode::NightLight:
+                break;
+            case Mode::NightLight: {
+                setNightLightHue(state_.controlValue());
+                if (ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW)
+                    send(msg::LightsColors{
+                        Color::HSV(0 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(1 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(2 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(3 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(4 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(5 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(6 << 13, 255, ex_.nightLightSettings.maxBrightness),
+                        Color::HSV(7 << 13, 255, ex_.nightLightSettings.maxBrightness)
+                    });
+                else
+                    send(msg::LightsBar{8, 8, ex_.nightLightSettings.color()});
+                break;
+            }
             default:
                 break;
         }
-
     }
 
     /** Starts recording in walkie-talkie mode. 
@@ -374,6 +405,10 @@ private:
 
     static void setControlRange(uint16_t value, uint16_t max) {
         LOG("Control range update: %u (max %u)", value, max);
+        if (value > max) {
+            value = max;
+            LOG("  mac value clipped to %u", max);
+        }
         state_.setControlValue(value);
         send(msg::SetControlRange{value, max});
     }
@@ -400,7 +435,10 @@ private:
                 radioPlay();
                 break;
             case Mode::WalkieTalkie:
+                break;
             case Mode::NightLight:
+                nightLightPlay();
+                break;
             default:
                 break;
         }
@@ -417,7 +455,10 @@ private:
                 radioPause();
                 break;
             case Mode::WalkieTalkie:
+                break;
             case Mode::NightLight:
+                nightLightPause();
+                break;
             default:
                 break;
         }
@@ -711,6 +752,27 @@ private:
     /** \name Night Lights mode
      */
     //@{
+
+    static void nightLightPlay() {
+        setControlRange(ex_.nightLightSettings.hue, NightLightSettings::HUE_RAINBOW + 1);
+        // TODO play lullaby? 
+    }
+
+    static void nightLightPause() {
+        // TODO stop playing lullaby?
+    }
+
+    static void setNightLightEffect(NightLightEffect effect) {
+        LOG("Night light effect: %u", static_cast<uint8_t>(effect));
+        ex_.nightLightSettings.effect = effect;
+        setExtendedState(ex_.nightLightSettings);
+    }
+
+    static void setNightLightHue(uint8_t hue) {
+        LOG("Night light hue: %u", hue);
+        ex_.nightLightSettings.hue = hue;
+        setExtendedState(ex_.nightLightSettings);
+    }
 
     //@}
 

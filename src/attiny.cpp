@@ -54,14 +54,6 @@ extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 #define AUDIO_SRC_ESP LOW
 #define AUDIO_SRC_RADIO HIGH
 
-#define IRQ_RESPONSE_TIMEOUT 64
-#define BATTERY_CRITICAL_VCC 340
-/** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 
- 
-    Currently set to 2 seconds
- */
-#define POWER_ON_PRESS_TICKS 128
-#define BUTTON_LONG_PRESS_TICKS 128
 
 
 
@@ -102,7 +94,6 @@ public:
         initializeI2C();
 
 
-
         wakeup();
     }
 
@@ -111,7 +102,8 @@ public:
             // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
             if (status_.irq && irqCountdown_ == 0)
                 resetESP();
-
+            // make sure we have a light show
+            lightsTick();
             cli();
             status_.tick = false;
             sei();
@@ -199,7 +191,7 @@ private:
             // enable power to neopixels, esp8266 and other circuits
             peripheralPowerOn();
             // TODO show the wakeup progressbar *if* not in silent mode
-            neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(maxBrightness_));
+            neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(ex_.nightLightSettings.maxBrightness));
             neopixels_.update();
             // TODO silent mode
         }
@@ -413,11 +405,11 @@ private:
             case Mode::MP3:
                 return MODE_COLOR_MP3;
             case Mode::Radio:
-                return MODE_COLOR_MP3;
+                return MODE_COLOR_RADIO;
             case Mode::WalkieTalkie:
-                return MODE_COLOR_MP3;
+                return MODE_COLOR_WALKIE_TALKIE;
             case Mode::NightLight:
-                return MODE_COLOR_MP3;
+                return MODE_COLOR_NIGHT_LIGHT;
             default:
                 return DEFAULT_COLOR;
         }
@@ -429,16 +421,16 @@ private:
      */
     static void lightsTick() {
         uint8_t step = 1;
-        if (state_.controlButtonDown()) {
+        if (state_.controlButtonDown() && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
             // if the long press counter is not 0, display the countdown bar
             if (longPressCounter_ != 0) {
                 Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.mode());
-                color = color.withBrightness(maxBrightness_);
+                color = color.withBrightness(ex_.nightLightSettings.maxBrightness);
                 strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
                 step = 255;
             } else {
                 Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(ex_.getNextMode(state_.mode()));
-                color = color.withBrightness(maxBrightness_);
+                color = color.withBrightness(ex_.nightLightSettings.maxBrightness);
                 strip_.fill(color);
             }
             // set effect timeout to one, which will immediately trigger revert back to night lights mode as soon as the button is released
@@ -446,14 +438,16 @@ private:
         } else if (effectTimeout_ > 0) {
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
-
+                effectHue_ = ex_.nightLightSettings.hue;
+                effectColor_ = Color::HSV(effectHue_, 255, ex_.nightLightSettings.maxBrightness);
             }
-
-
         } else {
             nightLightsTick();
+            step = 255;
         }
-
+        // once we have the tick, update the actual neopixels with the calculated strip value & step
+        neopixels_.moveTowardsReversed(strip_, step);
+        neopixels_.update();
     }
 
     /** Updates the neopoixels to show the selected night light effect. 
@@ -461,11 +455,17 @@ private:
         
      */
     static void nightLightsTick() {
+        // update the hue of the effect color, if in rainbow mode
+        if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW) {
+            effectHue_ += 1;
+            effectColor_ = ex_.nightLightSettings.color();
+        }
         switch (ex_.nightLightSettings.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...
             case NightLightEffect::Off:
+            default:
                 strip_.fill(Color::Black());
-                break;
+                return;
             // 
             case NightLightEffect::AudioLights: {
                 uint8_t ri = recordingWrite_;
@@ -489,31 +489,37 @@ private:
                     // TODO figure this out!!!
                 }
 
-                break;
+                return;
             }
             case NightLightEffect::Breathe: {
+                strip_.fill(effectColor_.withBrightness(effectCounter_ & 0xff));
                 break;
-
             }
             case NightLightEffect::BreatheBar: {
-
+                //strip_.centeredBar(effectColor_, effectCounter_ & 0xff, 255);
+                strip_.showBarCentered((effectCounter_ & 0xff) / 4, 64, effectColor_);
+                break;
             }
             case NightLightEffect::KnightRider: {
+                strip_.showPoint((effectCounter_ & 0xff) / 4, 64, effectColor_);
                 break;
             }
             case NightLightEffect::StarryNight: {
-                break;
+                strip_.fill(Color::Black());
+                return;
             }
             // solid color that simply fills the whole strip with the effect color
             case NightLightEffect::SolidColor: {
                 strip_.fill(effectColor_);
-                break;
+                return;
             }
         }
-        // update the hue of the effect color, if in rainbow mode
-        if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW) {
-            effectHue_ += 1;
-            effectColor_ = Color::HSV(effectHue_, 255, maxBrightness_);
+        if ((effectCounter_ & 0xff00) == 0) {
+            if (++effectCounter_ == 0x100)
+                effectCounter_ = 0x1ff;
+        } else {
+            if (--effectCounter_ == 0xff)
+                effectCounter_ = 0;
         }
     }
 
@@ -533,11 +539,12 @@ private:
         stopAudioCapture();
     }
 
-    inline static uint8_t maxBrightness_;
     inline static NeopixelStrip<NEOPIXEL, 8> neopixels_;
     inline static ColorStrip<8> strip_;
     inline static Color effectColor_;
     inline static uint16_t effectHue_;
+    inline static uint16_t effectCounter_;
+
     /** Union of effect settings. 
      
         These are both effects that come from the requests (point, bar, centered bar, etc.) and settings for the night light effects. They can share memory as the night-light effects can always be restarted from their initial settings after the special effect ends. 
