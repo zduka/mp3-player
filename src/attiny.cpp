@@ -191,7 +191,7 @@ private:
             // enable power to neopixels, esp8266 and other circuits
             peripheralPowerOn();
             // TODO show the wakeup progressbar *if* not in silent mode
-            neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(ex_.nightLightSettings.maxBrightness));
+            neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness));
             neopixels_.update();
             // TODO silent mode
         }
@@ -425,12 +425,12 @@ private:
             // if the long press counter is not 0, display the countdown bar
             if (longPressCounter_ != 0) {
                 Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.mode());
-                color = color.withBrightness(ex_.nightLightSettings.maxBrightness);
+                color = color.withBrightness(ex_.settings.maxBrightness);
                 strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
                 step = 255;
             } else {
                 Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(ex_.getNextMode(state_.mode()));
-                color = color.withBrightness(ex_.nightLightSettings.maxBrightness);
+                color = color.withBrightness(ex_.settings.maxBrightness);
                 strip_.fill(color);
             }
             // set effect timeout to one, which will immediately trigger revert back to night lights mode as soon as the button is released
@@ -438,8 +438,8 @@ private:
         } else if (effectTimeout_ > 0) {
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
-                effectHue_ = ex_.nightLightSettings.hue;
-                effectColor_ = Color::HSV(effectHue_, 255, ex_.nightLightSettings.maxBrightness);
+                effectHue_ = ex_.nightLightSettings.colorHue();
+                effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
             }
         } else {
             nightLightsTick();
@@ -458,7 +458,7 @@ private:
         // update the hue of the effect color, if in rainbow mode
         if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW) {
             effectHue_ += 1;
-            effectColor_ = ex_.nightLightSettings.color();
+            effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
         }
         switch (ex_.nightLightSettings.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...

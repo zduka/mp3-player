@@ -4,10 +4,15 @@
 
 # SW
 
-- replace stuff with settings
 
 - PINS changed for ATTiny to free TXD port
 - set radio frequency to first radio station upon complete start
+
+- add the following to the settings:
+    - power off timeout
+    - max speaker volume (4bits)
+    - max headphones volume (4bits)
+- read from SD card (some JSON)
 
 # ATTiny
 

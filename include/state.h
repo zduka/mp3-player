@@ -238,89 +238,96 @@ public:
 
 static_assert(sizeof(Measurements) == 4);
 
+/** Player settings. 
+ */
 class Settings {
 public:
 
-    bool mp3Enabled() const {
+    Settings() {
+        raw_ = ENABLE_MP3 | ENABLE_RADIO | ENABLE_WALKIE_TALKIE | ENABLE_NIGHT_LIGHT | RADIO_ENABLE_MANUAL_TUNING;
+    }
+
+    bool mp3Enabled() volatile {
         return raw_ & ENABLE_MP3;
     }
-    bool radioEnabled() const {
+
+    bool radioEnabled() volatile {
         return raw_ & ENABLE_RADIO;
     }
-    bool walkieTalkieEnabled() const {
+
+    bool walkieTalkieEnabled() volatile {
         return raw_ & ENABLE_WALKIE_TALKIE;
     }
-    bool nightLightsEnabled() const {
-        return raw_ & ENABLE_NIGHT_LIGHTS;
+
+    bool NightLightEnabled() volatile {
+        return raw_ & ENABLE_NIGHT_LIGHT;
     }
-    bool radioManualTuningEnabled() const {
+
+    bool radioManualTuningEnabled() volatile {
         return raw_ & RADIO_ENABLE_MANUAL_TUNING;
     }
 
-    bool radioForceMono() const {
+    bool radioForceMono() volatile {
         return raw_ & RADIO_FORCE_MONO;
-
     }
 
-    
-
-    bool lowBattery() const {
-        return raw_ & LOW_BATTERY;
+    void setMp3Enabled(bool value) {
+        raw_ = value ? (raw_ | ENABLE_MP3) : (raw_ & ~ENABLE_MP3);
     }
 
-    bool messageReady() const {
-        return raw_ & MESSAGE_READY;
+    void setRadioEnabled(bool value) {
+        raw_ = value ? (raw_ | ENABLE_RADIO) : (raw_ & ~ENABLE_RADIO);
     }
 
-    bool apActive() const {
-        return raw_ & AP_ACTIVE;
+    void setWalkieTalkieEnabled(bool value) {
+        raw_ = value ? (raw_ | ENABLE_WALKIE_TALKIE) : (raw_ & ~ENABLE_WALKIE_TALKIE);
     }
 
-    bool noWiFi() const {
-        return raw_ & NO_WIFI;
+    void setNightLightEnabled(bool value) {
+        raw_ = value ? (raw_ | ENABLE_NIGHT_LIGHT) : (raw_ & ~ENABLE_NIGHT_LIGHT);
     }
 
-    bool airplaneMode() const {
-        return raw_ & AIRPLANE_MODE;
+    void setRadioManualTuningEnabled(bool value) {
+        raw_ = value ? (raw_ | RADIO_ENABLE_MANUAL_TUNING) : (raw_ & ~RADIO_ENABLE_MANUAL_TUNING);
     }
+
+    void setRadioForceMono(bool value) {
+        raw_ = value ? (raw_ | RADIO_FORCE_MONO) : (raw_ & ~RADIO_FORCE_MONO);
+    }
+
+
+    uint8_t maxBrightness = DEFAULT_BRIGHTNESS; 
 
 private:
     static constexpr uint16_t ENABLE_MP3 = 1 << 0;
     static constexpr uint16_t ENABLE_RADIO = 1 << 1;
     static constexpr uint16_t ENABLE_WALKIE_TALKIE = 1 << 2;
-    static constexpr uint16_t ENABLE_NIGHT_LIGHTS = 1 << 3;
+    static constexpr uint16_t ENABLE_NIGHT_LIGHT = 1 << 3;
     static constexpr uint16_t RADIO_ENABLE_MANUAL_TUNING = 1 << 4;
     static constexpr uint16_t RADIO_FORCE_MONO = 1 << 5;
-
-    static constexpr uint16_t LOW_BATTERY = 1 << 11;
-    static constexpr uint16_t MESSAGE_READY = 1 << 12;
-    static constexpr uint16_t AP_ACTIVE = 1 << 13;
-    static constexpr uint16_t NO_WIFI = 1 << 14;
-    static constexpr uint16_t AIRPLANE_MODE = 1 << 15;
 
     uint16_t raw_;
 
 } __attribute__((packed)); // Settings
 
-static_assert(sizeof(Settings) == 2);
+static_assert(sizeof(Settings) == 3);
 
 
 /** Settings for the MP3 mode. 
  */
 class MP3Settings {
 public:
-    uint8_t numPlaylists;
     uint8_t playlistId;
     uint16_t trackId;
 
     void log() const {
         LOG("MP3 Settings:");
-        LOG("    playlist: %u (total %u)", playlistId, numPlaylists);
+        LOG("    playlist: %u", playlistId);
         LOG("    track: %u", trackId);
     }
 } __attribute__((packed)); // MP3Settings
 
-static_assert(sizeof(MP3Settings) == 4);
+static_assert(sizeof(MP3Settings) == 3);
 
 /** Settings for the FM Radio mode. 
  */
@@ -373,23 +380,21 @@ public:
     static constexpr uint8_t HUE_RAINBOW = 32;
     NightLightEffect effect = NightLightEffect::KnightRider;
     uint8_t hue = HUE_RAINBOW;
-    uint8_t maxBrightness = DEFAULT_BRIGHTNESS; 
-
-    Color color() const {
-        return Color::HSV(static_cast<uint16_t>(hue) << 11, 255, maxBrightness);
-    }
 
     void log() const {
         LOG("Night Light Settings:");
         LOG("    effect: %u", effect);
         LOG("    hue: %u", hue);
-        LOG("    maxBrightness: %u", maxBrightness);
+    }
+
+    uint16_t colorHue() volatile {
+        return (static_cast<uint16_t>(hue) << 11);
     }
 
     
 } __attribute__((packed)); // NightLightSettings
 
-static_assert(sizeof(NightLightSettings) == 3);
+static_assert(sizeof(NightLightSettings) == 2);
 
 /** Active notifications. 
  */
@@ -452,6 +457,7 @@ static_assert(sizeof(Notifications) == 1);
 class ExtendedState {
 public:
     Measurements measurements; 
+    Settings settings;
     MP3Settings mp3Settings;
     RadioSettings radioSettings;
     WalkieTalkieSettings walkieTalkieSettings;
@@ -465,16 +471,27 @@ public:
         This is usually straightforward unless the walkie-talkie mode is disabled. We need to know this inside the extended state as this function is used both by AVR and ESP and the extended state has enough information to determine whether a mode is active or not.
      */
     Mode getNextMode(Mode current) volatile {
+
         switch (current) {
             case Mode::MP3:
-                return Mode::Radio;
+                if (settings.radioEnabled()) 
+                    return Mode::Radio;
             case Mode::Radio:
-                return (walkieTalkieSettings.enabled) ? Mode::WalkieTalkie : Mode::NightLight;
+                if (settings.walkieTalkieEnabled())
+                    return Mode::WalkieTalkie;
             case Mode::WalkieTalkie:
-                return Mode::NightLight;
+                if (settings.NightLightEnabled())
+                    return Mode::NightLight;
             case Mode::NightLight:
             default:
-                return (mp3Settings.numPlaylists > 0) ? Mode::MP3 : Mode::Radio;
+                if (settings.mp3Enabled())
+                    return Mode::MP3;
+                else if (settings.radioEnabled())
+                    return Mode::Radio;
+                else if (settings.walkieTalkieEnabled())
+                    return Mode::WalkieTalkie;
+                else //if (settings.NightLightEnabled()) // ignore this check as we have to return something
+                    return Mode::NightLight;
         }
     }
 
@@ -489,7 +506,7 @@ public:
 
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 29);
+static_assert(sizeof(ExtendedState) == 28);
 
 
 

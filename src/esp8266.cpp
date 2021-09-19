@@ -78,6 +78,7 @@ public:
         // 
         initializePlaylists();
         initializeRadioStations();
+        //initializeSettings();
 
 
         // the extended state could have changed when initializing from the SD card, store it all
@@ -85,6 +86,7 @@ public:
 
         setMode(Mode::Radio);
 
+        LOG("Free heap: %u", ESP.getFreeHeap());
     }
 
     static void loop() {
@@ -146,6 +148,14 @@ private:
             LOG("Error reading from SD card");
             return false;
         }
+    }
+
+    /** Initializes the global settings from the SD card.
+
+         
+     */
+    static void initializeSettings() {
+
     }
     //@}
     
@@ -262,10 +272,10 @@ private:
         switch (state_.mode()) {
             case Mode::MP3: {
                 uint8_t i = ex_.mp3Settings.playlistId + 1;
-                if (i >= ex_.mp3Settings.numPlaylists)
+                if (i >= numPlaylists_)
                     i = 0;
                 setPlaylist(i);
-                send(msg::LightsPoint{i, ex_.mp3Settings.numPlaylists - 1, MODE_COLOR_MP3});
+                send(msg::LightsPoint{i, numPlaylists_ - 1, MODE_COLOR_MP3});
                 break;
             }
             case Mode::Radio: {
@@ -320,17 +330,17 @@ private:
                 setNightLightHue(state_.controlValue());
                 if (ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW)
                     send(msg::LightsColors{
-                        Color::HSV(0 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(1 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(2 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(3 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(4 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(5 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(6 << 13, 255, ex_.nightLightSettings.maxBrightness),
-                        Color::HSV(7 << 13, 255, ex_.nightLightSettings.maxBrightness)
+                        Color::HSV(0 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(1 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(2 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(3 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(4 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(5 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(6 << 13, 255, ex_.settings.maxBrightness),
+                        Color::HSV(7 << 13, 255, ex_.settings.maxBrightness)
                     });
                 else
-                    send(msg::LightsBar{8, 8, ex_.nightLightSettings.color()});
+                    send(msg::LightsBar{8, 8, Color::HSV(ex_.nightLightSettings.colorHue(), 255, ex_.settings.maxBrightness)});
                 break;
             }
             default:
@@ -479,12 +489,12 @@ private:
         if (f) {
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
-                ex_.mp3Settings.numPlaylists = 0;
+                numPlaylists_ = 0;
                 for (JsonVariant playlist : json.as<JsonArray>()) {
                     uint8_t id = playlist["id"];
                     uint16_t numTracks = initializePlaylistTracks(id);
                     if (numTracks > 0) {
-                        playlists_[ex_.mp3Settings.numPlaylists++] = PlaylistInfo{id, numTracks};
+                        playlists_[numPlaylists_++] = PlaylistInfo{id, numTracks};
                         LOG("  %u: %s (%u tracks)",id, playlist["name"].as<char const *>(), numTracks);
                     } else {
                         LOG("  %u: %s (no tracks found, skipping)", id, playlist["name"].as<char const *>());
@@ -497,7 +507,9 @@ private:
         } else {
             LOG("player/playlists.json not found");
         }
-        // TODO disable mp3 mode if no playlists are found
+        // disable mp3 mode if no playlists are found
+        if (numPlaylists_ == 0)
+            ex_.settings.setMp3Enabled(false);
     }
 
     /** Searches the playlist to determine the number of tracks it contains. 
@@ -626,6 +638,7 @@ private:
     static inline AudioOutputI2S i2s_;
     static inline AudioFileSourceSD mp3File_;
     static inline PlaylistInfo playlists_[8];
+    static inline uint8_t numPlaylists_ = 0;
 
     static inline File currentPlaylist_;
 
@@ -659,7 +672,7 @@ private:
 
     static void radioPlay() {
         radio_.init();
-        radio_.setMono(ex_.radioSettings.forceMono || ! state_.headphonesConnected());
+        radio_.setMono(ex_.settings.radioForceMono() || ! state_.headphonesConnected());
         radio_.setVolume(state_.volumeValue());
         setRadioFrequency(ex_.radioSettings.frequency);
         setControlRange(ex_.radioSettings.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
