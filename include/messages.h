@@ -43,6 +43,17 @@ namespace msg {
         }
     );
 
+    /** Turns the player's idle state on/off explicitly.
+     
+        
+     */
+    MESSAGE(SetIdle,
+        bool idle;
+        SetIdle(bool value):
+            idle{idle} {
+        }
+    );
+
     MESSAGE(SetControlRange,
         uint16_t value;
         uint16_t max;

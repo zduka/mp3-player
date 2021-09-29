@@ -368,8 +368,13 @@ private:
         switch (state_.mode()) {
             case Mode::MP3:
             case Mode::Radio:
-            case Mode::WalkieTalkie:
             case Mode::NightLight:
+                if (state_.idle())
+                    play();
+                else
+                    pause();
+                break;
+            case Mode::WalkieTalkie:
             default:
                 break;
         }
@@ -429,14 +434,18 @@ private:
         LOG("Setting mode %u", mode);
         if (state_.mode() == mode)
             return;
-        pause();
+        pause(/* changeIdle */ false);
         state_.setMode(mode);
         send(msg::SetMode(mode));
-        play();
+        play(/* changeIdle */ false);
     }
 
-    static void play() {
+    static void play(bool changeIdle = true) {
         LOG("Play");
+        if (changeIdle) {
+            state_.setIdle(false);
+            send(msg::SetIdle{false});
+        }
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Play();
@@ -455,8 +464,12 @@ private:
 
     }
 
-    static void pause() {
+    static void pause(bool changeIdle = true) {
         LOG("Pause");
+        if (changeIdle) {
+            state_.setIdle(true);
+            send(msg::SetIdle{true});
+        }
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Pause();

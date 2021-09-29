@@ -150,27 +150,55 @@ public:
             events_ &= ~DOUBLE_LONG_PRESS_MASK;
     }
 
-    /** Returns the current mode of the player. 
-     
-        When ESP starts, this is also the last mode that was used.
-     */
-    Mode mode() volatile {
-        return static_cast<Mode>((events_ & MODE_MASK) >> 5);
-    }
-
-    void setMode(Mode value) volatile {
-        events_ &= ~MODE_MASK;
-        events_ |= (static_cast<uint8_t>(value) << 5) & MODE_MASK;
-    }
-
 private:
     static constexpr uint8_t CONTROL_PRESS_MASK = 1 << 0;
     static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 1 << 1;
     static constexpr uint8_t VOLUME_PRESS_MASK = 1 << 2;
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 1 << 3;
     static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 1 << 4;
-    static constexpr uint8_t MODE_MASK = 7 << 5;
     uint8_t events_;
+//@}
+
+/** \name Mode 
+ */
+//@{
+
+public:
+    /** Returns the current mode of the player. 
+     
+        When ESP starts, this is also the last mode that was used.
+     */
+    Mode mode() const volatile {
+        return static_cast<Mode>(mode_ & MODE_MASK);
+    }
+
+    void setMode(Mode value) volatile {
+        mode_ &= ~MODE_MASK;
+        mode_ |= (static_cast<uint8_t>(value) << 5) & MODE_MASK;
+    }
+
+    /** Returns true if the player is idle. 
+     
+        This means no playback / recording is happening. 
+     */
+    bool idle() const volatile {
+        return mode_ & IDLE_MASK;
+    }
+
+    void setIdle(bool value) volatile {
+        if (value) 
+            mode_ |= IDLE_MASK;
+        else
+            mode_ &= ~IDLE_MASK;
+    }
+
+private:
+    static constexpr uint8_t MODE_MASK = 7;
+    static constexpr uint8_t IDLE_MASK = 8;
+
+    uint8_t mode_;
+
+
 //@}
 
 /** \name Control and Volume knob values. 
@@ -211,7 +239,7 @@ private:
 //@}
 } __attribute__((packed)); // State 
 
-static_assert(sizeof(State) == 4);
+static_assert(sizeof(State) == 5);
 
 /** Contains information about the temperature and voltage measurements done by AVR. 
  */
