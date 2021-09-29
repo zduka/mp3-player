@@ -438,7 +438,7 @@ private:
         } else if (effectTimeout_ > 0) {
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
-                effectHue_ = ex_.nightLightSettings.colorHue();
+                effectHue_ = ex_.nightLight.colorHue();
                 effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
             }
         } else {
@@ -456,11 +456,11 @@ private:
      */
     static void nightLightsTick() {
         // update the hue of the effect color, if in rainbow mode
-        if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW) {
+        if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLight.hue == NightLightState::HUE_RAINBOW) {
             effectHue_ += 1;
             effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
         }
-        switch (ex_.nightLightSettings.effect) {
+        switch (ex_.nightLight.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...
             case NightLightEffect::Off:
             default:
@@ -574,13 +574,12 @@ private:
         } knightRider;
 
     } effect_;
+
     /** Timeout in ticks for the requested effect to remain visible. 
      
         After the timeout reaches 0, the night-light mode will be reinstated. 
      */
     inline static uint8_t effectTimeout_;
-    
-
 //@}
 
 /** \name Communication with ESP8266
@@ -742,12 +741,7 @@ private:
 
     inline static constexpr uint8_t I2C_TRANSMISSIBLE_DATA_SIZE =
         sizeof(State) +
-        sizeof(Measurements) +
-        sizeof(MP3Settings) +
-        sizeof(RadioSettings) +
-        sizeof(WalkieTalkieSettings) +
-        sizeof(NightLightSettings) +
-        sizeof(Notifications) +
+        sizeof(ExtendedState) + 
         sizeof(DateTime) +
         sizeof(DateTime);
     inline static volatile State state_;

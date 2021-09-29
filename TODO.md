@@ -24,6 +24,7 @@
 
 # ESP
 
+- check heap and health and reset when necessary
 
 - only one channel for the Walkie-Talkie bot 
 - approaching memory limit for ESP...

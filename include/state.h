@@ -313,53 +313,53 @@ private:
 static_assert(sizeof(Settings) == 3);
 
 
-/** Settings for the MP3 mode. 
+/** State for the MP3 mode. 
  */
-class MP3Settings {
+class MP3State {
 public:
     uint8_t playlistId;
     uint16_t trackId;
 
     void log() const {
-        LOG("MP3 Settings:");
+        LOG("MP3 State:");
         LOG("    playlist: %u", playlistId);
         LOG("    track: %u", trackId);
     }
-} __attribute__((packed)); // MP3Settings
+} __attribute__((packed)); // MP3State
 
-static_assert(sizeof(MP3Settings) == 3);
+static_assert(sizeof(MP3State) == 3);
 
-/** Settings for the FM Radio mode. 
+/** State for the FM Radio mode. 
  */
-class RadioSettings {
+class RadioState {
 public:
     uint8_t stationId;
     uint16_t frequency;
 
     void log() const {
-        LOG("Radio Settings:");
+        LOG("Radio State:");
         LOG("    stationId: %u", stationId);
         LOG("    frequency: %u", frequency);
     }
 
-} __attribute__((packed)); // RadioSettings
+} __attribute__((packed)); // RadioState
 
-static_assert(sizeof(RadioSettings) == 3);
+static_assert(sizeof(RadioState) == 3);
 
-/** Settings for the Walkie-Talkie mode. 
+/** State of the Walkie-Talkie mode. 
  */
-class WalkieTalkieSettings {
+class WalkieTalkieState {
 public:
     uint32_t updateId;
 
     void log() const {
-        LOG("Walkie-Talkie Settings:");
+        LOG("Walkie-Talkie State:");
         LOG("    updateId: %lli", updateId);
     }
 
-} __attribute__((packed)); // WalkieTalkieSettings
+} __attribute__((packed)); // WalkieTalkieState
 
-static_assert(sizeof(WalkieTalkieSettings) == 4);
+static_assert(sizeof(WalkieTalkieState) == 4);
 
 /** The various night light effects the player supports. 
  */
@@ -373,16 +373,16 @@ enum class NightLightEffect : uint8_t {
     SolidColor,
 }; // NightLightEffect
 
-/** Settings for the night light mode. 
+/** State of the night light mode. 
  */
-class NightLightSettings {
+class NightLightState {
 public:
     static constexpr uint8_t HUE_RAINBOW = 32;
     NightLightEffect effect = NightLightEffect::KnightRider;
     uint8_t hue = HUE_RAINBOW;
 
     void log() const {
-        LOG("Night Light Settings:");
+        LOG("Night Light State:");
         LOG("    effect: %u", effect);
         LOG("    hue: %u", hue);
     }
@@ -392,9 +392,9 @@ public:
     }
 
     
-} __attribute__((packed)); // NightLightSettings
+} __attribute__((packed)); // NightLightState
 
-static_assert(sizeof(NightLightSettings) == 2);
+static_assert(sizeof(NightLightState) == 2);
 
 /** Active notifications. 
  */
@@ -458,10 +458,10 @@ class ExtendedState {
 public:
     Measurements measurements; 
     Settings settings;
-    MP3Settings mp3Settings;
-    RadioSettings radioSettings;
-    WalkieTalkieSettings walkieTalkieSettings;
-    NightLightSettings nightLightSettings;
+    MP3State mp3;
+    RadioState radio;
+    WalkieTalkieState walkieTalkie;
+    NightLightState nightLight;
     Notifications notifications;
     DateTime time;
     DateTime alarm;
@@ -497,10 +497,10 @@ public:
 
     void log() const {
         measurements.log();
-        mp3Settings.log();
-        radioSettings.log();
-        walkieTalkieSettings.log();
-        nightLightSettings.log();
+        mp3.log();
+        radio.log();
+        walkieTalkie.log();
+        nightLight.log();
         notifications.log();
     }
 

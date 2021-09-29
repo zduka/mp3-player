@@ -271,7 +271,7 @@ private:
         LOG("Control press");
         switch (state_.mode()) {
             case Mode::MP3: {
-                uint8_t i = ex_.mp3Settings.playlistId + 1;
+                uint8_t i = ex_.mp3.playlistId + 1;
                 if (i >= numPlaylists_)
                     i = 0;
                 setPlaylist(i);
@@ -279,7 +279,7 @@ private:
                 break;
             }
             case Mode::Radio: {
-                uint8_t i = ex_.radioSettings.stationId + 1;
+                uint8_t i = ex_.radio.stationId + 1;
                 if (i >= numRadioStations_)
                     i = 0;
                 setRadioStation(i);
@@ -290,7 +290,7 @@ private:
                 break;
             }
             case Mode::NightLight: {
-                uint8_t i = static_cast<uint8_t>(ex_.nightLightSettings.effect) + 1;
+                uint8_t i = static_cast<uint8_t>(ex_.nightLight.effect) + 1;
                 if (i == 7)
                     i = 0;
                 setNightLightEffect(static_cast<NightLightEffect>(i));
@@ -317,7 +317,7 @@ private:
         LOG("Control: %u", state_.controlValue());
         switch (state_.mode()) {
             case Mode::MP3:
-                send(msg::LightsPoint{state_.controlValue(), ex_.mp3Settings.playlistId, MODE_COLOR_MP3});
+                send(msg::LightsPoint{state_.controlValue(), ex_.mp3.playlistId, MODE_COLOR_MP3});
                 setTrack(state_.controlValue());
                 break;
             case Mode::Radio:
@@ -328,7 +328,7 @@ private:
                 break;
             case Mode::NightLight: {
                 setNightLightHue(state_.controlValue());
-                if (ex_.nightLightSettings.hue == NightLightSettings::HUE_RAINBOW)
+                if (ex_.nightLight.hue == NightLightState::HUE_RAINBOW)
                     send(msg::LightsColors{
                         Color::HSV(0 << 13, 255, ex_.settings.maxBrightness),
                         Color::HSV(1 << 13, 255, ex_.settings.maxBrightness),
@@ -340,7 +340,7 @@ private:
                         Color::HSV(7 << 13, 255, ex_.settings.maxBrightness)
                     });
                 else
-                    send(msg::LightsBar{8, 8, Color::HSV(ex_.nightLightSettings.colorHue(), 255, ex_.settings.maxBrightness)});
+                    send(msg::LightsBar{8, 8, Color::HSV(ex_.nightLight.colorHue(), 255, ex_.settings.maxBrightness)});
                 break;
             }
             default:
@@ -539,7 +539,7 @@ private:
     }
 
     static void mp3Play() {
-        setPlaylist(ex_.mp3Settings.playlistId);
+        setPlaylist(ex_.mp3.playlistId);
     }
 
     static void mp3Pause() {
@@ -567,8 +567,8 @@ private:
         currentPlaylist_.close();
         char playlistDir[2] = { playlists_[index].id + '0', 0 };
         currentPlaylist_ = SD.open(playlistDir);
-        ex_.mp3Settings.playlistId = index;
-        ex_.mp3Settings.trackId = 0;
+        ex_.mp3.playlistId = index;
+        ex_.mp3.trackId = 0;
         setControlRange(0, playlists_[index].numTracks);
         setTrack(0);
     }
@@ -577,7 +577,7 @@ private:
         // pause current playback if any
         mp3Pause();
         // determune whether we have to start from the beginning, or can go forward from current track
-        uint16_t nextTrack = ex_.mp3Settings.trackId + 1;
+        uint16_t nextTrack = ex_.mp3.trackId + 1;
         if (index < nextTrack) {
             currentPlaylist_.rewindDirectory();
             nextTrack = 0;
@@ -590,7 +590,7 @@ private:
             if (EndsWith(f.name(), ".mp3")) {
                 if (index == nextTrack) {
                     char  filename[16]; // this should be plenty for 8.3 filename
-                    filename[0] = playlists_[ex_.mp3Settings.playlistId].id + '0';
+                    filename[0] = playlists_[ex_.mp3.playlistId].id + '0';
                     filename[1] = '/';
                     memcpy(filename + 2, f.name(), strlen(f.name()) + 1);
                     f.close();
@@ -598,8 +598,8 @@ private:
                     i2s_.SetGain(state_.volumeValue() / 15);
                     mp3_.begin(& mp3File_, & i2s_);
                     LOG("Track %u, file: %s", index, filename);
-                    ex_.mp3Settings.trackId = index;
-                    setExtendedState(ex_.mp3Settings);
+                    ex_.mp3.trackId = index;
+                    setExtendedState(ex_.mp3);
                     return;
                 } else {
                     ++nextTrack;
@@ -612,8 +612,8 @@ private:
     }
 
     static void playNextTrack() {
-        if (ex_.mp3Settings.trackId + 1 < playlists_[ex_.mp3Settings.playlistId].numTracks) {
-            setTrack(ex_.mp3Settings.trackId + 1);
+        if (ex_.mp3.trackId + 1 < playlists_[ex_.mp3.playlistId].numTracks) {
+            setTrack(ex_.mp3.trackId + 1);
         } else {
             pause();
         }
@@ -674,8 +674,8 @@ private:
         radio_.init();
         radio_.setMono(ex_.settings.radioForceMono() || ! state_.headphonesConnected());
         radio_.setVolume(state_.volumeValue());
-        setRadioFrequency(ex_.radioSettings.frequency);
-        setControlRange(ex_.radioSettings.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+        setRadioFrequency(ex_.radio.frequency);
+        setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
     }
 
     static void radioPause() {
@@ -691,20 +691,20 @@ private:
     static void setRadioFrequency(uint16_t mhzx10) {
         LOG("Radio frequency: %u", mhzx10);
         if (state_.mode() == Mode::Radio) {
-            ex_.radioSettings.frequency = mhzx10;
+            ex_.radio.frequency = mhzx10;
             radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
-            setExtendedState(ex_.radioSettings);
+            setExtendedState(ex_.radio);
         }
     }
 
     static void setRadioStation(uint8_t index) {
         LOG("Radio station: %u", index);
         if (state_.mode() == Mode::Radio) {
-            ex_.radioSettings.stationId = index;
-            ex_.radioSettings.frequency = radioStations_[index];
-            radio_.setBandFrequency(RADIO_BAND_FM, ex_.radioSettings.frequency * 10);
-            setExtendedState(ex_.radioSettings);
-            setControlRange(ex_.radioSettings.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+            ex_.radio.stationId = index;
+            ex_.radio.frequency = radioStations_[index];
+            radio_.setBandFrequency(RADIO_BAND_FM, ex_.radio.frequency * 10);
+            setExtendedState(ex_.radio);
+            setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
         }
     }
 
@@ -767,7 +767,7 @@ private:
     //@{
 
     static void nightLightPlay() {
-        setControlRange(ex_.nightLightSettings.hue, NightLightSettings::HUE_RAINBOW + 1);
+        setControlRange(ex_.nightLight.hue, NightLightState::HUE_RAINBOW + 1);
         // TODO play lullaby? 
     }
 
@@ -777,14 +777,14 @@ private:
 
     static void setNightLightEffect(NightLightEffect effect) {
         LOG("Night light effect: %u", static_cast<uint8_t>(effect));
-        ex_.nightLightSettings.effect = effect;
-        setExtendedState(ex_.nightLightSettings);
+        ex_.nightLight.effect = effect;
+        setExtendedState(ex_.nightLight);
     }
 
     static void setNightLightHue(uint8_t hue) {
         LOG("Night light hue: %u", hue);
-        ex_.nightLightSettings.hue = hue;
-        setExtendedState(ex_.nightLightSettings);
+        ex_.nightLight.hue = hue;
+        setExtendedState(ex_.nightLight);
     }
 
     //@}
