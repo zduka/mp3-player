@@ -5,6 +5,8 @@
 
 #define BATTERY_CRITICAL_VCC 340
 
+#define DEFAULT_VOLUME 5
+
 
 /** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 
  

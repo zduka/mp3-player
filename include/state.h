@@ -174,7 +174,7 @@ public:
 
     void setMode(Mode value) volatile {
         mode_ &= ~MODE_MASK;
-        mode_ |= (static_cast<uint8_t>(value) << 5) & MODE_MASK;
+        mode_ |= static_cast<uint8_t>(value) & MODE_MASK;
     }
 
     /** Returns true if the player is idle. 
@@ -406,7 +406,7 @@ enum class NightLightEffect : uint8_t {
 class NightLightState {
 public:
     static constexpr uint8_t HUE_RAINBOW = 32;
-    NightLightEffect effect = NightLightEffect::KnightRider;
+    NightLightEffect effect = NightLightEffect::AudioLights;
     uint8_t hue = HUE_RAINBOW;
 
     void log() const {

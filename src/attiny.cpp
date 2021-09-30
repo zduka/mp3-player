@@ -77,6 +77,8 @@ public:
         // set sleep to full power down and enable sleep feature
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
         sleep_enable();     
+        // because this is poweron, delay a bit so that all voltages in the circuit can stabilize a bit, 200ms should do the trick
+        delay(200); 
         
         initializeRTC();
 

@@ -681,6 +681,9 @@ private:
         } else {
             LOG("  radio/stations.json file not found");
         }
+        // if the current frequency is out of bounds, set it to the frequency of the first station, which just means that when invalid state, default to the first station
+        if (ex_.radio.frequency < RADIO_FREQUENCY_MIN || ex_.radio.frequency > RADIO_FREQUENCY_MAX)
+            ex_.radio.frequency = radioStations_[0];
     }
 
     static void radioPlay() {
