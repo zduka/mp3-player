@@ -10,6 +10,7 @@
 #include <util/delay.h>
 #include <util/atomic.h>
 
+#include "config.h"
 #include "state.h"
 #include "messages.h"
 #include "attiny/inputs.h"
@@ -50,20 +51,20 @@ extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
+#define AUDIO_SRC_ESP LOW
+#define AUDIO_SRC_RADIO HIGH
 
-#define IRQ_RESPONSE_TIMEOUT 64
-#define AVR_I2C_ADDRESS 67
-#define BATTERY_CRITICAL_VCC 340
-/** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 
- 
-    Currently set to 2 seconds
- */
-#define POWER_ON_PRESS_TICKS 128
-#define BUTTON_LONG_PRESS_TICKS 128
+
+
+
+#define NOTIFICATION_LOW_BATTERY_COLOR Color::Red()
+#define NOTIFICATION_NEW_MESSAGE_COLOR Color::Green()
+#define NOTIFICATION_WIFI_CONNECTING_COLOR Color::Blue()
+#define NOTIFICATION_WIFI_AP_COLOR Color::Cyan()
 
 class Player {
 public:
-    static void Initialize() {
+    static void initialize() {
         // disable power to other systems
         pinMode(DCDC_PWR, INPUT);
         // enable the AVR_IRQ as input so that we can observe if ESP wants something
@@ -77,39 +78,41 @@ public:
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
         sleep_enable();     
         
-        InitializeRTC();
+        initializeRTC();
 
         // Initialize ADC0
-        InitializeMeasurementsADC();
+        initializeMeasurementsADC();
 
-        InitializeAudioCapture();
+        initializeAudioCapture();
         
 
 
         // enable control interrupts for buttons
-        ControlBtn_.setInterrupt(ControlButtonChanged);
-        VolumeBtn_.setInterrupt(VolumeButtonChanged);
+        controlBtn_.setInterrupt(controlButtonChanged);
+        volumeBtn_.setInterrupt(volumeButtonChanged);
         // initialize comms
-        InitializeI2C();
+        initializeI2C();
 
 
-
-        Wakeup();
+        wakeup();
     }
 
-    static void Loop() {
-        if (Status_.tick) {
+    static void loop() {
+        if (status_.tick) {
             // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
-            if (Status_.irq && IrqCountdown_ == 0)
-                ResetESP();
-
+            if (status_.irq && irqCountdown_ == 0)
+                resetESP();
+            // make sure we have a light show
+            lightsTick();
             cli();
-            Status_.tick = false;
+            status_.tick = false;
             sei();
         }
-        if (Status_.i2cRxReady)
-            ProcessCommand();
-
+        if (status_.i2cRxReady)
+            processCommand();
+        // if the measurement (headphones, voltage, temp, ...) is ready, measure
+        if (ADC0.INTFLAGS & ADC_RESRDY_bm)
+            measurementsADCReady();
     }
 
 private:
@@ -121,7 +124,7 @@ private:
     /** Initializes the real-time clock. 
      
      */
-    static void InitializeRTC() {
+    static void initializeRTC() {
         // configure the real time clock
         RTC.CLKSEL = RTC_CLKSEL_INT1K_gc; // select internal oscillator divided by 32
         RTC.PITINTCTRL |= RTC_PI_bm; // enable the interrupt
@@ -129,7 +132,7 @@ private:
 
     /** Initializes ADC0 used to take voltage & temperature measurements. 
      */
-    static void InitializeMeasurementsADC() {
+    static void initializeMeasurementsADC() {
         // setup ADC voltage references to 1.1V (internal)
         VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
         VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
@@ -144,30 +147,30 @@ private:
 
     /** Puts the AVR to sleep. 
      */
-    static void Sleep() {
+    static void sleep() {
         do { // wrapped in a loop to account to allow wakeup to re-enter sleep immediately (such as when low volatge, etc.)
             // disable rotary encoder interrupts so that they do not wake us from sleep
-            Control_.clearInterrupt();
-            Volume_.clearInterrupt();
+            control_.clearInterrupt();
+            volume_.clearInterrupt();
             // turn off neopixels and esp
-            PeripheralPowerOff();
+            peripheralPowerOff();
             // enable RTC interrupt every second so that the time can be kept
             while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
             RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
             // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
-            Status_.sleep = true;
-            while (Status_.sleep) {
+            status_.sleep = true;
+            while (status_.sleep) {
                 sleep_cpu();
             }
             // clear the button events that led to the wakeup
             // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
-            State_.clearEvents();
+            state_.clearEvents();
             // if we are not longer sleeping, wakeup
-            Wakeup();
-        } while (Status_.sleep);
+            wakeup();
+        } while (status_.sleep);
     }
 
-    static void Wakeup() {
+    static void wakeup() {
         // enable RTC interrupt every 1/64th of a second
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
@@ -177,16 +180,19 @@ private:
         // wait for the voltage measurement to finish
         while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
         }
-        if (Measurements_.vcc <= BATTERY_CRITICAL_VCC) {
-            CriticalBatteryWarning();
-            Status_.sleep = true;
+        measurementsADCReady();
+        if (ex_.measurements.vcc <= BATTERY_CRITICAL_VCC) {
+            criticalBatteryWarning();
+            status_.sleep = true;
         } else {
             // enable interrupts for rotary encoders
-            Control_.setInterrupt(ControlKnobChanged);
-            Volume_.setInterrupt(VolumeKnobChanged);
+            control_.setInterrupt(controlKnobChanged);
+            volume_.setInterrupt(volumeKnobChanged);
             // enable power to neopixels, esp8266 and other circuits
-            PeripheralPowerOn();
+            peripheralPowerOn();
             // TODO show the wakeup progressbar *if* not in silent mode
+            neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness));
+            neopixels_.update();
             // TODO silent mode
         }
     }
@@ -195,7 +201,7 @@ private:
      
         Powers on peripherals with both SDA and SCL held low, which puts ESP immediately in deep sleep and then flashes the full LED strip red three times. 
      */
-    static void CriticalBatteryWarning(uint8_t brightness = 255) {
+    static void criticalBatteryWarning(uint8_t brightness = 255) {
         // disable I2C
         TWI0.SCTRLA = 0;
         TWI0.MCTRLA = 0;
@@ -205,36 +211,36 @@ private:
         digitalWrite(SDA, LOW);
         digitalWrite(SCL, LOW);
         // turn on peripheral voltage & flash the strip
-        PeripheralPowerOn();
-        Neopixels_.fill(Color::Red().withBrightness(brightness));
-        Neopixels_.update();
+        peripheralPowerOn();
+        neopixels_.fill(Color::Red().withBrightness(brightness));
+        neopixels_.update();
         delay(50);
-        Neopixels_.fill(Color::Black());
-        Neopixels_.update();
+        neopixels_.fill(Color::Black());
+        neopixels_.update();
         delay(100);
-        Neopixels_.fill(Color::Red().withBrightness(brightness));
-        Neopixels_.update();
+        neopixels_.fill(Color::Red().withBrightness(brightness));
+        neopixels_.update();
         delay(50);
-        Neopixels_.fill(Color::Black());
-        Neopixels_.update();
+        neopixels_.fill(Color::Black());
+        neopixels_.update();
         delay(100);
-        Neopixels_.fill(Color::Red().withBrightness(brightness));
-        Neopixels_.update();
+        neopixels_.fill(Color::Red().withBrightness(brightness));
+        neopixels_.update();
         delay(50);
         // this also makes the strip look black;)
-        PeripheralPowerOff(); 
+        peripheralPowerOff(); 
         // initialize I2C back so that we are ready once the power stabilizes
-        InitializeI2C();
+        initializeI2C();
     }
 
-    static void PeripheralPowerOn() {
+    static void peripheralPowerOn() {
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         // add a delay so that the capacitor can be charged and voltage stabilized
         delay(50);
     }
 
-    static void PeripheralPowerOff() {
+    static void peripheralPowerOff() {
         pinMode(DCDC_PWR, INPUT);
     }
 
@@ -242,7 +248,7 @@ private:
      
         Sets the appropriate flags in state. 
      */
-    static void MeasurementsADCReady() {
+    static void measurementsADCReady() {
         uint16_t value = ADC0.RES / 64;
         switch (ADC0.MUXPOS) {
             case ADC_MUXPOS_INTREF_gc: { // VCC Sense
@@ -250,7 +256,7 @@ private:
                 value = 110 * 512 / value;
                 value = value * 2;
                 cli();
-                Measurements_.vcc = value;
+                ex_.measurements.vcc = value;
                 sei();
                 // switch the ADC to be ready to measure the temperature
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
@@ -260,7 +266,7 @@ private:
             case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
                 // TODO calculate the value properly
                 cli();
-                Measurements_.temp = value;
+                ex_.measurements.temp = value;
                 sei();
                 // fallthrough to the default where we set the next measurement to be that of input voltage
             }
@@ -289,126 +295,291 @@ private:
         During normal operation, short and long press of a button, or a double long press of both buttons are detected and raised as events.   
      */
     //@{
-    static void ControlButtonChanged() {
-        ControlBtn_.poll();
-        if (Status_.sleep) {
-            CheckButtonWakeup(ControlBtn_.pressed());
-        } else if (ControlBtn_.pressed()) {
-            LongPressCounter_ = BUTTON_LONG_PRESS_TICKS;
-            State_.setControlButtonDown();
-            SetIrq();
-        } else if (State_.controlButtonDown()) { // released & previous press recorded
-            State_.setControlButtonDown(false);
-            // if not a long press, emit short press, reset volume down so that if down & later released, no event will be fired
-            if (LongPressCounter_ > 0) {
-                State_.setVolumeButtonDown(false);
-                State_.setControlButtonPress();
-            // if this is long press and volume is not down, emit control button long press 
-            } else if (! State_.volumeButtonDown()) {
-                State_.setControlButtonLongPress();
-            // if volume is down as well, this is double button long press, emit & reset volume down so that it's up won't trigger any other event
+    static void controlButtonChanged() {
+        controlBtn_.poll();
+        if (status_.sleep) {
+            checkButtonWakeup(controlBtn_.pressed());
+        } else if (controlBtn_.pressed()) {
+            longPressCounter_ = BUTTON_LONG_PRESS_TICKS;
+            state_.setControlButtonDown();
+            setIrq();
+        } else if (state_.controlButtonDown()) { // released & previous press recorded
+            state_.setControlButtonDown(false);
+            // if the other button is down, make sure its subsequent release will not trigger anything, emit long double press if long press, or ignore short press
+            if (state_.volumeButtonDown()) {
+                state_.setVolumeButtonDown(false); // make sure the other button's release won't trigger anything
+                if (longPressCounter_ == 0)
+                    state_.setDoubleButtonLongPress();
+            // otherwise emit long or short press accordingly
+            } else if (longPressCounter_ == 0) {
+                state_.setControlButtonLongPress();
             } else {
-                State_.setVolumeButtonDown(false);
-                State_.setDoubleButtonLongPress();
+                state_.setControlButtonPress();
             }
-            LongPressCounter_ = 0;
-            SetIrq();
+            setIrq();
         }
     }
 
-    static void VolumeButtonChanged() {
-        VolumeBtn_.poll();
+    static void volumeButtonChanged() {
+        volumeBtn_.poll();
         // if we are sleeping check if we should wake up 
-        if (Status_.sleep) {
-            CheckButtonWakeup(VolumeBtn_.pressed());
+        if (status_.sleep) {
+            checkButtonWakeup(volumeBtn_.pressed());
         // if this is a press, reset the long press counter and update the state
-        } else if (VolumeBtn_.pressed()) {
-            LongPressCounter_ = BUTTON_LONG_PRESS_TICKS;
-            State_.setVolumeButtonDown();
-            SetIrq();
-        } else if (State_.volumeButtonDown()) { // released & previous press recorded
-            State_.setVolumeButtonDown(false);
-            // if not a long press, emit short press, reset control down so that if down & later released, no event will be fired
-            if (LongPressCounter_ > 0) {
-                State_.setControlButtonDown(false);
-                State_.setVolumeButtonPress();
-            // if this is long press and control is not down, emit volume button long press 
-            } else if (! State_.controlButtonDown()) {
-                State_.setVolumeButtonLongPress();
-            // if control is down as well, this is double button long press, emit & reset control down so that it's up won't trigger any other event
+        } else if (volumeBtn_.pressed()) {
+            longPressCounter_ = BUTTON_LONG_PRESS_TICKS;
+            state_.setVolumeButtonDown();
+            setIrq();
+        } else if (state_.volumeButtonDown()) { // released & previous press recorded
+            state_.setVolumeButtonDown(false);
+            // if the other button is down, make sure its subsequent release will not trigger anything, emit long double press if long press, or ignore short press
+            if (state_.controlButtonDown()) {
+                state_.setControlButtonDown(false); // make sure the other button's release won't trigger anything
+                if (longPressCounter_ == 0)
+                    state_.setDoubleButtonLongPress();
+            // otherwise emit long or short press accordingly
+            } else if (longPressCounter_ == 0) {
+                state_.setVolumeButtonLongPress();
             } else {
-                State_.setControlButtonDown(false);
-                State_.setDoubleButtonLongPress();
+                state_.setVolumeButtonPress();
             }
-            LongPressCounter_ = 0;
-            SetIrq();
+            setIrq();
         }
     }
 
-    static void CheckButtonWakeup(bool down) {
+    static void checkButtonWakeup(bool down) {
         if (down) {
-            PowerOnCountdown_ = POWER_ON_PRESS_TICKS << 16; // from 1/64th of a second to 1/1024th
-            PowerOnRTCValue_ = RTC.CNT; 
-        } else if (PowerOnCountdown_ == 0) {
-            Status_.sleep = false;
+            powerOnCountdown_ = POWER_ON_PRESS_TICKS << 16; // from 1/64th of a second to 1/1024th
+            powerOnRTCValue_ = RTC.CNT; 
+        } else if (powerOnCountdown_ == 0) {
+            status_.sleep = false;
         }
     }
     //@}
-
 
     /** \name Knob value changes [ISR]
      
         Corresponds to the the change of rotation encoders' position. Runs in ISR.
      */
     //@{
-    static void ControlKnobChanged() {
-        Control_.poll();
-        State_.setControlValue(Control_.value());
-        SetIrq();
+    static void controlKnobChanged() {
+        control_.poll();
+        state_.setControlValue(control_.value());
+        setIrq();
     }
 
-    static void VolumeKnobChanged() {
-        Volume_.poll();
-        State_.setVolumeValue(Volume_.value());
-        SetIrq();
+    static void volumeKnobChanged() {
+        volume_.poll();
+        state_.setVolumeValue(volume_.value());
+        setIrq();
     }
     //@}
 
-    inline static RotaryEncoder Control_{CTRL_A, CTRL_B, 256};
-    inline static RotaryEncoder Volume_{VOL_A, VOL_B, 16};
-    inline static Button ControlBtn_{CTRL_BTN};
-    inline static Button VolumeBtn_{VOL_BTN};
+    inline static RotaryEncoder control_{CTRL_A, CTRL_B, 256};
+    inline static RotaryEncoder volume_{VOL_A, VOL_B, 16};
+    inline static Button controlBtn_{CTRL_BTN};
+    inline static Button volumeBtn_{VOL_BTN};
 
 //@}
 
 /** \name RGB LED Light Strip
  
-    The strip displays various effects and notifications. For better visibility the notifications don't overlay themselves over the effects, but block the neopixels for themselves. The following notifications are supported:
+    The strip displays the following information:
 
-    - low battery
-    - waiting message 
-    
+    Special Effects
+
+    Night Light Effects
+
+    These are the default lights. They occupy the entire strip if no notifications are currently active, or are reduced to the inner 6 LEDs if there are any notifications available. 
+
+    Notifications 
+
+    Notifications are displayed only over night lights, or when idle. They take over the leftmost and rightmost LEDs for their own purposes and display as short pulses of various colors. The following notifications are supported:
+
+
  */
 //@{
+
+    static Color getModeColor(Mode mode) {
+        switch (mode) {
+            case Mode::MP3:
+                return MODE_COLOR_MP3;
+            case Mode::Radio:
+                return MODE_COLOR_RADIO;
+            case Mode::WalkieTalkie:
+                return MODE_COLOR_WALKIE_TALKIE;
+            case Mode::NightLight:
+                return MODE_COLOR_NIGHT_LIGHT;
+            default:
+                return DEFAULT_COLOR;
+        }
+    }
+
+    /** A tick of the lights system. 
+     
+        Called by the main thread every 1/64th of a second. Updates the LED strip according to the current state. Note that if 
+     */
+    static void lightsTick() {
+        uint8_t step = 1;
+        if (state_.controlButtonDown() && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
+            // if the long press counter is not 0, display the countdown bar
+            if (longPressCounter_ != 0) {
+                Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.mode());
+                color = color.withBrightness(ex_.settings.maxBrightness);
+                strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
+                step = 255;
+            } else {
+                Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(ex_.getNextMode(state_.mode()));
+                color = color.withBrightness(ex_.settings.maxBrightness);
+                strip_.fill(color);
+            }
+            // set effect timeout to one, which will immediately trigger revert back to night lights mode as soon as the button is released
+            effectTimeout_ = 1;
+        } else if (effectTimeout_ > 0) {
+            // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
+            if (--effectTimeout_ == 0) {
+                effectHue_ = ex_.nightLight.colorHue();
+                effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
+            }
+        } else {
+            nightLightsTick();
+            step = 255;
+        }
+        // once we have the tick, update the actual neopixels with the calculated strip value & step
+        neopixels_.moveTowardsReversed(strip_, step);
+        neopixels_.update();
+    }
+
+    /** Updates the neopoixels to show the selected night light effect. 
+     
+        
+     */
+    static void nightLightsTick() {
+        // update the hue of the effect color, if in rainbow mode
+        if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLight.hue == NightLightState::HUE_RAINBOW) {
+            effectHue_ += 1;
+            effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
+        }
+        switch (ex_.nightLight.effect) {
+            // turn off the strip, don't change step so that the fade to black is gradual...
+            case NightLightEffect::Off:
+            default:
+                strip_.fill(Color::Black());
+                return;
+            // 
+            case NightLightEffect::AudioLights: {
+                uint8_t ri = recordingWrite_;
+                uint8_t min = 255;
+                uint8_t max = 0;
+                for (uint8_t i = 0; i < 125; ++i) {
+                    uint8_t x = recordingBuffer_[--ri];
+                    min = (x < min) ? x : min;
+                    max = (x > max) ? x : max;
+                }
+                uint8_t d = max - min;
+                effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
+                effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
+                strip_.showBarCentered(
+                    d - effect_.audio.minDelta,
+                    effect_.audio.maxDelta - effect_.audio.minDelta,
+                    effectColor_
+                );
+                // fade the delta range at 1/4 the speed
+                if (tickCountdown_ % 4 == 0) {
+                    // TODO figure this out!!!
+                }
+
+                return;
+            }
+            case NightLightEffect::Breathe: {
+                strip_.fill(effectColor_.withBrightness(effectCounter_ & 0xff));
+                break;
+            }
+            case NightLightEffect::BreatheBar: {
+                //strip_.centeredBar(effectColor_, effectCounter_ & 0xff, 255);
+                strip_.showBarCentered((effectCounter_ & 0xff) / 4, 64, effectColor_);
+                break;
+            }
+            case NightLightEffect::KnightRider: {
+                strip_.showPoint((effectCounter_ & 0xff) / 4, 64, effectColor_);
+                break;
+            }
+            case NightLightEffect::StarryNight: {
+                strip_.fill(Color::Black());
+                return;
+            }
+            // solid color that simply fills the whole strip with the effect color
+            case NightLightEffect::SolidColor: {
+                strip_.fill(effectColor_);
+                return;
+            }
+        }
+        if ((effectCounter_ & 0xff00) == 0) {
+            if (++effectCounter_ == 0x100)
+                effectCounter_ = 0x1ff;
+        } else {
+            if (--effectCounter_ == 0xff)
+                effectCounter_ = 0;
+        }
+    }
 
     /** Starts the audio lights. 
 
         Resets the bookkeeping and starts the audio capture with audio source.  
      */
-    void StartAudioLights() {
+    static void startAudioLights() {
         //AudioLightsMin_ = 255;
         //AudioLightsMax_ = 0;
-        StartAudioCapture(AudioADCSource::Audio);
+        startAudioCapture(AudioADCSource::Audio);
     }
 
     /** Stops the audio lights. 
      */
-    void StopAudioLights() {
-        StopAudioCapture();
+    static void stopAudioLights() {
+        stopAudioCapture();
     }
 
-    inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
+    inline static NeopixelStrip<NEOPIXEL, 8> neopixels_;
+    inline static ColorStrip<8> strip_;
+    inline static Color effectColor_;
+    inline static uint16_t effectHue_;
+    inline static uint16_t effectCounter_;
 
+    /** Union of effect settings. 
+     
+        These are both effects that come from the requests (point, bar, centered bar, etc.) and settings for the night light effects. They can share memory as the night-light effects can always be restarted from their initial settings after the special effect ends. 
+     */
+    inline static union {
+        struct {
+            Color timer;
+            Color success;
+        } longPress;
+        struct {
+            uint16_t at;
+            uint16_t max;
+        } point;
+        struct {
+            uint16_t size;
+            uint16_t max;
+        } bar;
+        struct {
+            uint8_t maxDelta;
+            uint8_t minDelta;
+        } audio;
+        struct {
+            uint16_t size;
+        } breathe;
+        struct {
+            uint16_t pos;
+        } knightRider;
+
+    } effect_;
+
+    /** Timeout in ticks for the requested effect to remain visible. 
+     
+        After the timeout reaches 0, the night-light mode will be reinstated. 
+     */
+    inline static uint8_t effectTimeout_;
 //@}
 
 /** \name Communication with ESP8266
@@ -429,7 +600,7 @@ private:
  */
 //@{
 
-    static void InitializeI2C() {
+    static void initializeI2C() {
         // make sure that the pins are nout out - HW issue with the chip, will fail otherwise
         PORTB.OUTCLR = 0x03; // PB0, PB1
         // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
@@ -442,22 +613,22 @@ private:
         TWI0.MCTRLA = TWI_ENABLE_bm;   
     }
     
-    static void SetIrq() {
+    static void setIrq() {
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-            if (! Status_.irq) {
-                Status_.irq = true;
-                IrqCountdown_ = IRQ_RESPONSE_TIMEOUT;
+            if (! status_.irq) {
+                status_.irq = true;
+                irqCountdown_ = IRQ_RESPONSE_TIMEOUT;
                 pinMode(AVR_IRQ, OUTPUT);
                 digitalWrite(AVR_IRQ, LOW);
             }
         }
     }
 
-    static void ClearIrq() {
+    static void clearIrq() {
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-            if (Status_.irq) {
+            if (status_.irq) {
                 pinMode(AVR_IRQ, INPUT);
-                Status_.irq = false;
+                status_.irq = false;
                 // let the countdown to reach 0 naturally
             }
         }
@@ -465,29 +636,101 @@ private:
 
     /** Hard-resets the ESP8266. 
      */
-    static void ResetESP() {
-        ClearIrq(); // this is necessary so that ESP boots into a normal mode
+    static void resetESP() {
+        clearIrq(); // this is necessary so that ESP boots into a normal mode
 
     }
 
-    static void ProcessCommand() {
+    static void processCommand() {
         // TODO process the I2C commands from ESP
+        switch (i2cRxBuffer_[0]) {
+            /* Sets the specified part of the extended state to the given values via a simple memcpy.
+             */
+            case msg::SetExtendedState::Id: {
+                auto m = pointer_cast<msg::SetExtendedState*>(& i2cRxBuffer_);
+                uint8_t * target = pointer_cast<uint8_t*>(&ex_) + m->offset;
+                memcpy(target, i2cRxBuffer_ + sizeof(msg::SetExtendedState), m->size);
+                break;
+            }
+            case msg::PowerOff::Id: {
+                // TODO
+                break;
+            }
+            case msg::SetMode::Id: {
+                auto m = pointer_cast<msg::SetMode*>(& i2cRxBuffer_);
+                state_.setMode(m->mode);
+                if (m->mode == Mode::Radio)
+                    digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
+                else 
+                    digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
+                break;
+            }
+            case msg::SetControlRange::Id: {
+                auto m = pointer_cast<msg::SetControlRange*>(& i2cRxBuffer_);
+                control_.setValues(m->value, m->max);
+                state_.setControlValue(m->value);
+                break;
+            }
+            case msg::SetVolumeRange::Id: {
+                auto m = pointer_cast<msg::SetVolumeRange*>(& i2cRxBuffer_);
+                volume_.setValues(m->value, m->max);
+                state_.setVolumeValue(m->value);
+                break;
+            }
+            case msg::LightsFill::Id: {
+                auto m = pointer_cast<msg::LightsFill*>(& i2cRxBuffer_);
+                strip_.fill(m->color);
+                effectTimeout_ = m->timeout;
+                break;
+            }
+            case msg::LightsPoint::Id: {
+                auto m = pointer_cast<msg::LightsPoint*>(& i2cRxBuffer_);
+                strip_.showPoint(m->value, m->max, m->color);
+                effectTimeout_ = m->timeout;
+                break;
+            }
+            case msg::LightsBar::Id: {
+                auto m = pointer_cast<msg::LightsPoint*>(& i2cRxBuffer_);
+                strip_.showBar(m->value, m->max, m->color);
+                effectTimeout_ = m->timeout;
+                break;
+            }
+            case msg::LightsBarCentered::Id: {
+                auto m = pointer_cast<msg::LightsPoint*>(& i2cRxBuffer_);
+                strip_.showBarCentered(m->value, m->max, m->color);
+                effectTimeout_ = m->timeout;
+                break;
+            }
+            case msg::LightsColors::Id: {
+                auto m = pointer_cast<msg::LightsColors*>(& i2cRxBuffer_);
+                for (uint8_t i = 0; i < 8; ++i)
+                    strip_[i] = m->colors[i];
+                effectTimeout_ = m->timeout;
+                break;
+            }
+            case msg::StartRecording::Id:
+            case msg::StopRecording::Id:
+            default:
+                // TODO what to do in such an error? 
+                break;
+
+        }
 
         // clear the ready flag and reset the buffer offset - since the bitfield is shared, we must protect its writes
         cli();
-        Status_.i2cRxReady = false;
+        status_.i2cRxReady = false;
         sei();
-        I2CRxOffset_ = 0;
+        i2cRxOffset_ = 0;
     }
 
     friend void ::TWI0_TWIS_vect();
 
     /** Number of bytes to be sent from the I2C TX buffer. 
      */
-    inline static uint8_t I2CTxLength_ = 0;
-    inline static uint8_t * I2CTxBuffer_ = nullptr;
-    inline static uint8_t I2CRxBuffer_[32];
-    inline static uint8_t I2CRxOffset_ = 0;
+    inline static uint8_t i2cTxLength_ = 0;
+    inline static uint8_t * i2cTxBuffer_ = nullptr;
+    inline static uint8_t i2cRxBuffer_[32];
+    inline static uint8_t i2cRxOffset_ = 0;
 
 //@}
 
@@ -498,19 +741,12 @@ private:
 
     inline static constexpr uint8_t I2C_TRANSMISSIBLE_DATA_SIZE =
         sizeof(State) +
-        sizeof(Measurements) +
-        sizeof(MP3Settings) +
-        sizeof(RadioSettings) +
-        sizeof(WalkieTalkieSettings) +
-        sizeof(NightLightSettings);
-    inline static volatile State State_;
-    inline static volatile Measurements Measurements_; 
-    inline static volatile MP3Settings MP3Settings_;
-    inline static volatile RadioSettings RadioSettings_;
-    inline static volatile WalkieTalkieSettings WalkieTalkieSettings_;
-    inline static volatile NightLightSettings NightLightSettings_;
-    static inline DateTime Time_;
-    static inline DateTime Alarm_;
+        sizeof(ExtendedState) + 
+        sizeof(DateTime) +
+        sizeof(DateTime);
+    inline static volatile State state_;
+    // no need for this to be volatile as the updates and reads are non-confliciting
+    inline static ExtendedState ex_;
 //@}
 
 /** \name Audio Recording information & buffer. 
@@ -526,7 +762,7 @@ private:
         Mic = ADC_MUXPOS_AIN6_gc
     }; // AudioADCSource
 
-    static void InitializeAudioCapture() {
+    static void initializeAudioCapture() {
         // configure the timer we use for 8kHz audio sampling
         TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
         TCB0.CTRLB = TCB_CNTMODE_INT_gc;
@@ -552,9 +788,9 @@ private:
         ADC1.EVCTRL = ADC_STARTEI_bm;
     }
 
-    static void StartAudioCapture(AudioADCSource source) {
-        RecordingRead_ = 0;
-        RecordingWrite_ = 0;
+    static void startAudioCapture(AudioADCSource source) {
+        recordingRead_ = 0;
+        recordingWrite_ = 0;
         // select ADC channel to either MIC or audio ADC
         ADC1.MUXPOS  = static_cast<uint8_t>(source);
         // enable and use 8bit resolution, freerun mode
@@ -565,16 +801,16 @@ private:
         TCB0.CTRLA |= TCB_ENABLE_bm;
     }
 
-    static void StopAudioCapture() {
+    static void stopAudioCapture() {
         ADC1.CTRLA = 0;
         TCB0.CTRLA &= ~TCB_ENABLE_bm;
     }
 
     friend void ::ADC1_RESRDY_vect();
 
-    inline static volatile uint8_t RecordingWrite_ = 0;
-    inline static volatile uint8_t RecordingRead_ = 0;
-    inline static volatile uint8_t RecordingBuffer_[256];
+    inline static volatile uint8_t recordingWrite_ = 0;
+    inline static volatile uint8_t recordingRead_ = 0;
+    inline static volatile uint8_t recordingBuffer_[256];
 //@}
 
 /** \name Diagnostic functions
@@ -585,17 +821,17 @@ private:
      
         The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
      */
-    static void ShowByte(uint8_t value, Color const & color) {
+    static void showByte(uint8_t value, Color const & color) {
         cli();
-        Neopixels_[7] = (value & 1) ? color : Color::Black();
-        Neopixels_[6] = (value & 2) ? color : Color::Black();
-        Neopixels_[5] = (value & 4) ? color : Color::Black();
-        Neopixels_[4] = (value & 8) ? color : Color::Black();
-        Neopixels_[3] = (value & 16) ? color : Color::Black();
-        Neopixels_[2] = (value & 32) ? color : Color::Black();
-        Neopixels_[1] = (value & 64) ? color : Color::Black();
-        Neopixels_[0] = (value & 128) ? color : Color::Black();
-        Neopixels_.update();
+        neopixels_[7] = (value & 1) ? color : Color::Black();
+        neopixels_[6] = (value & 2) ? color : Color::Black();
+        neopixels_[5] = (value & 4) ? color : Color::Black();
+        neopixels_[4] = (value & 8) ? color : Color::Black();
+        neopixels_[3] = (value & 16) ? color : Color::Black();
+        neopixels_[2] = (value & 32) ? color : Color::Black();
+        neopixels_[1] = (value & 64) ? color : Color::Black();
+        neopixels_[0] = (value & 128) ? color : Color::Black();
+        neopixels_.update();
         while (true) { };
     }
 //@}
@@ -623,13 +859,13 @@ private:
         bool longPressPending : 1;
 
 
-    } Status_;
+    } status_;
 
-    static inline uint8_t IrqCountdown_;
-    static inline uint8_t TickCountdown_; 
-    static inline uint16_t PowerOnCountdown_ = 0;
-    static inline uint16_t PowerOnRTCValue_ = 0;
-    static inline uint8_t LongPressCounter_ = 0; // [isr]
+    static inline uint8_t irqCountdown_;
+    static inline uint8_t tickCountdown_; 
+    static inline uint16_t powerOnCountdown_ = 0;
+    static inline uint16_t powerOnRTCValue_ = 0;
+    static inline uint8_t longPressCounter_ = 0; // [isr]
 
 
 
@@ -653,23 +889,23 @@ private:
 ISR(RTC_PIT_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
-    if (Player::Status_.sleep) {
-        uint16_t x = 1024 - Player::PowerOnRTCValue_;
-        Player::PowerOnCountdown_ = (x > Player::PowerOnCountdown_) ? 0 : (Player::PowerOnCountdown_ - x);
-        Player::PowerOnRTCValue_ = 0;
+    if (Player::status_.sleep) {
+        uint16_t x = 1024 - Player::powerOnRTCValue_;
+        Player::powerOnCountdown_ = (x > Player::powerOnCountdown_) ? 0 : (Player::powerOnCountdown_ - x);
+        Player::powerOnRTCValue_ = 0;
         // do one second tick
-        Player::Time_.secondTick();
+        Player::ex_.time.secondTick();
 
         // TODO check alarm, set wakeup bits and wake up? 
     } else {
         // set the tick flag so that more resource demanding periodic tasks can be done in the loop
-        Player::Status_.tick = true;
+        Player::status_.tick = true;
         // decrement irq
-        if (Player::IrqCountdown_ > 0)
-            --Player::IrqCountdown_;
+        if (Player::irqCountdown_ > 0)
+            --Player::irqCountdown_;
         // decrement button long press counter
-        if (Player::LongPressCounter_ > 0)
-            --Player::LongPressCounter_;
+        if (Player::longPressCounter_ > 0)
+            --Player::longPressCounter_;
     }
     //digitalWrite(AUDIO_SRC, LOW);
 }
@@ -682,23 +918,23 @@ ISR(TWI0_TWIS_vect) {
     // sending data to accepting master is on our fastpath as is checked first
     if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
         // if there is a byte to be sent as part of current transaction, do that and ack
-        if (Player::I2CTxLength_ > 0) {
-            --Player::I2CTxLength_;
-            TWI0.SDATA = *(Player::I2CTxBuffer_++);
+        if (Player::i2cTxLength_ > 0) {
+            --Player::i2cTxLength_;
+            TWI0.SDATA = *(Player::i2cTxBuffer_++);
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
             // if we have just sent the events part of the state, clear them so that new events can be written - as we do this inside an IRQ that just copied the particular byte, this is the best way of making sure new events can be added after these were sent
             // of course, if the I2C transmission would fail, then we have lost the events, but if the transmission fails, the software has bigger problems to think about
-            if (Player::I2CTxLength_ == 2 && Player::I2CTxBuffer_ == (uint8_t *)(& Player::State_) + 2)
-                Player::State_.clearEvents();
+            if (Player::i2cTxBuffer_ == (uint8_t *)(& Player::state_) + 2)
+                Player::state_.clearEvents();
         // after the transaction has been trasnmitted, switch to sending the state, if not already sending it
-        } else if (Player::I2CTxBuffer_ != (uint8_t*)(& Player::State_ + 1)) {
+        } else if (Player::i2cTxBuffer_ != (uint8_t*)(& Player::state_ + 1)) {
             // if we have successfully sent a recording buffer, increment the read index accordingly
-            if (Player::I2CTxBuffer_ > Player::RecordingBuffer_)
-                Player::RecordingRead_ += 32;
+            if (Player::i2cTxBuffer_ > Player::recordingBuffer_)
+                Player::recordingRead_ += 32;
             // move the tx buffer to state and start sending
-            Player::I2CTxBuffer_ = (uint8_t*)(& Player::State_);
-            Player::I2CTxLength_ = sizeof(State);
-            TWI0.SDATA = *(Player::I2CTxBuffer_++);
+            Player::i2cTxBuffer_ = (uint8_t*)(& Player::state_);
+            Player::i2cTxLength_ = sizeof(State);
+            TWI0.SDATA = *(Player::i2cTxBuffer_++);
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         // otherwise there is nothing more to send, nack
         } else {
@@ -706,67 +942,67 @@ ISR(TWI0_TWIS_vect) {
         }
     // a byte has been received from master. Store it and send either ACK if we can store more, or NACK if we can't store more
     } else if ((status & I2C_DATA_MASK) == I2C_DATA_RX) {
-        Player::I2CRxBuffer_[Player::I2CRxOffset_++] = TWI0.SDATA;
-        TWI0.SCTRLB = (Player::I2CRxOffset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
+        Player::i2cRxBuffer_[Player::i2cRxOffset_++] = TWI0.SDATA;
+        TWI0.SCTRLB = (Player::i2cRxOffset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
     // master requests slave to write data, determine what data to send, send ACK if there is data to be transmitted, NACK if there is no data to send
     } else if ((status & I2C_START_MASK) == I2C_START_TX) {
-        Player::ClearIrq();
+        Player::clearIrq();
         // if i2cready is not set, and rx offset is 1, we have previously received one byte, but STOP condition has not been sent, i.e. this is repeated start, and the received byte is TxOffset
-        if (Player::I2CRxOffset_ == 1 && ! Player::Status_.i2cRxReady) {
-            Player::I2CTxBuffer_ = (uint8_t*)(& Player::State_) + Player::I2CRxBuffer_[0];
-            Player::I2CTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE - Player::I2CRxBuffer_[0];
-            Player::I2CRxOffset_ = 0;
+        if (Player::i2cRxOffset_ == 1 && ! Player::status_.i2cRxReady) {
+            Player::i2cTxBuffer_ = (uint8_t*)(& Player::state_) + Player::i2cRxBuffer_[0];
+            Player::i2cTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE - Player::i2cRxBuffer_[0];
+            Player::i2cRxOffset_ = 0;
         // otherwise, if currently recording, prepare to send next 32 bytes of audio, if available        
-        } else if (Player::Status_.recording) {
-            Player::I2CTxBuffer_ = (uint8_t *)(& Player::RecordingBuffer_) + Player::RecordingRead_;
-            Player::I2CTxLength_ = (((Player::RecordingRead_ + 32) & 0xff) <= Player::RecordingWrite_) ? 32 : 0;
+        } else if (Player::status_.recording) {
+            Player::i2cTxBuffer_ = (uint8_t *)(& Player::recordingBuffer_) + Player::recordingRead_;
+            Player::i2cTxLength_ = (((Player::recordingRead_ + 32) & 0xff) <= Player::recordingWrite_) ? 32 : 0;
         // or if not recording, do the default action, which is to send the state
         } else {
-            Player::I2CTxBuffer_ = (uint8_t*)(& Player::State_);
-            Player::I2CTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE;
+            Player::i2cTxBuffer_ = (uint8_t*)(& Player::state_);
+            Player::i2cTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE;
         }
         // depending on the available length of data to be sent either ACK or NACK if there is nothing to send
-        if (Player::I2CTxLength_ > 0) 
+        if (Player::i2cTxLength_ > 0) 
             TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
         else 
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
     // master requests to write data itself. ACK if the buffer is empty (we do not support multiple commands in same buffer), NACK otherwise.
     } else if ((status & I2C_START_MASK) == I2C_START_RX) {
-        if (Player::I2CRxOffset_ == 0)
+        if (Player::i2cRxOffset_ == 0)
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
         else
             TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
     // when a transmission finishes we must see if another transmission required and re-raise the irq flag for ESP. While recording this means we need to see if there is another 32 bytes available yet
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
-        if (Player::Status_.recording) {
+        if (Player::status_.recording) {
             // if the read and write offsets are into the same 32 bit partition, then the flag will be raised when more samples are available, otherwise raise the flag now
-            if (Player::RecordingRead_ / 32 != Player::RecordingWrite_ / 32)
-                Player::SetIrq();
+            if (Player::recordingRead_ / 32 != Player::recordingWrite_ / 32)
+                Player::setIrq();
         }
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
     } else if ((status & I2C_STOP_MASK) == I2C_STOP_RX) {
         TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
-        Player::Status_.i2cRxReady = true;
+        Player::status_.i2cRxReady = true;
     } else {
-        Player::ShowByte(status, Color::Red());
+        Player::showByte(status, Color::Red());
     }
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
 ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
-    Player::RecordingBuffer_[Player::RecordingWrite_++] = (ADC1.RES / 8) & 0xff;
-    if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
-        Player::SetIrq();
+    Player::recordingBuffer_[Player::recordingWrite_++] = (ADC1.RES / 8) & 0xff;
+    if (Player::recordingWrite_ % 32 == 0 && Player::status_.recording)
+        Player::setIrq();
     //digitalWrite(AUDIO_SRC, LOW);
 }
 
 void setup() {
-    Player::Initialize();
+    Player::initialize();
 }
 
 void loop() {
-    Player::Loop();
+    Player::loop();
 }
 
 

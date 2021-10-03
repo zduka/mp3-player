@@ -24,15 +24,25 @@ inline T pointer_cast(W * from) {
 #define assert(...)
 
 #if (defined ARCH_ESP8266)
-
-
 // TODO __VA_OPT__(,) works better than the GNU extension here with C++20, but although it works for ESP, it confuses the editor so I am stuck with ##__VA_ARGS__ for now
 #define LOG(FORMAT,...) do { Serial.printf_P(PSTR("%u: "), millis() / 1000); Serial.printf_P(PSTR(FORMAT), ##__VA_ARGS__); Serial.println(); } while (false)
 
-#define STR(...) (String("") + __VA_ARGS__)
+#elif (defined ARCH_ATTINY)
+
+#define LOG(...)
 
 #endif
 
+
+/** Returns true if given string ends with the given suffix. 
+ 
+    Does not use the evil string object. 
+ */
+inline bool EndsWith(char const * str, char const * suffix) {
+    unsigned l1 = strlen(str);
+    unsigned l2 = strlen(suffix);
+    return strncmp(str + (l1 - l2), suffix, l2) == 0;
+}
 
 
 inline uint8_t FromHex(char c) {
