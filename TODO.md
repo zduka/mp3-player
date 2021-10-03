@@ -1,6 +1,11 @@
 # HW
 
+- verify the I2S output vdiv (R3 + R10, R8 + R14) values so that the volume is similar to the radio
+- determine if low pass filter after audio selection is useful, and its values (R4 + C13, R13 + C19)
+- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
+- determine useful headphone max volume (R7, R12). Setting this to non-zero may also mean that we can use smaller value for the headphone decoupling caps (C10, C14)
 - check charging detection & charging power dissipation, low battery, AC power
+
 
 # SW
 
