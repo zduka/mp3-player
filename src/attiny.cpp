@@ -10,6 +10,11 @@
 #include <util/delay.h>
 #include <util/atomic.h>
 
+#if (defined TEST_RADIO)
+#include <radio.h>
+#include <RDA5807M.h>
+#endif
+
 #include "config.h"
 #include "state.h"
 #include "messages.h"
@@ -23,45 +28,79 @@
        VOL_BTN -- (01) PA5   PA2 (15) -- CTRL_BTN
          VOL_A -- (02) PA6   PA1 (14) -- HEADPHONES
       DCDC_PWR -- (03) PA7   PA0 (17) -- UPDI
-               -- (04) PB5   PC3 (13) -- CTRL_B
+      NEOPIXEL -- (04) PB5   PC3 (13) -- CTRL_B
       CHARGING -- (05) PB4   PC2 (12) -- AUDIO_ADC
-      NEOPIXEL -- (06) PB3   PC1 (11) -- AUDIO_SRC
-       AVR_IRQ -- (07) PB2   PC0 (10) -- MIC
+       AVR_IRQ -- (06) PB3   PC1 (11) -- AUDIO_SRC
+               -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
 
-TODO change AVR_IRQ to PB5 and set PB2 for TX for serial, this would make debugging less painful
-but we actually need audio_src
  */
 
 #define DCDC_PWR 3
-#define NEOPIXEL 6
+#define NEOPIXEL 4
 #define CTRL_A 16
 #define CTRL_B 13
 #define CTRL_BTN 15
 #define VOL_A 2
 #define VOL_B 0
 #define VOL_BTN 1
-#define AVR_IRQ 7
+#define AVR_IRQ 6
 #define AUDIO_SRC 11
 #define AUDIO_ADC 12
 #define HEADPHONES 14
 #define MIC 10
 
-extern "C" void RTC_PIT_vect(void) __attribute__((signal));
-extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
-extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
-#define AUDIO_SRC_ESP LOW
-#define AUDIO_SRC_RADIO HIGH
-
-
-
+#define AUDIO_SRC_ESP HIGH
+#define AUDIO_SRC_RADIO LOW
 
 #define NOTIFICATION_LOW_BATTERY_COLOR Color::Red()
 #define NOTIFICATION_NEW_MESSAGE_COLOR Color::Green()
 #define NOTIFICATION_WIFI_CONNECTING_COLOR Color::Blue()
 #define NOTIFICATION_WIFI_AP_COLOR Color::Cyan()
 
+extern "C" void RTC_PIT_vect(void) __attribute__((signal));
+extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
+extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
+
+#if (defined TEST_NEOPIXEL)
+void setup() {
+    NeopixelStrip<NEOPIXEL, 8> neopixels;
+    pinMode(DCDC_PWR, OUTPUT);
+    digitalWrite(DCDC_PWR, LOW);
+    delay(50);
+    neopixels[0] = Color::Red();
+    neopixels[1] = Color::Green();
+    neopixels[2] = Color::Blue();
+    neopixels[3] = Color::Purple();
+    neopixels[4] = Color::Yellow();
+    neopixels[5] = Color::Cyan();
+    neopixels[6] = Color::White();
+    neopixels[7] = Color::Red();
+    neopixels.update();
+}
+void loop() { 
+}
+#elif (defined TEST_RADIO)
+void setup() {
+    pinMode(DCDC_PWR, OUTPUT);
+    digitalWrite(DCDC_PWR, LOW);
+    pinMode(AUDIO_SRC, OUTPUT);
+    digitalWrite(AUDIO_SRC, LOW);
+    pinMode(HEADPHONES, OUTPUT);
+    digitalWrite(HEADPHONES, LOW);
+
+    delay(50);
+    Wire.begin();
+    RDA5807M radio;
+    radio.init();
+    radio.setMono(true);
+    radio.setVolume(1);
+    radio.setBandFrequency(RADIO_BAND_FM, 9370);
+}
+void loop() { 
+}
+#else 
 class Player {
 public:
     static void initialize() {
@@ -196,6 +235,10 @@ private:
             neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness));
             neopixels_.update();
             // TODO silent mode
+
+            // disable idle mode when waking up
+            // TODO perhaps not do this for silent mode? 
+            state_.setIdle(false);
         }
     }
 
@@ -442,10 +485,13 @@ private:
             if (--effectTimeout_ == 0) {
                 effectHue_ = ex_.nightLight.colorHue();
                 effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
+                if (ex_.nightLight.effect == NightLightEffect::AudioLights) {
+                    effect_.audio.maxDelta = 0;
+                    effect_.audio.minDelta = 255;
+                }
             }
         } else {
-            nightLightsTick();
-            step = 255;
+            nightLightsTick(step);
         }
         // once we have the tick, update the actual neopixels with the calculated strip value & step
         neopixels_.moveTowardsReversed(strip_, step);
@@ -456,7 +502,7 @@ private:
      
         
      */
-    static void nightLightsTick() {
+    static void nightLightsTick(uint8_t & step) {
         // update the hue of the effect color, if in rainbow mode
         if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLight.hue == NightLightState::HUE_RAINBOW) {
             effectHue_ += 1;
@@ -470,27 +516,34 @@ private:
                 return;
             // 
             case NightLightEffect::AudioLights: {
-                uint8_t ri = recordingWrite_;
-                uint8_t min = 255;
-                uint8_t max = 0;
-                for (uint8_t i = 0; i < 125; ++i) {
-                    uint8_t x = recordingBuffer_[--ri];
-                    min = (x < min) ? x : min;
-                    max = (x > max) ? x : max;
+                if (state_.idle()) {
+                    strip_.fill(Color::Black());
+                } else {
+                    uint8_t ri = recordingWrite_;
+                    uint8_t min = 255;
+                    uint8_t max = 0;
+                    for (uint8_t i = 0; i < 125; ++i) {
+                        uint8_t x = recordingBuffer_[--ri];
+                        min = (x < min) ? x : min;
+                        max = (x > max) ? x : max;
+                    }
+                    uint8_t d = max - min;
+                    effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
+                    effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
+                    strip_.showBarCentered(
+                        d - effect_.audio.minDelta,
+                        max(effect_.audio.maxDelta - effect_.audio.minDelta, 2),
+                        effectColor_
+                    );
+                    // fade the delta range at 1/4 the speed
+                    if (tickCountdown_ % 4 == 0) {
+                        if (effect_.audio.maxDelta > d)
+                            --effect_.audio.maxDelta;
+                        if (effect_.audio.minDelta < d)
+                            ++effect_.audio.minDelta;
+                    }
                 }
-                uint8_t d = max - min;
-                effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
-                effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
-                strip_.showBarCentered(
-                    d - effect_.audio.minDelta,
-                    effect_.audio.maxDelta - effect_.audio.minDelta,
-                    effectColor_
-                );
-                // fade the delta range at 1/4 the speed
-                if (tickCountdown_ % 4 == 0) {
-                    // TODO figure this out!!!
-                }
-
+                step = 255;
                 return;
             }
             case NightLightEffect::Breathe: {
@@ -523,22 +576,7 @@ private:
             if (--effectCounter_ == 0xff)
                 effectCounter_ = 0;
         }
-    }
-
-    /** Starts the audio lights. 
-
-        Resets the bookkeeping and starts the audio capture with audio source.  
-     */
-    static void startAudioLights() {
-        //AudioLightsMin_ = 255;
-        //AudioLightsMax_ = 0;
-        startAudioCapture(AudioADCSource::Audio);
-    }
-
-    /** Stops the audio lights. 
-     */
-    static void stopAudioLights() {
-        stopAudioCapture();
+        step = 255;
     }
 
     inline static NeopixelStrip<NEOPIXEL, 8> neopixels_;
@@ -665,6 +703,15 @@ private:
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
                 else 
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
+                break;
+            }
+            case msg::SetIdle::Id: {
+                auto m = pointer_cast<msg::SetIdle*>(& i2cRxBuffer_);
+                state_.setIdle(m->idle);
+                if (state_.idle())
+                    stopAudioCapture();
+                else
+                    startAudioCapture(AudioADCSource::Audio);
                 break;
             }
             case msg::SetControlRange::Id: {
@@ -1008,6 +1055,8 @@ void loop() {
 }
 
 
+
+#endif
 
 #ifdef HAHA
 

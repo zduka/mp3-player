@@ -92,6 +92,15 @@ public:
     static void loop() {
         if (status_.irq) 
             status_.recording ? record() : updateState();
+        if (mp3_.isRunning()) {
+            if (!mp3_.loop()) {
+                mp3_.stop();
+                LOG("MP3 playback done");
+                playNextTrack();
+            }
+        }
+    
+    
     }
 
 private:
@@ -434,10 +443,12 @@ private:
         LOG("Setting mode %u", mode);
         if (state_.mode() == mode)
             return;
-        pause(/* changeIdle */ false);
+        if (! state_.idle())
+            pause(/* changeIdle */ false);
         state_.setMode(mode);
         send(msg::SetMode(mode));
-        play(/* changeIdle */ false);
+        if (! state_.idle())
+            play(/* changeIdle */ false);
     }
 
     static void play(bool changeIdle = true) {
@@ -565,7 +576,7 @@ private:
 
     static void mp3UpdateVolume() {
         if (mp3_.isRunning()) {
-            i2s_.SetGain(state_.volumeValue() / 15);
+            i2s_.SetGain(static_cast<float>(state_.volumeValue()) / 15);
         }
     }
 
@@ -608,7 +619,7 @@ private:
                     memcpy(filename + 2, f.name(), strlen(f.name()) + 1);
                     f.close();
                     mp3File_.open(filename);
-                    i2s_.SetGain(state_.volumeValue() / 15);
+                    i2s_.SetGain(static_cast<float>(state_.volumeValue()) / 15);
                     mp3_.begin(& mp3File_, & i2s_);
                     LOG("Track %u, file: %s", index, filename);
                     ex_.mp3.trackId = index;

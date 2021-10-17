@@ -50,7 +50,7 @@ namespace msg {
     MESSAGE(SetIdle,
         bool idle;
         SetIdle(bool value):
-            idle{idle} {
+            idle{value} {
         }
     );
 

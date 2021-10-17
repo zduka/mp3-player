@@ -262,6 +262,8 @@ public:
     /** Shows a bar at given value that grows symmetrically from the center. 
      */
     void showBarCentered(uint16_t value, uint16_t max, Color const & color, uint8_t step = 255) {
+        if (max < value)
+            max = value;
         uint32_t v = static_cast<uint32_t>(value) * (SIZE * 255) / max;
         uint32_t offset = (SIZE * 255 - v) / 2;
         for (uint8_t i = 0; i < SIZE; ++i) {

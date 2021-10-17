@@ -1,11 +1,17 @@
 # HW
 
+- V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
+- check charging detection & charging power dissipation, low battery, AC power - lower charging power to ~0.5A to be on the safe side (2k7), remove LEDs
+- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
+
+- radio antenna seem to work rather bad in the new board version
+- volume seems to be really high, at least headphones
+- check that neopixels don't interefere with radio reception
+
+
 - verify the I2S output vdiv (R3 + R10, R8 + R14) values so that the volume is similar to the radio
 - determine if low pass filter after audio selection is useful, and its values (R4 + C13, R13 + C19)
-- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
 - determine useful headphone max volume (R7, R12). Setting this to non-zero may also mean that we can use smaller value for the headphone decoupling caps (C10, C14)
-- check charging detection & charging power dissipation, low battery, AC power
-
 
 # SW
 
@@ -44,6 +50,8 @@
 
  - alarm clock
  - birthday reminder
+
+ - a way to record a message to be played directly from the player? Or updateable via telegram?
 
 # Walkie Talkie
 
