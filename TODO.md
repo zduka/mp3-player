@@ -1,5 +1,8 @@
 # HW
 
+- opamps for audio feedback seem to be broken, especially the amplifier one
+- where to put the extra LC filter for audio?
+
 - V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
 - check charging detection & charging power dissipation, low battery, AC power - lower charging power to ~0.5A to be on the safe side (2k7), remove LEDs
 - determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
@@ -15,9 +18,9 @@
 
 # SW
 
-
-- PINS changed for ATTiny to free TXD port
+- initial on does not set idle properly
 - set radio frequency to first radio station upon complete start
+- headphones can be set to output and LOW to disable speaker any time
 
 - add the following to the settings:
     - power off timeout

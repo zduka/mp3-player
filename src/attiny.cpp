@@ -64,6 +64,9 @@ extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
 #if (defined TEST_NEOPIXEL)
+
+/** Displays various colors on the neopixel strip after turning on 3v3. 
+ */
 void setup() {
     NeopixelStrip<NEOPIXEL, 8> neopixels;
     pinMode(DCDC_PWR, OUTPUT);
@@ -81,26 +84,46 @@ void setup() {
 }
 void loop() { 
 }
+
 #elif (defined TEST_RADIO)
+
+/** Starts the radio at lowest volume and preset station while displaying a moving light on the neopixels. 
+ */
+
+RDA5807M radio;
+NeopixelStrip<NEOPIXEL, 8> neopixels;
+uint8_t x = 0;
+
 void setup() {
     pinMode(DCDC_PWR, OUTPUT);
     digitalWrite(DCDC_PWR, LOW);
     pinMode(AUDIO_SRC, OUTPUT);
     digitalWrite(AUDIO_SRC, LOW);
-    pinMode(HEADPHONES, OUTPUT);
-    digitalWrite(HEADPHONES, LOW);
-
+    //pinMode(HEADPHONES, OUTPUT);
+    //digitalWrite(HEADPHONES, LOW);
     delay(50);
     Wire.begin();
-    RDA5807M radio;
     radio.init();
+    delay(50);
     radio.setMono(true);
-    radio.setVolume(1);
+    delay(50);
+    radio.setVolume(15);
+    delay(50);
     radio.setBandFrequency(RADIO_BAND_FM, 9370);
 }
 void loop() { 
+    neopixels.showPoint(x, 255, Color::White().withBrightness(32));
+    neopixels.update();
+    delay(30);
+    ++x;
+    //if (x % 16 == 0)
+    //    radio.setVolume(x >> 4);
 }
+
 #else 
+
+/** The actual player. 
+  */
 class Player {
 public:
     static void initialize() {
@@ -508,6 +531,7 @@ private:
             effectHue_ += 1;
             effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
         }
+        ex_.nightLight.effect = NightLightEffect::AudioLights;
         switch (ex_.nightLight.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...
             case NightLightEffect::Off:
@@ -516,7 +540,7 @@ private:
                 return;
             // 
             case NightLightEffect::AudioLights: {
-                if (state_.idle()) {
+                if (state_.idle() && false) {
                     strip_.fill(Color::Black());
                 } else {
                     uint8_t ri = recordingWrite_;
@@ -532,18 +556,27 @@ private:
                     effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
                     strip_.showBarCentered(
                         d - effect_.audio.minDelta,
-                        max(effect_.audio.maxDelta - effect_.audio.minDelta, 2),
+                        max(effect_.audio.maxDelta - effect_.audio.minDelta, 8),
                         effectColor_
+                        //32,
+                        //64,
+                        //d,
+                        //64,
+                        //Color::Red().withBrightness(10)
                     );
-                    // fade the delta range at 1/4 the speed
-                    if (tickCountdown_ % 4 == 0) {
+                    // fade the delta range at 1/32 the speed
+                    if (tickCountdown_ % 32 == 0) {
                         if (effect_.audio.maxDelta > d)
                             --effect_.audio.maxDelta;
                         if (effect_.audio.minDelta < d)
                             ++effect_.audio.minDelta;
                     }
+                    if (effect_.audio.lastDelta < d)
+                        step = 255;
+                    else 
+                        step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
+                    effect_.audio.lastDelta = d;
                 }
-                step = 255;
                 return;
             }
             case NightLightEffect::Breathe: {
@@ -605,6 +638,7 @@ private:
         struct {
             uint8_t maxDelta;
             uint8_t minDelta;
+            uint8_t lastDelta;
         } audio;
         struct {
             uint16_t size;

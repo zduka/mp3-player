@@ -397,6 +397,7 @@ private:
     /** Changes volume. 
      */
     static void volumeTurn() {
+        // TODO check that the volume is within the settings available
         LOG("Volume: %u", state_.volumeValue());
         switch (state_.mode()) {
             case Mode::MP3:
@@ -410,6 +411,7 @@ private:
             default:
                 break;
         }
+        send(msg::LightsBar{state_.volumeValue() + 1, 16, DEFAULT_COLOR});
     }
 
     /** Turns wifi on/off, turns the player off. 
@@ -576,7 +578,7 @@ private:
 
     static void mp3UpdateVolume() {
         if (mp3_.isRunning()) {
-            i2s_.SetGain(static_cast<float>(state_.volumeValue()) / 15);
+            i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
         }
     }
 
