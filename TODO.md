@@ -1,6 +1,6 @@
 # HW
 
-- opamps for audio feedback seem to be broken, especially the amplifier one
+- audio feedback opamp can have bigger gain, most likely. Needs checking...
 - where to put the extra LC filter for audio?
 
 - V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
@@ -18,8 +18,9 @@
 
 # SW
 
-- initial on does not set idle properly
-- set radio frequency to first radio station upon complete start
+- startup progress bar
+- is the play after wakeup really what we want? 
+- setting the radio station immediately after startup does not really work and produces noise for a long time... (seems like issue with the radio chip)
 - headphones can be set to output and LOW to disable speaker any time
 
 - add the following to the settings:

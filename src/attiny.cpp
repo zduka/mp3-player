@@ -157,7 +157,8 @@ public:
         // initialize comms
         initializeI2C();
 
-
+        // set state to initial power on and proceed with a wakeup
+        state_.setInitialPowerOn(true);
         wakeup();
     }
 
@@ -212,6 +213,8 @@ private:
     /** Puts the AVR to sleep. 
      */
     static void sleep() {
+        // when we wake up, it will be user wake up, not initial power on
+        state_.setInitialPowerOn(false);
         do { // wrapped in a loop to account to allow wakeup to re-enter sleep immediately (such as when low volatge, etc.)
             // disable rotary encoder interrupts so that they do not wake us from sleep
             control_.clearInterrupt();
@@ -249,6 +252,8 @@ private:
             criticalBatteryWarning();
             status_.sleep = true;
         } else {
+            // disable the idle mode so that the player starts playing stuff
+            state_.setIdle(false);
             // enable interrupts for rotary encoders
             control_.setInterrupt(controlKnobChanged);
             volume_.setInterrupt(volumeKnobChanged);
@@ -433,12 +438,14 @@ private:
     static void controlKnobChanged() {
         control_.poll();
         state_.setControlValue(control_.value());
+        state_.setControlTurn();
         setIrq();
     }
 
     static void volumeKnobChanged() {
         volume_.poll();
         state_.setVolumeValue(volume_.value());
+        state_.setVolumeTurn();
         setIrq();
     }
     //@}
@@ -540,7 +547,8 @@ private:
                 return;
             // 
             case NightLightEffect::AudioLights: {
-                if (state_.idle() && false) {
+                if (state_.idle()) {
+                    // TODO do we want this, or do we want some breathing effect, i.e. a fallthrough? 
                     strip_.fill(Color::Black());
                 } else {
                     uint8_t ri = recordingWrite_;
@@ -558,11 +566,6 @@ private:
                         d - effect_.audio.minDelta,
                         max(effect_.audio.maxDelta - effect_.audio.minDelta, 8),
                         effectColor_
-                        //32,
-                        //64,
-                        //d,
-                        //64,
-                        //Color::Red().withBrightness(10)
                     );
                     // fade the delta range at 1/32 the speed
                     if (tickCountdown_ % 32 == 0) {

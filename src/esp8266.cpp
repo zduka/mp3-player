@@ -63,28 +63,30 @@ public:
         // initialize the IRQ pin and attach interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), avrIrq, FALLING);
-        // enable I2C and request state
+        // enable I2C and request the current state and the extended state
         Wire.begin(I2C_SDA, I2C_SCL);
         Wire.setClock(400000);
         updateState();
-        //send(msg::LightsBar{2,8,DEFAULT_COLOR.withBrightness(ex_.nightmaxBrightness_)});
-        // get the whole extended state, making sure we fit in the buffer
         getExtendedState(ex_);
         ex_.log();
-        // Initialize the core subsystems and report back
+        // initialize the chip and core peripherals
         initializeESP();
         initializeLittleFS();
         initializeSDCard();
-        // 
+        // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
         initializePlaylists();
         initializeRadioStations();
         //initializeSettings();
-
-
-        // the extended state could have changed when initializing from the SD card, store it all
+        // if this is the initial state, write basic settings from the mode configuration to cached state
+        if (state_.initialPowerOn()) {
+            LOG("Initial power on");
+            ex_.radio.stationId = 0;
+            ex_.radio.frequency = radioStations_[0];
+        }
+        // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
 
-        setMode(Mode::Radio);
+        setMode(Mode::Radio, /* force */ true);
 
         LOG("Free heap: %u", ESP.getFreeHeap());
     }
@@ -227,7 +229,7 @@ private:
             State old = state_;
             Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
             // check available events and react accordingly
-            if (state_.controlValue() != old.controlValue()) 
+            if (state_.controlTurn()) 
                 controlTurn();
             if (state_.controlButtonDown() != old.controlButtonDown())
                 state_.controlButtonDown() ? controlDown() : controlUp();
@@ -235,7 +237,7 @@ private:
                 controlPress();
             if (state_.controlButtonLongPress())
                 controlLongPress();
-            if (state_.volumeValue() != old.volumeValue())
+            if (state_.volumeTurn())
                 volumeTurn();
             if (state_.volumeButtonDown() != old.volumeButtonDown())
                 state_.volumeButtonDown() ? volumeDown() : volumeUp();
@@ -441,24 +443,23 @@ private:
     
     /** Enters the provided mode. 
      */
-    static void setMode(Mode mode) {
+    static void setMode(Mode mode, bool force = false) {
         LOG("Setting mode %u", mode);
-        if (state_.mode() == mode)
+        if ((state_.mode() == mode) && ! force)
             return;
-        if (! state_.idle())
-            pause(/* changeIdle */ false);
+        bool resume = ! state_.idle();
+        if (resume)
+            pause();
         state_.setMode(mode);
         send(msg::SetMode(mode));
-        if (! state_.idle())
-            play(/* changeIdle */ false);
+        if (resume)
+            play();
     }
 
-    static void play(bool changeIdle = true) {
+    static void play() {
         LOG("Play");
-        if (changeIdle) {
-            state_.setIdle(false);
-            send(msg::SetIdle{false});
-        }
+        state_.setIdle(false);
+        send(msg::SetIdle{false});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Play();
@@ -477,12 +478,10 @@ private:
 
     }
 
-    static void pause(bool changeIdle = true) {
+    static void pause() {
         LOG("Pause");
-        if (changeIdle) {
-            state_.setIdle(true);
-            send(msg::SetIdle{true});
-        }
+        state_.setIdle(true);
+        send(msg::SetIdle{true});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Pause();
@@ -621,7 +620,7 @@ private:
                     memcpy(filename + 2, f.name(), strlen(f.name()) + 1);
                     f.close();
                     mp3File_.open(filename);
-                    i2s_.SetGain(static_cast<float>(state_.volumeValue()) / 15);
+                    i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
                     mp3_.begin(& mp3File_, & i2s_);
                     LOG("Track %u, file: %s", index, filename);
                     ex_.mp3.trackId = index;

@@ -112,7 +112,7 @@ public:
         This is called automatically every time the state is transmitted so that new events can occur. 
      */ 
     void clearEvents() volatile {
-        events_ &= ~(CONTROL_PRESS_MASK | CONTROL_LONG_PRESS_MASK | VOLUME_PRESS_MASK | VOLUME_LONG_PRESS_MASK | DOUBLE_LONG_PRESS_MASK);
+        events_ = 0;
     }
 
     void setControlButtonPress(bool value = true) volatile {
@@ -150,12 +150,36 @@ public:
             events_ &= ~DOUBLE_LONG_PRESS_MASK;
     }
 
+    bool controlTurn() const volatile {
+        return events_ & CONTROL_TURN_MASK;
+    }
+
+    void setControlTurn(bool value = true) volatile {
+        if (value)
+            events_ |= CONTROL_TURN_MASK;
+        else
+            events_ &= ~CONTROL_TURN_MASK;
+    }
+
+    bool volumeTurn() const volatile {
+        return events_ & VOLUME_TURN_MASK;
+    }
+
+    void setVolumeTurn(bool value = true) volatile {
+        if (value)
+            events_ |= VOLUME_TURN_MASK;
+        else
+            events_ &= ~VOLUME_TURN_MASK;
+    }
+
 private:
     static constexpr uint8_t CONTROL_PRESS_MASK = 1 << 0;
     static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 1 << 1;
     static constexpr uint8_t VOLUME_PRESS_MASK = 1 << 2;
     static constexpr uint8_t VOLUME_LONG_PRESS_MASK = 1 << 3;
     static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 1 << 4;
+    static constexpr uint8_t CONTROL_TURN_MASK = 1 << 5;
+    static constexpr uint8_t VOLUME_TURN_MASK = 1 << 6;
     uint8_t events_;
 //@}
 
@@ -192,9 +216,23 @@ public:
             mode_ &= ~IDLE_MASK;
     }
 
+    /** Returns true if the current power on state is the initial state, i.e. if the AVR chip has also been power on as well (such as when batteries were inserted, or recharged from BOD) as opposed to wake up from sleep. 
+     */
+    bool initialPowerOn() const volatile {
+        return mode_ & INITIAL_POWER_ON_MASK;
+    }
+
+    void setInitialPowerOn(bool value) volatile {
+        if (value)
+            mode_ |= INITIAL_POWER_ON_MASK;
+        else
+            mode_ &= ~INITIAL_POWER_ON_MASK;
+    }
+
 private:
     static constexpr uint8_t MODE_MASK = 7;
     static constexpr uint8_t IDLE_MASK = 8;
+    static constexpr uint8_t INITIAL_POWER_ON_MASK = 16;
 
     uint8_t mode_;
 
