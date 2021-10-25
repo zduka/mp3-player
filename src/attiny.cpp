@@ -49,6 +49,7 @@
 #define AUDIO_ADC 12
 #define HEADPHONES 14
 #define MIC 10
+#define DEBUG_PIN 7
 
 
 #define AUDIO_SRC_ESP HIGH
@@ -127,6 +128,12 @@ void loop() {
 class Player {
 public:
     static void initialize() {
+        Serial.begin(9600);
+        USART0.CTRLB &= ~ USART_RXEN_bm;
+        Serial.print("Hello AVR!");
+
+        //pinMode(DEBUG_PIN, OUTPUT);
+        //digitalWrite(DEBUG_PIN, LOW);
         // disable power to other systems
         pinMode(DCDC_PWR, INPUT);
         // enable the AVR_IRQ as input so that we can observe if ESP wants something
@@ -201,6 +208,7 @@ private:
     }
     
     static void tick() {
+        //digitalWrite(DEBUG_PIN, HIGH);            
         // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
         if (status_.irq && irqCountdown_ == 0)
             resetESP();
@@ -213,9 +221,10 @@ private:
         if ((++tickCountdown_ % 64) == 0) {
             ex_.time.secondTick();
             // TODO actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
-            //if (--powerCountdown_ == 0)
-            //    sleep();   
+            if (--powerCountdown_ == 0)
+                sleep();   
         }
+        //digitalWrite(DEBUG_PIN, LOW);
     }
 
     /** Puts the AVR to sleep. 
@@ -528,7 +537,9 @@ private:
                 }
             }
         } else {
+            //digitalWrite(DEBUG_PIN, HIGH);            
             nightLightsTick(step);
+            //digitalWrite(DEBUG_PIN, LOW);            
         }
         // once we have the tick, update the actual neopixels with the calculated strip value & step
         neopixels_.moveTowardsReversed(strip_, step);
@@ -751,15 +762,13 @@ private:
             }
             case msg::SetIdle::Id: {
                 auto m = pointer_cast<msg::SetIdle*>(& i2cRxBuffer_);
-                if (state_.idle() != m->idle) {
-                    state_.setIdle(m->idle);
-                    if (state_.idle())
-                        stopAudioCapture();
-                    else
-                        startAudioCapture(AudioADCSource::Audio);
-                }
+                state_.setIdle(m->idle);
+                if (state_.idle())
+                    stopAudioCapture();
+                else
+                    startAudioCapture(AudioADCSource::Audio);
                 // reset the timeout countdown (argument in minutes, we are converting to seconds)
-                powerCountdown_ = static_cast<uint16_t>(m->timeout) * 60;
+                powerCountdown_ = static_cast<uint16_t>(m->timeout);
                 break;
             }
             case msg::SetControlRange::Id: {
@@ -985,7 +994,7 @@ private:
 
  */
 ISR(RTC_PIT_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
+    //digitalWrite(DEBUG_PIN, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
     if (Player::status_.sleep) {
         uint16_t x = 1024 - Player::powerOnRTCValue_;
@@ -1005,13 +1014,13 @@ ISR(RTC_PIT_vect) {
         if (Player::longPressCounter_ > 0)
             --Player::longPressCounter_;
     }
-    //digitalWrite(AUDIO_SRC, LOW);
+    //digitalWrite(DEBUG_PIN, LOW);
 }
 
 /** [ISR]
  */
 ISR(TWI0_TWIS_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
+    //digitalWrite(DEBUG_PIN, HIGH);
     uint8_t status = TWI0.SSTATUS;
     // sending data to accepting master is on our fastpath as is checked first
     if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
@@ -1084,15 +1093,15 @@ ISR(TWI0_TWIS_vect) {
     } else {
         Player::showByte(status, Color::Red());
     }
-    //digitalWrite(AUDIO_SRC, LOW);
+    //digitalWrite(DEBUG_PIN, LOW);
 }
 
 ISR(ADC1_RESRDY_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
+    //digitalWrite(DEBUG_PIN, HIGH);
     Player::recordingBuffer_[Player::recordingWrite_++] = (ADC1.RES / 8) & 0xff;
     if (Player::recordingWrite_ % 32 == 0 && Player::status_.recording)
         Player::setIrq();
-    //digitalWrite(AUDIO_SRC, LOW);
+    //digitalWrite(DEBUG_PIN, LOW);
 }
 
 void setup() {

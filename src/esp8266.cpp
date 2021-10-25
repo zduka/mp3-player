@@ -95,6 +95,7 @@ public:
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         // enter the last used mode
+        state_.setIdle(false);
         setMode(state_.mode(), /* force */ true);
     }
 

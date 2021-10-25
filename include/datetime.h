@@ -67,13 +67,12 @@ public:
     void setSecond(uint8_t s) {
         //assert(s >= 0 && s <= 59);
         raw_ &= ~SECOND_MASK;
-        raw_ |= s;
+        raw_ |= static_cast<uint32_t>(s);
     }
 
     void secondTick() {
         if (second() == 59) {
             setSecond(0);
-            /*
             if (minute() == 59) {
                 setMinute(0);
                 if (hour() == 23) {
@@ -96,7 +95,6 @@ public:
             } else {
                 setMinute(minute() + 1);
             }
-            */
         } else {
             setSecond(second() + 1);
         } 
@@ -129,12 +127,13 @@ public:
     }
 
 private:
-    static constexpr uint32_t YEAR_MASK = 63 << 26;
-    static constexpr uint32_t MONTH_MASK = 16 << 22;
-    static constexpr uint32_t DAY_MASK = 31 << 17;
-    static constexpr uint32_t HOUR_MASK = 31 << 12;
-    static constexpr uint32_t MINUTE_MASK = 63 << 6;
-    static constexpr uint32_t SECOND_MASK = 63;
+
+    static constexpr uint32_t YEAR_MASK = UINT32_C(63) << 26;
+    static constexpr uint32_t MONTH_MASK = UINT32_C(16) << 22;
+    static constexpr uint32_t DAY_MASK = UINT32_C(31) << 17;
+    static constexpr uint32_t HOUR_MASK = UINT32_C(31) << 12;
+    static constexpr uint32_t MINUTE_MASK = UINT32_C(63) << 6;
+    static constexpr uint32_t SECOND_MASK = UINT32_C(63);
 
     uint32_t raw_ = 0;
 
