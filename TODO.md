@@ -1,5 +1,7 @@
 # HW
 
+- weird AVR_IRQ pin fluctuating when ESP turned off... Not sure why... cleaned the board and stuff worked
+
 - audio feedback opamp can have bigger gain, most likely. Needs checking...
 - where to put the extra LC filter for audio?
 
@@ -18,7 +20,9 @@
 
 # SW
 
-- startup progress bar
+- timeout in idle message should be in uint8_t (in minutes)
+- setting time does not work and crashes the lights... No idea why, too tired...
+
 - is the play after wakeup really what we want? 
 - setting the radio station immediately after startup does not really work and produces noise for a long time... (seems like issue with the radio chip)
 - headphones can be set to output and LOW to disable speaker any time

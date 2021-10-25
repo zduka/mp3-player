@@ -148,8 +148,6 @@ public:
         initializeMeasurementsADC();
 
         initializeAudioCapture();
-        
-
 
         // enable control interrupts for buttons
         controlBtn_.setInterrupt(controlButtonChanged);
@@ -163,16 +161,8 @@ public:
     }
 
     static void loop() {
-        if (status_.tick) {
-            // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
-            if (status_.irq && irqCountdown_ == 0)
-                resetESP();
-            // make sure we have a light show
-            lightsTick();
-            cli();
-            status_.tick = false;
-            sei();
-        }
+        if (status_.tick)
+            tick();
         if (status_.i2cRxReady)
             processCommand();
         // if the measurement (headphones, voltage, temp, ...) is ready, measure
@@ -208,6 +198,24 @@ private:
         ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
         ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
         ADC0.SAMPCTRL = 31;
+    }
+    
+    static void tick() {
+        // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
+        if (status_.irq && irqCountdown_ == 0)
+            resetESP();
+        // make sure we have a light show
+        lightsTick();
+        cli();
+        status_.tick = false;
+        sei();
+        // if we have accumulated 64 ticks, do a one second tick check
+        if ((++tickCountdown_ % 64) == 0) {
+            ex_.time.secondTick();
+            // TODO actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
+            //if (--powerCountdown_ == 0)
+            //    sleep();   
+        }
     }
 
     /** Puts the AVR to sleep. 
@@ -252,21 +260,20 @@ private:
             criticalBatteryWarning();
             status_.sleep = true;
         } else {
-            // disable the idle mode so that the player starts playing stuff
-            state_.setIdle(false);
+            powerCountdown_ = 60; // make sure we are awake for at least 1 minute, the ESP will set proper timer when it turns on
             // enable interrupts for rotary encoders
             control_.setInterrupt(controlKnobChanged);
             volume_.setInterrupt(volumeKnobChanged);
-            // enable power to neopixels, esp8266 and other circuits
-            peripheralPowerOn();
-            // TODO show the wakeup progressbar *if* not in silent mode
-            neopixels_.showBar(1,8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness));
-            neopixels_.update();
-            // TODO silent mode
-
             // disable idle mode when waking up
             // TODO perhaps not do this for silent mode? 
             state_.setIdle(false);
+            // enable power to neopixels, esp8266 and other circuits
+            peripheralPowerOn();
+            // TODO show the wakeup progressbar *if* not in silent mode
+            neopixels_.fill(Color::Black());
+            strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness));
+            effectTimeout_ = SPECIAL_LIGHTS_TIMEOUT;
+            // TODO silent mode
         }
     }
 
@@ -744,11 +751,15 @@ private:
             }
             case msg::SetIdle::Id: {
                 auto m = pointer_cast<msg::SetIdle*>(& i2cRxBuffer_);
-                state_.setIdle(m->idle);
-                if (state_.idle())
-                    stopAudioCapture();
-                else
-                    startAudioCapture(AudioADCSource::Audio);
+                if (state_.idle() != m->idle) {
+                    state_.setIdle(m->idle);
+                    if (state_.idle())
+                        stopAudioCapture();
+                    else
+                        startAudioCapture(AudioADCSource::Audio);
+                }
+                // reset the timeout countdown (argument in minutes, we are converting to seconds)
+                powerCountdown_ = static_cast<uint16_t>(m->timeout) * 60;
                 break;
             }
             case msg::SetControlRange::Id: {
@@ -948,7 +959,8 @@ private:
     } status_;
 
     static inline uint8_t irqCountdown_;
-    static inline uint8_t tickCountdown_; 
+    static inline uint8_t tickCountdown_ = 0; 
+    static inline uint16_t powerCountdown_ = 60;
     static inline uint16_t powerOnCountdown_ = 0;
     static inline uint16_t powerOnRTCValue_ = 0;
     static inline uint8_t longPressCounter_ = 0; // [isr]

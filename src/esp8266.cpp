@@ -69,13 +69,20 @@ public:
         updateState();
         getExtendedState(ex_);
         ex_.log();
+        send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         // initialize the chip and core peripherals
         initializeESP();
         initializeLittleFS();
+        send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         initializeSDCard();
+        send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
         initializePlaylists();
+        send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         initializeRadioStations();
+        send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        //initializeWalkieTalkie()
+        send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         //initializeSettings();
         // if this is the initial state, write basic settings from the mode configuration to cached state
         if (state_.initialPowerOn()) {
@@ -85,10 +92,10 @@ public:
         }
         // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
-
-        setMode(Mode::Radio, /* force */ true);
-
+        send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
+        // enter the last used mode
+        setMode(state_.mode(), /* force */ true);
     }
 
     static void loop() {
@@ -459,7 +466,7 @@ private:
     static void play() {
         LOG("Play");
         state_.setIdle(false);
-        send(msg::SetIdle{false});
+        send(msg::SetIdle{false, timeoutPlay_ * 60});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Play();
@@ -481,7 +488,7 @@ private:
     static void pause() {
         LOG("Pause");
         state_.setIdle(true);
-        send(msg::SetIdle{true});
+        send(msg::SetIdle{true, timeoutIdle_ * 60});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Pause();
@@ -846,6 +853,9 @@ private:
 
     static inline State state_;
     static inline ExtendedState ex_;
+
+    static inline uint8_t timeoutIdle_ = DEFAULT_IDLE_TIMEOUT;
+    static inline uint8_t timeoutPlay_ = DEFAULT_PLAY_TIMEOUT;
 
 }; // Player
 
