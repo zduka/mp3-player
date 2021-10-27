@@ -64,6 +64,16 @@ extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
 extern "C" void ADC1_RESRDY_vect(void) __attribute__((signal));
 
+/** We need the actual transmissible state to be in a own structure, guaranteeing that state and extended state are right next to each other in memory.
+ */
+class AVRState {
+public:
+    volatile State state;
+    ExtendedState ex;
+} __attribute__((packed));
+
+static_assert(sizeof(AVRState) == sizeof(State) + sizeof(ExtendedState));
+
 #if (defined TEST_NEOPIXEL)
 
 /** Displays various colors on the neopixel strip after turning on 3v3. 
@@ -128,9 +138,10 @@ void loop() {
 class Player {
 public:
     static void initialize() {
-        Serial.begin(9600);
+        Serial.begin(115200);
+        delay(10);
         USART0.CTRLB &= ~ USART_RXEN_bm;
-        Serial.print("Hello AVR!");
+        LOG("Initializing AVR");
 
         //pinMode(DEBUG_PIN, OUTPUT);
         //digitalWrite(DEBUG_PIN, LOW);
@@ -163,7 +174,8 @@ public:
         initializeI2C();
 
         // set state to initial power on and proceed with a wakeup
-        state_.setInitialPowerOn(true);
+        state_.state.setInitialPowerOn(true);
+
         wakeup();
     }
 
@@ -219,10 +231,13 @@ private:
         sei();
         // if we have accumulated 64 ticks, do a one second tick check
         if ((++tickCountdown_ % 64) == 0) {
-            ex_.time.secondTick();
+            //LOG("time: %u", state_.ex.time.second());
+            state_.ex.time.secondTick();
             // TODO actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
-            if (--powerCountdown_ == 0)
+            if (--powerCountdown_ == 0) {
+                LOG("power countdown timeout");
                 sleep();   
+            }
         }
         //digitalWrite(DEBUG_PIN, LOW);
     }
@@ -230,8 +245,9 @@ private:
     /** Puts the AVR to sleep. 
      */
     static void sleep() {
+        LOG("entering sleep");
         // when we wake up, it will be user wake up, not initial power on
-        state_.setInitialPowerOn(false);
+        state_.state.setInitialPowerOn(false);
         do { // wrapped in a loop to account to allow wakeup to re-enter sleep immediately (such as when low volatge, etc.)
             // disable rotary encoder interrupts so that they do not wake us from sleep
             control_.clearInterrupt();
@@ -244,17 +260,19 @@ private:
             // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
             status_.sleep = true;
             while (status_.sleep) {
+                LOG("sleep");
                 sleep_cpu();
             }
             // clear the button events that led to the wakeup
             // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
-            state_.clearEvents();
+            state_.state.clearEvents();
             // if we are not longer sleeping, wakeup
             wakeup();
         } while (status_.sleep);
     }
 
     static void wakeup() {
+        LOG("Wakeup");
         // enable RTC interrupt every 1/64th of a second
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
@@ -265,7 +283,7 @@ private:
         while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
         }
         measurementsADCReady();
-        if (ex_.measurements.vcc <= BATTERY_CRITICAL_VCC) {
+        if (state_.ex.measurements.vcc <= BATTERY_CRITICAL_VCC) {
             criticalBatteryWarning();
             status_.sleep = true;
         } else {
@@ -275,12 +293,12 @@ private:
             volume_.setInterrupt(volumeKnobChanged);
             // disable idle mode when waking up
             // TODO perhaps not do this for silent mode? 
-            state_.setIdle(false);
+            state_.state.setIdle(false);
             // enable power to neopixels, esp8266 and other circuits
             peripheralPowerOn();
             // TODO show the wakeup progressbar *if* not in silent mode
             neopixels_.fill(Color::Black());
-            strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness));
+            strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(state_.ex.settings.maxBrightness));
             effectTimeout_ = SPECIAL_LIGHTS_TIMEOUT;
             // TODO silent mode
         }
@@ -291,6 +309,7 @@ private:
         Powers on peripherals with both SDA and SCL held low, which puts ESP immediately in deep sleep and then flashes the full LED strip red three times. 
      */
     static void criticalBatteryWarning(uint8_t brightness = 255) {
+        LOG("Critical battery");
         // disable I2C
         TWI0.SCTRLA = 0;
         TWI0.MCTRLA = 0;
@@ -323,6 +342,7 @@ private:
     }
 
     static void peripheralPowerOn() {
+        LOG("3V3 PowerOn");
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         // add a delay so that the capacitor can be charged and voltage stabilized
@@ -330,6 +350,7 @@ private:
     }
 
     static void peripheralPowerOff() {
+        LOG("3V3 PowerOff");
         pinMode(DCDC_PWR, INPUT);
     }
 
@@ -345,7 +366,7 @@ private:
                 value = 110 * 512 / value;
                 value = value * 2;
                 cli();
-                ex_.measurements.vcc = value;
+                state_.ex.measurements.vcc = value;
                 sei();
                 // switch the ADC to be ready to measure the temperature
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
@@ -355,7 +376,7 @@ private:
             case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
                 // TODO calculate the value properly
                 cli();
-                ex_.measurements.temp = value;
+                state_.ex.measurements.temp = value;
                 sei();
                 // fallthrough to the default where we set the next measurement to be that of input voltage
             }
@@ -390,20 +411,20 @@ private:
             checkButtonWakeup(controlBtn_.pressed());
         } else if (controlBtn_.pressed()) {
             longPressCounter_ = BUTTON_LONG_PRESS_TICKS;
-            state_.setControlButtonDown();
+            state_.state.setControlButtonDown();
             setIrq();
-        } else if (state_.controlButtonDown()) { // released & previous press recorded
-            state_.setControlButtonDown(false);
+        } else if (state_.state.controlButtonDown()) { // released & previous press recorded
+            state_.state.setControlButtonDown(false);
             // if the other button is down, make sure its subsequent release will not trigger anything, emit long double press if long press, or ignore short press
-            if (state_.volumeButtonDown()) {
-                state_.setVolumeButtonDown(false); // make sure the other button's release won't trigger anything
+            if (state_.state.volumeButtonDown()) {
+                state_.state.setVolumeButtonDown(false); // make sure the other button's release won't trigger anything
                 if (longPressCounter_ == 0)
-                    state_.setDoubleButtonLongPress();
+                    state_.state.setDoubleButtonLongPress();
             // otherwise emit long or short press accordingly
             } else if (longPressCounter_ == 0) {
-                state_.setControlButtonLongPress();
+                state_.state.setControlButtonLongPress();
             } else {
-                state_.setControlButtonPress();
+                state_.state.setControlButtonPress();
             }
             setIrq();
         }
@@ -417,20 +438,20 @@ private:
         // if this is a press, reset the long press counter and update the state
         } else if (volumeBtn_.pressed()) {
             longPressCounter_ = BUTTON_LONG_PRESS_TICKS;
-            state_.setVolumeButtonDown();
+            state_.state.setVolumeButtonDown();
             setIrq();
-        } else if (state_.volumeButtonDown()) { // released & previous press recorded
-            state_.setVolumeButtonDown(false);
+        } else if (state_.state.volumeButtonDown()) { // released & previous press recorded
+            state_.state.setVolumeButtonDown(false);
             // if the other button is down, make sure its subsequent release will not trigger anything, emit long double press if long press, or ignore short press
-            if (state_.controlButtonDown()) {
-                state_.setControlButtonDown(false); // make sure the other button's release won't trigger anything
+            if (state_.state.controlButtonDown()) {
+                state_.state.setControlButtonDown(false); // make sure the other button's release won't trigger anything
                 if (longPressCounter_ == 0)
-                    state_.setDoubleButtonLongPress();
+                    state_.state.setDoubleButtonLongPress();
             // otherwise emit long or short press accordingly
             } else if (longPressCounter_ == 0) {
-                state_.setVolumeButtonLongPress();
+                state_.state.setVolumeButtonLongPress();
             } else {
-                state_.setVolumeButtonPress();
+                state_.state.setVolumeButtonPress();
             }
             setIrq();
         }
@@ -453,15 +474,15 @@ private:
     //@{
     static void controlKnobChanged() {
         control_.poll();
-        state_.setControlValue(control_.value());
-        state_.setControlTurn();
+        state_.state.setControlValue(control_.value());
+        state_.state.setControlTurn();
         setIrq();
     }
 
     static void volumeKnobChanged() {
         volume_.poll();
-        state_.setVolumeValue(volume_.value());
-        state_.setVolumeTurn();
+        state_.state.setVolumeValue(volume_.value());
+        state_.state.setVolumeTurn();
         setIrq();
     }
     //@}
@@ -512,16 +533,16 @@ private:
      */
     static void lightsTick() {
         uint8_t step = 1;
-        if (state_.controlButtonDown() && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
+        if (state_.state.controlButtonDown() && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
             // if the long press counter is not 0, display the countdown bar
             if (longPressCounter_ != 0) {
-                Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.mode());
-                color = color.withBrightness(ex_.settings.maxBrightness);
+                Color color = state_.state.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.state.mode());
+                color = color.withBrightness(state_.ex.settings.maxBrightness);
                 strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
                 step = 255;
             } else {
-                Color color = state_.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(ex_.getNextMode(state_.mode()));
-                color = color.withBrightness(ex_.settings.maxBrightness);
+                Color color = state_.state.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.ex.getNextMode(state_.state.mode()));
+                color = color.withBrightness(state_.ex.settings.maxBrightness);
                 strip_.fill(color);
             }
             // set effect timeout to one, which will immediately trigger revert back to night lights mode as soon as the button is released
@@ -529,9 +550,9 @@ private:
         } else if (effectTimeout_ > 0) {
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
-                effectHue_ = ex_.nightLight.colorHue();
-                effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
-                if (ex_.nightLight.effect == NightLightEffect::AudioLights) {
+                effectHue_ = state_.ex.nightLight.colorHue();
+                effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
+                if (state_.ex.nightLight.effect == NightLightEffect::AudioLights) {
                     effect_.audio.maxDelta = 0;
                     effect_.audio.minDelta = 255;
                 }
@@ -552,12 +573,12 @@ private:
      */
     static void nightLightsTick(uint8_t & step) {
         // update the hue of the effect color, if in rainbow mode
-        if (/*tickCountdown_ % 16 == 0 && */ ex_.nightLight.hue == NightLightState::HUE_RAINBOW) {
+        if (/*tickCountdown_ % 16 == 0 && */ state_.ex.nightLight.hue == NightLightState::HUE_RAINBOW) {
             effectHue_ += 1;
-            effectColor_ = Color::HSV(effectHue_, 255, ex_.settings.maxBrightness);
+            effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
         }
-        ex_.nightLight.effect = NightLightEffect::AudioLights;
-        switch (ex_.nightLight.effect) {
+        state_.ex.nightLight.effect = NightLightEffect::AudioLights;
+        switch (state_.ex.nightLight.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...
             case NightLightEffect::Off:
             default:
@@ -565,7 +586,7 @@ private:
                 return;
             // 
             case NightLightEffect::AudioLights: {
-                if (state_.idle()) {
+                if (state_.state.idle()) {
                     // TODO do we want this, or do we want some breathing effect, i.e. a fallthrough? 
                     strip_.fill(Color::Black());
                 } else {
@@ -732,8 +753,9 @@ private:
     /** Hard-resets the ESP8266. 
      */
     static void resetESP() {
+        LOG("Resetting ESP");
         clearIrq(); // this is necessary so that ESP boots into a normal mode
-
+        // TODO
     }
 
     static void processCommand() {
@@ -743,17 +765,20 @@ private:
              */
             case msg::SetExtendedState::Id: {
                 auto m = pointer_cast<msg::SetExtendedState*>(& i2cRxBuffer_);
-                uint8_t * target = pointer_cast<uint8_t*>(&ex_) + m->offset;
+                LOG("cmd SetExtendedState s: %u, o: %u", m->size, m->offset);
+                uint8_t * target = pointer_cast<uint8_t*>(&state_.ex) + m->offset;
                 memcpy(target, i2cRxBuffer_ + sizeof(msg::SetExtendedState), m->size);
                 break;
             }
             case msg::PowerOff::Id: {
+                LOG("cmd PowerOff");
                 // TODO
                 break;
             }
             case msg::SetMode::Id: {
                 auto m = pointer_cast<msg::SetMode*>(& i2cRxBuffer_);
-                state_.setMode(m->mode);
+                LOG("cmd SetMode m: %u", m->mode);
+                state_.state.setMode(m->mode);
                 if (m->mode == Mode::Radio)
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
                 else 
@@ -762,8 +787,9 @@ private:
             }
             case msg::SetIdle::Id: {
                 auto m = pointer_cast<msg::SetIdle*>(& i2cRxBuffer_);
-                state_.setIdle(m->idle);
-                if (state_.idle())
+                LOG("cmd SetIdle, timeout: %u", m->timeout);
+                state_.state.setIdle(m->idle);
+                if (state_.state.idle())
                     stopAudioCapture();
                 else
                     startAudioCapture(AudioADCSource::Audio);
@@ -773,42 +799,49 @@ private:
             }
             case msg::SetControlRange::Id: {
                 auto m = pointer_cast<msg::SetControlRange*>(& i2cRxBuffer_);
+                LOG("cmd SetControlRange v: %u, m: %u", m->value, m->max);
                 control_.setValues(m->value, m->max);
-                state_.setControlValue(m->value);
+                state_.state.setControlValue(m->value);
                 break;
             }
             case msg::SetVolumeRange::Id: {
                 auto m = pointer_cast<msg::SetVolumeRange*>(& i2cRxBuffer_);
+                LOG("cmd SetVolumeRange v: %u, m: %u", m->value, m->max);
                 volume_.setValues(m->value, m->max);
-                state_.setVolumeValue(m->value);
+                state_.state.setVolumeValue(m->value);
                 break;
             }
             case msg::LightsFill::Id: {
                 auto m = pointer_cast<msg::LightsFill*>(& i2cRxBuffer_);
+                //LOG("cmd LightsFill rgb: %u,%u,%u, t: %u", m->color.r, m->color.g, m->color.b, m->timeout);
                 strip_.fill(m->color);
                 effectTimeout_ = m->timeout;
                 break;
             }
             case msg::LightsPoint::Id: {
                 auto m = pointer_cast<msg::LightsPoint*>(& i2cRxBuffer_);
+                //LOG("cmd LightsPoint v: %u, m: %u, rgb: %u,%u,%u, t: %u", m->value, m->max, m->color.r, m->color.g, m->color.b, m->timeout);
                 strip_.showPoint(m->value, m->max, m->color);
                 effectTimeout_ = m->timeout;
                 break;
             }
             case msg::LightsBar::Id: {
                 auto m = pointer_cast<msg::LightsPoint*>(& i2cRxBuffer_);
+                //LOG("cmd LightsBar v: %u, m: %u, rgb: %x%x%x, t: %u", m->value, m->max, m->color.r, m->color.g, m->color.b, m->timeout);
                 strip_.showBar(m->value, m->max, m->color);
                 effectTimeout_ = m->timeout;
                 break;
             }
             case msg::LightsBarCentered::Id: {
                 auto m = pointer_cast<msg::LightsPoint*>(& i2cRxBuffer_);
+                //LOG("cmd LightsBarCentered v: %u, m: %u, rgb: %u,%u,%u, t: %u", m->value, m->max, m->color.r, m->color.g, m->color.b, m->timeout);
                 strip_.showBarCentered(m->value, m->max, m->color);
                 effectTimeout_ = m->timeout;
                 break;
             }
             case msg::LightsColors::Id: {
                 auto m = pointer_cast<msg::LightsColors*>(& i2cRxBuffer_);
+                //LOG("cmd LightsColors, t: %u", m->timeout);
                 for (uint8_t i = 0; i < 8; ++i)
                     strip_[i] = m->colors[i];
                 effectTimeout_ = m->timeout;
@@ -818,6 +851,7 @@ private:
             case msg::StopRecording::Id:
             default:
                 // TODO what to do in such an error? 
+                LOG("cmd unrecognized id %u", i2cRxBuffer_[0]);
                 break;
 
         }
@@ -850,9 +884,9 @@ private:
         sizeof(ExtendedState) + 
         sizeof(DateTime) +
         sizeof(DateTime);
-    inline static volatile State state_;
-    // no need for this to be volatile as the updates and reads are non-confliciting
-    inline static ExtendedState ex_;
+
+    inline static AVRState state_;
+
 //@}
 
 /** \name Audio Recording information & buffer. 
@@ -928,6 +962,7 @@ private:
         The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
      */
     static void showByte(uint8_t value, Color const & color) {
+        LOG("error: %u", value);
         cli();
         neopixels_[7] = (value & 1) ? color : Color::Black();
         neopixels_[6] = (value & 2) ? color : Color::Black();
@@ -978,7 +1013,6 @@ private:
 
 } __attribute__((packed)); // Player
 
-
 #define I2C_DATA_MASK (TWI_DIF_bm | TWI_DIR_bm) 
 #define I2C_DATA_TX (TWI_DIF_bm | TWI_DIR_bm)
 #define I2C_DATA_RX (TWI_DIF_bm)
@@ -1001,7 +1035,7 @@ ISR(RTC_PIT_vect) {
         Player::powerOnCountdown_ = (x > Player::powerOnCountdown_) ? 0 : (Player::powerOnCountdown_ - x);
         Player::powerOnRTCValue_ = 0;
         // do one second tick
-        Player::ex_.time.secondTick();
+        Player::state_.ex.time.secondTick();
 
         // TODO check alarm, set wakeup bits and wake up? 
     } else {
@@ -1032,7 +1066,7 @@ ISR(TWI0_TWIS_vect) {
             // if we have just sent the events part of the state, clear them so that new events can be written - as we do this inside an IRQ that just copied the particular byte, this is the best way of making sure new events can be added after these were sent
             // of course, if the I2C transmission would fail, then we have lost the events, but if the transmission fails, the software has bigger problems to think about
             if (Player::i2cTxBuffer_ == (uint8_t *)(& Player::state_) + 2)
-                Player::state_.clearEvents();
+                Player::state_.state.clearEvents();
         // after the transaction has been trasnmitted, switch to sending the state, if not already sending it
         } else if (Player::i2cTxBuffer_ != (uint8_t*)(& Player::state_ + 1)) {
             // if we have successfully sent a recording buffer, increment the read index accordingly
@@ -1194,7 +1228,7 @@ public:
         }
         if (Status_.secondTick) {
             Status_.secondTick = false;
-            if (State_.voltage() <= BATTERY_CRITICAL) {
+            if (state_.state.voltage() <= BATTERY_CRITICAL) {
                 CriticalBattery();
                 return;
             }
@@ -1206,18 +1240,18 @@ private:
     static void Tick() {
         // if sleeping & button(s) are pressed, we have 1/32th of a second tick and must determine if wake up
         // if not sleeping, the long press counters must be increased and second tick determined
-        if (! Status_.sleep || State_.controlDown() || State_.volumeDown()) {
+        if (! Status_.sleep || state_.state.controlDown() || state_.state.volumeDown()) {
             bool wakeup = false;
-            if (State_.controlDown() && ControlBtnCounter_ > 0 && --ControlBtnCounter_ == 0) 
+            if (state_.state.controlDown() && ControlBtnCounter_ > 0 && --ControlBtnCounter_ == 0) 
                 wakeup = true;
-            if (State_.volumeDown() && VolumeBtnCounter_ > 0 && --VolumeBtnCounter_ ==0) 
+            if (state_.state.volumeDown() && VolumeBtnCounter_ > 0 && --VolumeBtnCounter_ ==0) 
                 wakeup = true;
             // if sleeping, check if we should wake up, otherwise initiate the tick in main loop
             if (Status_.sleep) {
                 if (wakeup) {
                     // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
-                    State_.setControlDown(false);
-                    State_.setVolumeDown(false);
+                    state_.state.setControlDown(false);
+                    state_.state.setVolumeDown(false);
                     Status_.sleep = false;
                 }
             } else {
@@ -1247,7 +1281,7 @@ private:
         }
         VoltageAndTemperature();
         // if the voltage is below low battery threshold
-        if (State_.voltage() <= BATTERY_CRITICAL) {
+        if (state_.state.voltage() <= BATTERY_CRITICAL) {
             CriticalBattery();
             return;
         }
@@ -1281,7 +1315,7 @@ private:
             }
             // clear the button events that led to the wakeup
             // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
-            State_.clearButtonEvents();
+            state_.state.clearButtonEvents();
             // if we are not longer sleeping, wakeup
             Wakeup();
         } while (Status_.sleep == true);
@@ -1298,7 +1332,7 @@ private:
         switch (ADC0.MUXPOS) {
             case ADC_MUXPOS_INTREF_gc: { // VCC Sense
                 cli();
-                State_.setVoltage(value);
+                state_.state.setVoltage(value);
                 sei();
                 // switch the ADC to be ready to measure the temperature
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
@@ -1307,7 +1341,7 @@ private:
             }
             case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
                 cli();
-                State_.setTemp(value);
+                state_.state.setTemp(value);
                 sei();
                 // fallthrough to the default where we set the next measurement to be that of input voltage
             }
@@ -1359,12 +1393,12 @@ private:
                 msg.applyTo(State_);
                 sei();
                 // sync the volume and control states
-                Control_.setValues(State_.control(), State_.maxControl());
-                Volume_.setValues(State_.volume(), State_.maxVolume());
+                Control_.setValues(state_.state.control(), state_.state.maxControl());
+                Volume_.setValues(state_.state.volume(), state_.state.maxVolume());
                 // sync the effect color for the night mode
-                EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
+                EffectColor_ = state_.state.nightLightColor(AccentColor_, MaxBrightness_);
                 // set the audio source accordingly
-                if (State_.mode() == Mode::Radio)
+                if (state_.state.mode() == Mode::Radio)
                     digitalWrite(AUDIO_SRC, HIGH);
                 else
                     digitalWrite(AUDIO_SRC, LOW); 
@@ -1396,7 +1430,7 @@ private:
                 cli();
                 msg.applyTo(State_);
                 sei();
-                EffectColor_ = State_.nightLightColor(AccentColor_, MaxBrightness_);
+                EffectColor_ = state_.state.nightLightColor(AccentColor_, MaxBrightness_);
                 break;
             }
             case msg::SetAccentColor::Id: {
@@ -1448,7 +1482,7 @@ private:
             case msg::SetAudioLights::Id: {
                 auto msg = msg::At<msg::SetAudioLights>(I2C_RX_Buffer_);
                 msg.applyTo(State_);
-                if (State_.audioLights()) 
+                if (state_.state.audioLights()) 
                     StartAudioADC(AudioADCSource::Audio);
                 else
                     StopAudioADC();
@@ -1456,7 +1490,7 @@ private:
             }
             case msg::Play::Id: {
                 // TODO enable sound out
-                if (State_.audioLights()) 
+                if (state_.state.audioLights()) 
                     StartAudioADC(AudioADCSource::Audio);
                 break;
             }
@@ -1497,13 +1531,13 @@ private:
 
     static void ControlValueChanged() { // IRQ
         Control_.poll();
-        State_.setControl(Control_.value());
+        state_.state.setControl(Control_.value());
         SetIrq();
     }   
 
     static void VolumeValueChanged() { // IRQ
         Volume_.poll(); 
-        State_.setVolume(Volume_.value());
+        state_.state.setVolume(Volume_.value());
         SetIrq();
     } 
 
@@ -1511,30 +1545,30 @@ private:
         ControlBtn_.poll();
         if (ControlBtn_.pressed()) {
             ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
-            State_.setControlDown(true);
+            state_.state.setControlDown(true);
             // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
             if (Status_.sleep) {
                 while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
                 RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;     
             }
-        } else if (State_.controlDown()) {
-            State_.setControlDown(false);
+        } else if (state_.state.controlDown()) {
+            state_.state.setControlDown(false);
             // if the counter is greater than 0, we are dealing with a short press
             if (ControlBtnCounter_ > 0) {
                 if (Status_.doubleLongPress == true)
-                    State_.setVolumeLongPress();
-                State_.setControlPress();
+                    state_.state.setVolumeLongPress();
+                state_.state.setControlPress();
                 ControlBtnCounter_ = 0;
                 Status_.doubleLongPress = false;
             // if the counter is 0, we are looking at a long press
             } else {
                 if (Status_.doubleLongPress == true) { // the other button has been long pressed
-                    State_.setDoubleLongPress();
+                    state_.state.setDoubleLongPress();
                     Status_.doubleLongPress = false;
-                } else if (State_.volumeDown()) { // this long press has to be delayed as it might be double
+                } else if (state_.state.volumeDown()) { // this long press has to be delayed as it might be double
                     Status_.doubleLongPress = true;
                 } else { // emit long press
-                    State_.setControlLongPress();
+                    state_.state.setControlLongPress();
                     // wake up from sleep if sleeping
                     Status_.sleep = false;
                 }
@@ -1550,30 +1584,30 @@ private:
         VolumeBtn_.poll();
         if (VolumeBtn_.pressed()) {
             VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
-            State_.setVolumeDown(true);
+            state_.state.setVolumeDown(true);
             // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
             if (Status_.sleep) {
                 while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
                 RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;     
             }
         } else {
-            State_.setVolumeDown(false);
+            state_.state.setVolumeDown(false);
             // if the counter is greater than 0, we are dealing with a short press
             if (VolumeBtnCounter_ > 0) {
                 if (Status_.doubleLongPress == true)
-                    State_.setControlLongPress();
-                State_.setVolumePress();
+                    state_.state.setControlLongPress();
+                state_.state.setVolumePress();
                 VolumeBtnCounter_ = 0;
                 Status_.doubleLongPress = false;
             // if the counter is 0, we are looking at a long press
             } else {
                 if (Status_.doubleLongPress == true) { // the other button has been long pressed
-                    State_.setDoubleLongPress();
+                    state_.state.setDoubleLongPress();
                     Status_.doubleLongPress = false;
-                } else if (State_.controlDown()) { // this long press has to be delayed as it might be double
+                } else if (state_.state.controlDown()) { // this long press has to be delayed as it might be double
                     Status_.doubleLongPress = true;
                 } else { // emit long press
-                    State_.setVolumeLongPress();
+                    state_.state.setVolumeLongPress();
                     // wake up from sleep if sleeping
                     Status_.sleep = false;
                 }
@@ -1602,7 +1636,7 @@ private:
         // always start fresh
         uint8_t step = max(MaxBrightness_ / 32, 1);
         // when a button is down then the strip shows the long press progress first and foremost, unless we are recoding in which case display the audiolights of the recorded message
-        if (State_.volumeDown() || State_.controlDown()) {
+        if (state_.state.volumeDown() || state_.state.controlDown()) {
             if (Status_.recording) {
                 AudioLights(step);
             } else {
@@ -1617,14 +1651,14 @@ private:
             Lights_.moveTowards(SpecialLights_, step);
             --LightsCounter_ == 0;
         // otherwise, show network connecting bar, if currently connecting to a network
-        } else if (State_.wifiStatus() == WiFiStatus::Connecting) {
+        } else if (state_.state.wifiStatus() == WiFiStatus::Connecting) {
             Lights_.showCenteredBar(Status_.ticksCounter, 63, Color::Blue().withBrightness(MaxBrightness_));
         // if in night light mode, show the selected effect
-        } else if (State_.mode() == Mode::NightLight) {
+        } else if (state_.state.mode() == Mode::NightLight) {
             NightLight(step);
         // display audio lights now
         // TODO remove the true flag and actually work this based on mode & audio lights state
-        } else if (State_.audioLights()) {
+        } else if (state_.state.audioLights()) {
             AudioLights(step);
         // otherwise the lights are off
         } else {
@@ -1646,18 +1680,18 @@ private:
             notificationBrightness = notificationBrightness * (63 - Status_.ticksCounter) / 16;
         // after done, the bar as such, graft on it any notification LEDs with have
         if (Time_.second() % 2) {
-            if (State_.wifiStatus() == WiFiStatus::Connected || State_.wifiStatus() == WiFiStatus::SoftAP)
+            if (state_.state.wifiStatus() == WiFiStatus::Connected || state_.state.wifiStatus() == WiFiStatus::SoftAP)
                 Neopixels_[0].add(Color::Blue().withBrightness(notificationBrightness));
         // the low battery warning blinks out of sync with the other notifications
         } else {
-            if (State_.voltage() <= BATTERY_LOW)
+            if (state_.state.voltage() <= BATTERY_LOW)
                 Neopixels_[7].add(Color::Red().withBrightness(notificationBrightness));
         }
     }
 
     static void NightLight(uint8_t & step) {
         step = 255; // pixels will be synced, not moved towards
-        switch (State_.nightLightEffect()) {
+        switch (state_.state.nightLightEffect()) {
             case NightLightEffect::Color:
                 Lights_.fill(EffectColor_);
                 break;
@@ -1688,7 +1722,7 @@ private:
             }
         }
         // if we are in rainbow mode, update the effect color hue
-        if (State_.nightLightHue() == State::NIGHTLIGHT_RAINBOW_HUE) {
+        if (state_.state.nightLightHue() == State::NIGHTLIGHT_RAINBOW_HUE) {
             uint16_t hue = EffectHelper_ & 0xfff;
             hue += 16;
             if (hue > 0xfff)
@@ -1804,7 +1838,7 @@ ISR(TWI0_TWIS_vect) {
             TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
             // first byte of state is the events of the buttons, so once we send them, clear them so that we don't send them again
             if (Player::I2C_TX_Offset_ == 1 && Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
-                Player::State_.clearButtonEvents();
+                Player::state_.state.clearButtonEvents();
         // after the selected buffer has been sent, if the buffer is was not state, switch to state and continue sending as long as master wants more data
         } else if (Player::I2C_Current_TX_Mode_ != Player::I2C_TX_Mode::State) {
             if (Player::I2C_Current_TX_Mode_ == Player::I2C_TX_Mode::Recording)

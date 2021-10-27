@@ -361,6 +361,11 @@ public:
         raw_ = value ? (raw_ | RADIO_FORCE_MONO) : (raw_ & ~RADIO_FORCE_MONO);
     }
 
+    void log() const {
+        LOG("Settings:");
+        LOG("    maxBrightness: %u", maxBrightness);
+    }
+
 
     uint8_t maxBrightness = DEFAULT_BRIGHTNESS; 
 
@@ -563,6 +568,7 @@ public:
 
     void log() const {
         measurements.log();
+        settings.log();
         mp3.log();
         radio.log();
         walkieTalkie.log();
@@ -573,7 +579,3 @@ public:
 } __attribute__((packed)); // ExtendedState
 
 static_assert(sizeof(ExtendedState) == 28);
-
-
-
-

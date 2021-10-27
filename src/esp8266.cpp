@@ -191,13 +191,22 @@ private:
     }
 
     template<typename T>
-    static void send(T const & msg) {
-        Wire.beginTransmission(AVR_I2C_ADDRESS);
-        unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
-        Wire.write(msgBytes, sizeof(T));
-        uint8_t status = Wire.endTransmission();
-        if (status != 0)
-            ERROR("I2C command failed: %u", status);
+    static void send(T const & msg, unsigned retries = 1) {
+        while (true) {
+            Wire.beginTransmission(AVR_I2C_ADDRESS);
+            unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
+            Wire.write(msgBytes, sizeof(T));
+            uint8_t status = Wire.endTransmission();
+            if (status == 0)
+                return;
+            if (retries-- == 0) {
+                ERROR("I2C command failed: %u", status);
+                return;
+            } else {
+                LOG("retrying I2C command, failed: %u", status);
+            }
+            delay(10); 
+        }
     }
 
     template<typename T>
