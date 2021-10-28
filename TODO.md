@@ -7,21 +7,20 @@
 
 - V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
 - check charging detection & charging power dissipation, low battery, AC power - lower charging power to ~0.5A to be on the safe side (2k7), remove LEDs
-- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
 
 - radio antenna seem to work rather bad in the new board version
-- volume seems to be really high, at least headphones
-- check that neopixels don't interefere with radio reception
 
 
-- verify the I2S output vdiv (R3 + R10, R8 + R14) values so that the volume is similar to the radio
+- esp is too quiet while radio is a bit too loud, verify the I2S output vdiv (R3 + R10, R8 + R14) values so that the volume is similar to the radio
 - determine if low pass filter after audio selection is useful, and its values (R4 + C13, R13 + C19)
 - determine useful headphone max volume (R7, R12). Setting this to non-zero may also mean that we can use smaller value for the headphone decoupling caps (C10, C14)
+- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
 
 # SW
 
-- timeout in idle message should be in uint8_t (in minutes)
+- radio stereo mode check/change/etc
 
+- idle light show for audio lights
 - is the play after wakeup really what we want? 
 - setting the radio station immediately after startup does not really work and produces noise for a long time... (seems like issue with the radio chip)
 - headphones can be set to output and LOW to disable speaker any time
@@ -47,10 +46,8 @@
 - only one channel for the Walkie-Talkie bot 
 - approaching memory limit for ESP...
 - actually implement downloading telegram file
-- wifi connecting gauge is wrong direction
 - check time and update it
 - longer delay before power down in night light mode
-- wifi_off (http) does not inform about success
 - add authentication
 
  # Missing Features

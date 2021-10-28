@@ -50,7 +50,7 @@ namespace msg {
      */
     MESSAGE(SetIdle,
         bool idle;
-        uint16_t timeout;
+        uint8_t timeout;
         SetIdle(bool value, uint16_t timeout):
             idle{value},
             timeout{value} {

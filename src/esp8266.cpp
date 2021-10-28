@@ -285,7 +285,11 @@ private:
 
     static void controlDown() {
         LOG("Control down");
-
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                 if (status_.recording)
+                     stopRecording(/*cancel*/ true);
+        }
     }
 
     static void controlUp() {
@@ -380,11 +384,20 @@ private:
      */
     static void volumeDown() {
         LOG("Volume down");
-
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                startRecording();
+                break;
+        }
     }
 
     static void volumeUp() {
         LOG("Volume up");
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                stopRecording();
+                break;
+        }
     }
 
     /** Play/Pause in mp3, radio and night-lights mode. 
@@ -476,7 +489,7 @@ private:
     static void play() {
         LOG("Play");
         state_.setIdle(false);
-        send(msg::SetIdle{false, timeoutPlay_ * 60});
+        send(msg::SetIdle{false, timeoutPlay_});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Play();
@@ -498,7 +511,7 @@ private:
     static void pause() {
         LOG("Pause");
         state_.setIdle(true);
-        send(msg::SetIdle{true, timeoutIdle_ * 60});
+        send(msg::SetIdle{true, timeoutIdle_});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Pause();
@@ -687,6 +700,8 @@ private:
     //@}
 
     /** \name Radio Mode
+     
+        When enabled, allows the reception of FM radio via a RDA5807M module.
      */
     //@{
     /** Initializes the predefined radio stations from the SD card. 
@@ -762,19 +777,35 @@ private:
     //@}
 
     /** \name Walkie-Talkie Mode
+     
+        The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
      */
     //@{
+
+    static void startRecording() {
+        if (!recordingReady_ || !recording_.begin("/rec.wav")) {
+            LOG("Unable to open recording target file or recording not ready");
+            send(msg::LightsFill{Color::Red().withBrightness(ex_.settings.maxBrightness)});
+        } else {
+            LOG("Recording...");
+            status_.recording = true;
+            send(msg::StartRecording());
+            recordingReady_ = false;
+        }        
+    }
         
     static void stopRecording(bool cancel = false) {
         if (status_.recording) {
             // tell avr to return to normal state & stop own recording
             send(msg::StopRecording{});
             recording_.end();
-            if (! cancel) {
-                LOG("Recording done");
-                // TODO
-            } else {
+            status_.recording = false;
+            if (cancel) {
                 LOG("Recording cancelled");
+                send(msg::LightsFill{Color::Red().withBrightness(ex_.settings.maxBrightness)});
+                recordingReady_ = true;
+            } else {
+                LOG("Recording done");
                 // TODO
             }
         }
@@ -803,6 +834,12 @@ private:
         }
     }
 
+    /** If true when recording can be done, i.e. the prevcious recording buffer has been sent. False if the buffer is currently being sent. 
+     */
+    static inline bool recordingReady_ = true;
+
+    /** The WAV 8kHz recorder to an SD card file
+     */
     static inline WavWriter recording_;
 
     //@}
@@ -849,6 +886,14 @@ private:
     /** \name Sync mode
      */
     //@{
+
+    //@}
+
+    /** \name WiFi & Server
+     */
+    //@{
+
+    //static inline ESP8266WebServer Server_{80};
 
     //@}
 

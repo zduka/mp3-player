@@ -557,6 +557,8 @@ private:
                     effect_.audio.minDelta = 255;
                 }
             }
+        } else if (status_.recording) {
+            audioLightsTick(step);
         } else {
             //digitalWrite(DEBUG_PIN, HIGH);            
             nightLightsTick(step);
@@ -586,39 +588,7 @@ private:
                 return;
             // 
             case NightLightEffect::AudioLights: {
-                if (state_.state.idle()) {
-                    // TODO do we want this, or do we want some breathing effect, i.e. a fallthrough? 
-                    strip_.fill(Color::Black());
-                } else {
-                    uint8_t ri = recordingWrite_;
-                    uint8_t min = 255;
-                    uint8_t max = 0;
-                    for (uint8_t i = 0; i < 125; ++i) {
-                        uint8_t x = recordingBuffer_[--ri];
-                        min = (x < min) ? x : min;
-                        max = (x > max) ? x : max;
-                    }
-                    uint8_t d = max - min;
-                    effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
-                    effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
-                    strip_.showBarCentered(
-                        d - effect_.audio.minDelta,
-                        max(effect_.audio.maxDelta - effect_.audio.minDelta, 8),
-                        effectColor_
-                    );
-                    // fade the delta range at 1/32 the speed
-                    if (tickCountdown_ % 32 == 0) {
-                        if (effect_.audio.maxDelta > d)
-                            --effect_.audio.maxDelta;
-                        if (effect_.audio.minDelta < d)
-                            ++effect_.audio.minDelta;
-                    }
-                    if (effect_.audio.lastDelta < d)
-                        step = 255;
-                    else 
-                        step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
-                    effect_.audio.lastDelta = d;
-                }
+                audioLightsTick(step);
                 return;
             }
             case NightLightEffect::Breathe: {
@@ -652,6 +622,42 @@ private:
                 effectCounter_ = 0;
         }
         step = 255;
+    }
+
+    static void audioLightsTick(uint8_t & step) {
+        if (state_.state.idle()) {
+            // TODO do we want this, or do we want some breathing effect, i.e. a fallthrough? 
+            strip_.fill(Color::Black());
+        } else {
+            uint8_t ri = recordingWrite_;
+            uint8_t min = 255;
+            uint8_t max = 0;
+            for (uint8_t i = 0; i < 125; ++i) {
+                uint8_t x = recordingBuffer_[--ri];
+                min = (x < min) ? x : min;
+                max = (x > max) ? x : max;
+            }
+            uint8_t d = max - min;
+            effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
+            effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
+            strip_.showBarCentered(
+                d - effect_.audio.minDelta,
+                max(effect_.audio.maxDelta - effect_.audio.minDelta, 8),
+                effectColor_
+            );
+            // fade the delta range at 1/32 the speed
+            if (tickCountdown_ % 32 == 0) {
+                if (effect_.audio.maxDelta > d)
+                    --effect_.audio.maxDelta;
+                if (effect_.audio.minDelta < d)
+                    ++effect_.audio.minDelta;
+            }
+            if (effect_.audio.lastDelta < d)
+                step = 255;
+            else 
+                step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
+            effect_.audio.lastDelta = d;
+        }
     }
 
     inline static NeopixelStrip<NEOPIXEL, 8> neopixels_;
@@ -794,7 +800,7 @@ private:
                 else
                     startAudioCapture(AudioADCSource::Audio);
                 // reset the timeout countdown (argument in minutes, we are converting to seconds)
-                powerCountdown_ = static_cast<uint16_t>(m->timeout);
+                powerCountdown_ = static_cast<uint16_t>(m->timeout) * 60;
                 break;
             }
             case msg::SetControlRange::Id: {
@@ -848,7 +854,17 @@ private:
                 break;
             }
             case msg::StartRecording::Id:
+                LOG("cmd StartRecording");
+                status_.recording = true;
+                startAudioCapture(AudioADCSource::Mic);
+                // set the effect color to mode color for the lights bar from microphone
+                effectColor_ = MODE_COLOR_WALKIE_TALKIE.withBrightness(state_.ex.settings.maxBrightness);
+                break;            
             case msg::StopRecording::Id:
+                LOG("cmd StopRecording");
+                status_.recording = false;
+                stopAudioCapture();
+                break;
             default:
                 // TODO what to do in such an error? 
                 LOG("cmd unrecognized id %u", i2cRxBuffer_[0]);
@@ -878,12 +894,6 @@ private:
  
     */
 //@{
-
-    inline static constexpr uint8_t I2C_TRANSMISSIBLE_DATA_SIZE =
-        sizeof(State) +
-        sizeof(ExtendedState) + 
-        sizeof(DateTime) +
-        sizeof(DateTime);
 
     inline static AVRState state_;
 
@@ -929,6 +939,7 @@ private:
     }
 
     static void startAudioCapture(AudioADCSource source) {
+        stopAudioCapture(); // make sure we will not be interefered in the setup routine
         recordingRead_ = 0;
         recordingWrite_ = 0;
         // select ADC channel to either MIC or audio ADC
@@ -1091,7 +1102,7 @@ ISR(TWI0_TWIS_vect) {
         // if i2cready is not set, and rx offset is 1, we have previously received one byte, but STOP condition has not been sent, i.e. this is repeated start, and the received byte is TxOffset
         if (Player::i2cRxOffset_ == 1 && ! Player::status_.i2cRxReady) {
             Player::i2cTxBuffer_ = (uint8_t*)(& Player::state_) + Player::i2cRxBuffer_[0];
-            Player::i2cTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE - Player::i2cRxBuffer_[0];
+            Player::i2cTxLength_ = sizeof(AVRState) - Player::i2cRxBuffer_[0];
             Player::i2cRxOffset_ = 0;
         // otherwise, if currently recording, prepare to send next 32 bytes of audio, if available        
         } else if (Player::status_.recording) {
@@ -1100,7 +1111,7 @@ ISR(TWI0_TWIS_vect) {
         // or if not recording, do the default action, which is to send the state
         } else {
             Player::i2cTxBuffer_ = (uint8_t*)(& Player::state_);
-            Player::i2cTxLength_ = Player::I2C_TRANSMISSIBLE_DATA_SIZE;
+            Player::i2cTxLength_ = sizeof(AVRState);
         }
         // depending on the available length of data to be sent either ACK or NACK if there is nothing to send
         if (Player::i2cTxLength_ > 0) 
@@ -1145,8 +1156,6 @@ void setup() {
 void loop() {
     Player::loop();
 }
-
-
 
 #endif
 
@@ -1321,12 +1330,6 @@ private:
         } while (Status_.sleep == true);
     }
 
-    /** Flashes the strip three times with red as a critical battery indicator. 
-     */
-    static void CriticalBattery() {
-        Status_.sleep = true;
-    }
-
     static void VoltageAndTemperature() {
         uint16_t value = ADC0.RES / 64;
         switch (ADC0.MUXPOS) {
@@ -1356,8 +1359,6 @@ private:
     }
 
 
-    friend void ::RTC_PIT_vect();
-
     inline volatile static struct {
         bool sleep : 1;
         bool tick : 1;
@@ -1379,135 +1380,6 @@ private:
 private:
 
 
-    static void I2CReceive() {
-        // TODO check that numBytes <= message length or accept corrupted messages?
-        switch (I2C_RX_Buffer_[0]) {
-            case msg::PowerOff::Id: {
-                // set sleep to true so that the sleep can be handled in main loop
-                Status_.sleep = true;
-                break;
-            }
-            case msg::SetMode::Id: {
-                auto msg = msg::At<msg::SetMode>(I2C_RX_Buffer_);
-                cli();
-                msg.applyTo(State_);
-                sei();
-                // sync the volume and control states
-                Control_.setValues(state_.state.control(), state_.state.maxControl());
-                Volume_.setValues(state_.state.volume(), state_.state.maxVolume());
-                // sync the effect color for the night mode
-                EffectColor_ = state_.state.nightLightColor(AccentColor_, MaxBrightness_);
-                // set the audio source accordingly
-                if (state_.state.mode() == Mode::Radio)
-                    digitalWrite(AUDIO_SRC, HIGH);
-                else
-                    digitalWrite(AUDIO_SRC, LOW); 
-                break;
-            }
-            case msg::SetWiFiStatus::Id: {
-                auto msg = msg::At<msg::SetWiFiStatus>(I2C_RX_Buffer_);
-                cli();
-                msg.applyTo(State_);
-                sei();
-                break;
-            }
-            case msg::SetMP3Settings::Id: {
-                auto msg = msg::At<msg::SetMP3Settings>(I2C_RX_Buffer_);
-                cli();
-                msg.applyTo(State_);
-                sei();
-                break;
-            }
-            case msg::SetRadioSettings::Id: {
-                auto msg = msg::At<msg::SetRadioSettings>(I2C_RX_Buffer_);
-                cli();
-                msg.applyTo(State_);
-                sei();
-                break;
-            }
-            case msg::SetNightLightSettings::Id: {
-                auto msg = msg::At<msg::SetNightLightSettings>(I2C_RX_Buffer_);
-                cli();
-                msg.applyTo(State_);
-                sei();
-                EffectColor_ = state_.state.nightLightColor(AccentColor_, MaxBrightness_);
-                break;
-            }
-            case msg::SetAccentColor::Id: {
-                auto msg = msg::At<msg::SetAccentColor>(I2C_RX_Buffer_);
-                AccentColor_ = msg.color;
-                break;
-            }
-            case msg::LightsBar::Id: {
-                auto msg = msg::At<msg::LightsBar>(I2C_RX_Buffer_);
-                SpecialLights_.showBar(msg.value, msg.max, msg.color);
-                LightsCounter_ = msg.timeout;
-                break;
-            }
-            case msg::LightsCenteredBar::Id: {
-                auto msg = msg::At<msg::LightsCenteredBar>(I2C_RX_Buffer_);
-                SpecialLights_.showCenteredBar(msg.value, msg.max, msg.color);
-                LightsCounter_ = msg.timeout;
-                break;
-            }
-            case msg::LightsPoint::Id: {
-                auto msg = msg::At<msg::LightsPoint>(I2C_RX_Buffer_);
-                SpecialLights_.showPoint(msg.value, msg.max, msg.color);
-                LightsCounter_ = msg.timeout;
-                break;
-            }
-            case msg::LightsColors::Id: {
-                auto msg = msg::At<msg::LightsColors>(I2C_RX_Buffer_);
-                for (int i = 0; i < 8; ++i)
-                    SpecialLights_[i] = msg.colors[i];
-                LightsCounter_ = msg.timeout;
-                break;
-            }
-            case msg::StartRecording::Id: {
-                Status_.recording = true;
-                I2C_TX_Mode_ = I2C_TX_Mode::Recording;
-                StartAudioADC(AudioADCSource::Mic);
-                break;
-            }
-            case msg::StopRecording::Id: {
-                Status_.recording = false;
-                I2C_TX_Mode_ = I2C_TX_Mode::State;
-                StopAudioADC();
-                break;
-            }
-            case msg::GetTime::Id: {
-                I2C_TX_Mode_ = I2C_TX_Mode::Time;
-                break;
-            }
-            case msg::SetAudioLights::Id: {
-                auto msg = msg::At<msg::SetAudioLights>(I2C_RX_Buffer_);
-                msg.applyTo(State_);
-                if (state_.state.audioLights()) 
-                    StartAudioADC(AudioADCSource::Audio);
-                else
-                    StopAudioADC();
-                break;
-            }
-            case msg::Play::Id: {
-                // TODO enable sound out
-                if (state_.state.audioLights()) 
-                    StartAudioADC(AudioADCSource::Audio);
-                break;
-            }
-            case msg::Pause::Id: {
-                // TODO disable sound out
-                StopAudioADC();
-                break;
-            }
-        }
-        Irq_.i2cRx = false;
-        cli();
-        I2C_RX_Offset_ = 0;
-        sei();
-    }
-
-    friend void TWI0_TWIS_vect();
-
 
     static_assert(IRQ_MAX_DELAY < 128);
     inline volatile static struct {
@@ -1525,103 +1397,6 @@ private:
     
  */
 //@{
-
-    inline static uint8_t ControlBtnCounter_ = 0;
-    inline static uint8_t VolumeBtnCounter_ = 0;
-
-    static void ControlValueChanged() { // IRQ
-        Control_.poll();
-        state_.state.setControl(Control_.value());
-        SetIrq();
-    }   
-
-    static void VolumeValueChanged() { // IRQ
-        Volume_.poll(); 
-        state_.state.setVolume(Volume_.value());
-        SetIrq();
-    } 
-
-    static void ControlButtonChanged() { // IRQ
-        ControlBtn_.poll();
-        if (ControlBtn_.pressed()) {
-            ControlBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
-            state_.state.setControlDown(true);
-            // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
-            if (Status_.sleep) {
-                while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-                RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;     
-            }
-        } else if (state_.state.controlDown()) {
-            state_.state.setControlDown(false);
-            // if the counter is greater than 0, we are dealing with a short press
-            if (ControlBtnCounter_ > 0) {
-                if (Status_.doubleLongPress == true)
-                    state_.state.setVolumeLongPress();
-                state_.state.setControlPress();
-                ControlBtnCounter_ = 0;
-                Status_.doubleLongPress = false;
-            // if the counter is 0, we are looking at a long press
-            } else {
-                if (Status_.doubleLongPress == true) { // the other button has been long pressed
-                    state_.state.setDoubleLongPress();
-                    Status_.doubleLongPress = false;
-                } else if (state_.state.volumeDown()) { // this long press has to be delayed as it might be double
-                    Status_.doubleLongPress = true;
-                } else { // emit long press
-                    state_.state.setControlLongPress();
-                    // wake up from sleep if sleeping
-                    Status_.sleep = false;
-                }
-            }
-        }
-        // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
-        // when recording, don't notify either as it is always transmitted in the first state byte
-        if (! Status_.sleep && ! Status_.recording)
-            SetIrq();
-    }
-
-    static void VolumeButtonChanged() { // IRQ
-        VolumeBtn_.poll();
-        if (VolumeBtn_.pressed()) {
-            VolumeBtnCounter_ = BUTTON_LONG_PRESS_TICKS;
-            state_.state.setVolumeDown(true);
-            // if we are sleeping, increase RTC period to 1/32th of a second so that we can detect the long tick
-            if (Status_.sleep) {
-                while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-                RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;     
-            }
-        } else {
-            state_.state.setVolumeDown(false);
-            // if the counter is greater than 0, we are dealing with a short press
-            if (VolumeBtnCounter_ > 0) {
-                if (Status_.doubleLongPress == true)
-                    state_.state.setControlLongPress();
-                state_.state.setVolumePress();
-                VolumeBtnCounter_ = 0;
-                Status_.doubleLongPress = false;
-            // if the counter is 0, we are looking at a long press
-            } else {
-                if (Status_.doubleLongPress == true) { // the other button has been long pressed
-                    state_.state.setDoubleLongPress();
-                    Status_.doubleLongPress = false;
-                } else if (state_.state.controlDown()) { // this long press has to be delayed as it might be double
-                    Status_.doubleLongPress = true;
-                } else { // emit long press
-                    state_.state.setVolumeLongPress();
-                    // wake up from sleep if sleeping
-                    Status_.sleep = false;
-                }
-            }
-        }
-        // if we are not sleeping, set the IRQ to notify ESP. If we have just woken up, then this is irrelevant and will be cleared when waking ESP up
-        // when recording, don't notify either as it is always transmitted in the first state byte
-        if (! Status_.sleep && !Status_.recording)
-            SetIrq();
-    }
-
-
-//@}
-
 
 /** \name Lights
  */
@@ -1811,107 +1586,6 @@ private:
 }; // Player
 
 
-ISR(RTC_PIT_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
-    RTC.PITINTFLAGS = RTC_PI_bm;
-    Player::Tick();
-    //digitalWrite(AUDIO_SRC, LOW);
-}
-
-#define I2C_DATA_MASK (TWI_DIF_bm | TWI_DIR_bm) 
-#define I2C_DATA_TX (TWI_DIF_bm | TWI_DIR_bm)
-#define I2C_DATA_RX (TWI_DIF_bm)
-#define I2C_START_MASK (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm)
-#define I2C_START_TX (TWI_APIF_bm | TWI_AP_bm | TWI_DIR_bm)
-#define I2C_START_RX (TWI_APIF_bm | TWI_AP_bm)
-#define I2C_STOP_MASK (TWI_APIF_bm | TWI_DIR_bm)
-#define I2C_STOP_TX (TWI_APIF_bm | TWI_DIR_bm)
-#define I2C_STOP_RX (TWI_APIF_bm)
-
-ISR(TWI0_TWIS_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
-    uint8_t status = TWI0.SSTATUS;
-    // sending data to accepting master is on our fastpath. In this case depending on whether there is data to be send or not we send or don't the ack
-    if ((status & I2C_DATA_MASK) == I2C_DATA_TX) {
-        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) {
-            TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
-            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
-            // first byte of state is the events of the buttons, so once we send them, clear them so that we don't send them again
-            if (Player::I2C_TX_Offset_ == 1 && Player::I2C_TX_Buffer_ == pointer_cast<uint8_t*>(& Player::State_))
-                Player::state_.state.clearButtonEvents();
-        // after the selected buffer has been sent, if the buffer is was not state, switch to state and continue sending as long as master wants more data
-        } else if (Player::I2C_Current_TX_Mode_ != Player::I2C_TX_Mode::State) {
-            if (Player::I2C_Current_TX_Mode_ == Player::I2C_TX_Mode::Recording)
-                Player::RecordingRead_ += 32; // we succeeded in sending the buffer, increment read index
-            Player::I2C_Current_TX_Mode_ = Player::I2C_TX_Mode::State;
-            Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
-            Player::I2C_TX_Offset_ = 0;
-            Player::I2C_TX_Length_ = sizeof(State);
-            TWI0.SDATA = Player::I2C_TX_Buffer_[Player::I2C_TX_Offset_++];
-            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
-        // otherwise don't send anything else, master will eventually send stop
-        } else {
-            TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
-        }
-    // a byte has been received from master. Store it and send either ACK if we can store more, or NACK if we can't store more
-    } else if ((status & I2C_DATA_MASK) == I2C_DATA_RX) {
-        Player::I2C_RX_Buffer_[Player::I2C_RX_Offset_++] = TWI0.SDATA;
-        TWI0.SCTRLB = (Player::I2C_RX_Offset_ == 32) ? TWI_SCMD_COMPTRANS_gc : TWI_SCMD_RESPONSE_gc;
-    // master requests slave to write data, send ACK if there is data to be transmitted, NACK if there is no data to send
-    } else if ((status & I2C_START_MASK) == I2C_START_TX) {
-        Player::ClearIrq();
-        Player::I2C_Current_TX_Mode_ = Player::I2C_TX_Mode_;
-        switch (Player::I2C_Current_TX_Mode_) {
-            case Player::I2C_TX_Mode::State: 
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::State_);
-                Player::I2C_TX_Offset_ = 0;
-                Player::I2C_TX_Length_ = sizeof(State);
-                // if in the middle of recording, switch back to recording mode for the next request
-                if (Player::Status_.recording)
-                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
-                break;
-            case Player::I2C_TX_Mode::Recording: 
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::RecordingBuffer_) + Player::RecordingRead_;
-                Player::I2C_TX_Offset_ = 0;
-                Player::I2C_TX_Length_ = (static_cast<uint8_t>(Player::RecordingRead_ + 32) <= Player::RecordingWrite_) ? 32 : 0;
-                break;
-            // when sending time, set the buffer properly and revert back to the default TX mode
-            case Player::I2C_TX_Mode::Time:
-                Player::I2C_TX_Buffer_ = pointer_cast<uint8_t *>(& Player::Time_);
-                Player::I2C_TX_Offset_ = 0;
-                Player::I2C_TX_Length_ = sizeof(DateTime);
-                if (Player::Status_.recording)
-                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::Recording;
-                else
-                    Player::I2C_TX_Mode_ = Player::I2C_TX_Mode::State;
-                break;
-        }
-        if (Player::I2C_TX_Offset_ < Player::I2C_TX_Length_) 
-            TWI0.SCTRLB = TWI_ACKACT_ACK_gc + TWI_SCMD_RESPONSE_gc;
-        else 
-            TWI0.SCTRLB = TWI_ACKACT_NACK_gc + TWI_SCMD_COMPTRANS_gc;
-    // master requests to write data itself. ACK if the buffer is empty (we do not support multiple commands in same buffer), NACK otherwise.
-    } else if ((status & I2C_START_MASK) == I2C_START_RX) {
-        if (Player::I2C_RX_Offset_ == 0)
-            TWI0.SCTRLB = TWI_SCMD_RESPONSE_gc;
-        else
-            TWI0.SCTRLB = TWI_ACKACT_NACK_gc;
-    // when a transmission finishes we must see if another transmission required and re-raise the irq flag for ESP. While recording this means we need to see if there is another 32 bytes available yet
-    } else if ((status & I2C_STOP_MASK) == I2C_STOP_TX) {
-        if (Player::Status_.recording) {
-            // if the read and write offsets are into the same 32 bit partition, then the flag will be raised when more samples are available, otherwise raise the flag now
-            if (Player::RecordingRead_ / 32 != Player::RecordingWrite_ / 32)
-                Player::SetIrq();
-        }
-        TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
-    } else if ((status & I2C_STOP_MASK) == I2C_STOP_RX) {
-        Player::Irq_.i2cRx = true;
-        TWI0.SCTRLB = TWI_SCMD_COMPTRANS_gc;
-    } else {
-        Player::ShowByte(status, Color::Red());
-    }
-    //digitalWrite(AUDIO_SRC, LOW);
-}
 
 ISR(ADC1_RESRDY_vect) {
     //digitalWrite(AUDIO_SRC, HIGH);
