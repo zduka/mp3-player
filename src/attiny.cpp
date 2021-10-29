@@ -276,6 +276,10 @@ private:
         // enable RTC interrupt every 1/64th of a second
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
+        // end the wakeup state and mark both buttons as not down so that their release will be ignored
+        status_.wakeup = false;
+        state_.state.setVolumeButtonDown(false);
+        state_.state.setControlButtonDown(false);
         // start ADC0 to measure the VCC and wait for the first measurement to be done
         ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
         ADC0.COMMAND = ADC_STCONV_bm;
@@ -343,6 +347,7 @@ private:
 
     static void peripheralPowerOn() {
         LOG("3V3 PowerOn");
+        clearIrq();
         pinMode(DCDC_PWR, OUTPUT);
         digitalWrite(DCDC_PWR, LOW);
         // add a delay so that the capacitor can be charged and voltage stabilized
@@ -459,10 +464,16 @@ private:
 
     static void checkButtonWakeup(bool down) {
         if (down) {
-            powerOnCountdown_ = POWER_ON_PRESS_TICKS << 16; // from 1/64th of a second to 1/1024th
-            powerOnRTCValue_ = RTC.CNT; 
-        } else if (powerOnCountdown_ == 0) {
-            status_.sleep = false;
+            status_.wakeup = true;
+            // change the RTC ticks to 1/64th of a second 
+            while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
+            RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
+            powerCountdown_ = POWER_ON_PRESS_TICKS; 
+        } else {
+            status_.wakeup = false;
+            // go back to 1 second RTC interval and sleep
+            while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
+            RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
         }
     }
     //@}
@@ -1010,6 +1021,10 @@ private:
 
         bool longPressPending : 1;
 
+        /** True if in the wakeup check, i.e. sleeping, but button down which might lead to eventual wakeup if the button is pressed long enough. While true, the RTC interrupt period is 1/64th of a second instead of the 1s when regularly sleeping.
+         */
+        bool wakeup : 1;
+
 
     } status_;
 
@@ -1042,12 +1057,15 @@ ISR(RTC_PIT_vect) {
     //digitalWrite(DEBUG_PIN, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
     if (Player::status_.sleep) {
-        uint16_t x = 1024 - Player::powerOnRTCValue_;
-        Player::powerOnCountdown_ = (x > Player::powerOnCountdown_) ? 0 : (Player::powerOnCountdown_ - x);
-        Player::powerOnRTCValue_ = 0;
-        // do one second tick
-        Player::state_.ex.time.secondTick();
-
+        if (Player::status_.wakeup) {
+            if ((++Player::tickCountdown_ % 64) == 0) 
+                Player::state_.ex.time.secondTick();
+            if (--Player::powerCountdown_ == 0)
+                Player::status_.sleep = false;
+        } else {
+            // do one second tick
+            Player::state_.ex.time.secondTick();
+        }
         // TODO check alarm, set wakeup bits and wake up? 
     } else {
         // set the tick flag so that more resource demanding periodic tasks can be done in the loop

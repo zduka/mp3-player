@@ -33,6 +33,7 @@
 
 # ATTiny
 
+- power on should change rtc timer to 1/64th and actually start the player as soon as pressed for long enough for better respose
 
 - what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
