@@ -33,7 +33,8 @@
 
 # ATTiny
 
-- power on should change rtc timer to 1/64th and actually start the player as soon as pressed for long enough for better respose
+- wakeup eventually resets the AVR, which makes the ex state reset as well... (check if its power, determine reset cause, etc.)
+- extend binary clock to proper one
 
 - what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
@@ -41,6 +42,7 @@
 - determine decent speed settings for the night light effects
 
 # ESP
+
 
 - check heap and health and reset when necessary
 

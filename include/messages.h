@@ -51,9 +51,9 @@ namespace msg {
     MESSAGE(SetIdle,
         bool idle;
         uint8_t timeout;
-        SetIdle(bool value, uint16_t timeout):
+        SetIdle(bool value, uint8_t timeout):
             idle{value},
-            timeout{value} {
+            timeout{timeout} {
         }
     );
 

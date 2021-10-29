@@ -33,7 +33,6 @@
        AVR_IRQ -- (06) PB3   PC1 (11) -- AUDIO_SRC
                -- (07) PB2   PC0 (10) -- MIC
            SDA -- (08) PB1   PB0 (09) -- SCL
-
  */
 
 #define DCDC_PWR 3
@@ -258,11 +257,11 @@ private:
             while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
             RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
             // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
+            LOG("sleep");
+            state_.ex.log();
             status_.sleep = true;
-            while (status_.sleep) {
-                LOG("sleep");
+            while (status_.sleep)
                 sleep_cpu();
-            }
             // clear the button events that led to the wakeup
             // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
             state_.state.clearEvents();
@@ -273,6 +272,7 @@ private:
 
     static void wakeup() {
         LOG("Wakeup");
+        state_.ex.log();
         // enable RTC interrupt every 1/64th of a second
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
@@ -599,7 +599,14 @@ private:
                 return;
             // 
             case NightLightEffect::AudioLights: {
-                audioLightsTick(step);
+                if (! state_.state.idle()) {
+                    audioLightsTick(step);
+                    return;
+                }
+                // fallthrough to BinaryClock
+            }
+            case NightLightEffect::BinaryClock: {
+                showByte(state_.ex.time.second(), Color::Red().withBrightness(state_.ex.settings.maxBrightness));
                 return;
             }
             case NightLightEffect::Breathe: {
@@ -669,6 +676,17 @@ private:
                 step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
             effect_.audio.lastDelta = d;
         }
+    }
+
+    static void showByte(uint8_t value, Color const & color) {
+        strip_[7] = (value & 1) ? color : Color::Black();
+        strip_[6] = (value & 2) ? color : Color::Black();
+        strip_[5] = (value & 4) ? color : Color::Black();
+        strip_[4] = (value & 8) ? color : Color::Black();
+        strip_[3] = (value & 16) ? color : Color::Black();
+        strip_[2] = (value & 32) ? color : Color::Black();
+        strip_[1] = (value & 64) ? color : Color::Black();
+        strip_[0] = (value & 128) ? color : Color::Black();
     }
 
     inline static NeopixelStrip<NEOPIXEL, 8> neopixels_;
@@ -983,17 +1001,11 @@ private:
      
         The byte is displayed LSB first when looking from the front, or MSB first when looking from the back. 
      */
-    static void showByte(uint8_t value, Color const & color) {
-        LOG("error: %u", value);
+    static void showErrorByte(uint8_t value, Color const & color) {
         cli();
-        neopixels_[7] = (value & 1) ? color : Color::Black();
-        neopixels_[6] = (value & 2) ? color : Color::Black();
-        neopixels_[5] = (value & 4) ? color : Color::Black();
-        neopixels_[4] = (value & 8) ? color : Color::Black();
-        neopixels_[3] = (value & 16) ? color : Color::Black();
-        neopixels_[2] = (value & 32) ? color : Color::Black();
-        neopixels_[1] = (value & 64) ? color : Color::Black();
-        neopixels_[0] = (value & 128) ? color : Color::Black();
+        LOG("error: %u", value);
+        showByte(value, color);
+        neopixels_.moveTowardsReversed(strip_, 255);
         neopixels_.update();
         while (true) { };
     }
@@ -1031,8 +1043,6 @@ private:
     static inline uint8_t irqCountdown_;
     static inline uint8_t tickCountdown_ = 0; 
     static inline uint16_t powerCountdown_ = 60;
-    static inline uint16_t powerOnCountdown_ = 0;
-    static inline uint16_t powerOnRTCValue_ = 0;
     static inline uint8_t longPressCounter_ = 0; // [isr]
 
 
