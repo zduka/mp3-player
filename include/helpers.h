@@ -28,8 +28,7 @@ inline T pointer_cast(W * from) {
 #define LOG(FORMAT,...) do { Serial.printf_P(PSTR("%u: "), millis() / 1000); Serial.printf_P(PSTR(FORMAT), ##__VA_ARGS__); Serial.println(); } while (false)
 
 #elif (defined ARCH_ATTINY)
-
-#define LOG(...)
+#define LOG(FORMAT,...) do { Serial.printf(F(FORMAT), ##__VA_ARGS__); Serial.println(); } while (false)
 
 #endif
 

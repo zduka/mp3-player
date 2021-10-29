@@ -35,39 +35,39 @@ public:
     }
 
     void setYear(uint16_t year) {
-        assert(year >= 2021 && year <= 2084);
+        //assert(year >= 2021 && year <= 2084);
         raw_ &= ~YEAR_MASK;
         raw_ += (year - 2021) << 26;
     }
 
     void setMonth(uint8_t month) {
-        assert(month >= 1 && month <= 12);
+        //assert(month >= 1 && month <= 12);
         raw_ &= ~MONTH_MASK;
         raw_ += month << 22;
     }
 
     void setDay(uint8_t day) {
-        assert(day >= 1 && day <= 31);
+        //assert(day >= 1 && day <= 31);
         raw_ &= ~DAY_MASK;
         raw_ += day << 17;
     }
 
     void setHour(uint8_t hour) {
-        assert(hour >= 0 && hour <= 23);
+        //assert(hour >= 0 && hour <= 23);
         raw_ &= ~HOUR_MASK;
         raw_ += hour << 12;
     }
 
     void setMinute(uint8_t m) {
-        assert(m >= 0 && m <= 59);
+        //assert(m >= 0 && m <= 59);
         raw_ &= ~MINUTE_MASK;
         raw_ += m << 6;
     }
 
     void setSecond(uint8_t s) {
-        assert(s >= 0 && s <= 59);
+        //assert(s >= 0 && s <= 59);
         raw_ &= ~SECOND_MASK;
-        raw_ += s;
+        raw_ |= static_cast<uint32_t>(s);
     }
 
     void secondTick() {
@@ -82,7 +82,7 @@ public:
                         if (month() == 12) {
                             setMonth(0);
                             // years can overflow
-                            setYear(year() + 1 == 2085 ? 2021 : year() + 1);
+                            setYear(year() == 2084 ? 2021 : (year() + 1));
                         } else {
                             setMonth(month() + 1);
                         }
@@ -97,7 +97,7 @@ public:
             }
         } else {
             setSecond(second() + 1);
-        }
+        } 
     }
 
     bool timeEqualTo(DateTime const & other) const {
@@ -127,12 +127,13 @@ public:
     }
 
 private:
-    static constexpr uint32_t YEAR_MASK = 63 << 26;
-    static constexpr uint32_t MONTH_MASK = 16 << 22;
-    static constexpr uint32_t DAY_MASK = 31 << 17;
-    static constexpr uint32_t HOUR_MASK = 31 << 12;
-    static constexpr uint32_t MINUTE_MASK = 63 << 6;
-    static constexpr uint32_t SECOND_MASK = 63;
+
+    static constexpr uint32_t YEAR_MASK = UINT32_C(63) << 26;
+    static constexpr uint32_t MONTH_MASK = UINT32_C(16) << 22;
+    static constexpr uint32_t DAY_MASK = UINT32_C(31) << 17;
+    static constexpr uint32_t HOUR_MASK = UINT32_C(31) << 12;
+    static constexpr uint32_t MINUTE_MASK = UINT32_C(63) << 6;
+    static constexpr uint32_t SECOND_MASK = UINT32_C(63);
 
     uint32_t raw_ = 0;
 

@@ -45,12 +45,15 @@ namespace msg {
 
     /** Turns the player's idle state on/off explicitly.
      
+        Also sets the poweroff timeout. 
         
      */
     MESSAGE(SetIdle,
         bool idle;
-        SetIdle(bool value):
-            idle{value} {
+        uint8_t timeout;
+        SetIdle(bool value, uint8_t timeout):
+            idle{value},
+            timeout{timeout} {
         }
     );
 

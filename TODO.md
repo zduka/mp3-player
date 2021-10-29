@@ -1,23 +1,29 @@
 # HW
 
+- weird AVR_IRQ pin fluctuating when ESP turned off... Not sure why... cleaned the board and stuff worked
+
+- audio feedback opamp can have bigger gain, most likely. Needs checking...
+- where to put the extra LC filter for audio?
+
 - V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
 - check charging detection & charging power dissipation, low battery, AC power - lower charging power to ~0.5A to be on the safe side (2k7), remove LEDs
-- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
 
 - radio antenna seem to work rather bad in the new board version
-- volume seems to be really high, at least headphones
-- check that neopixels don't interefere with radio reception
 
 
-- verify the I2S output vdiv (R3 + R10, R8 + R14) values so that the volume is similar to the radio
+- esp is too quiet while radio is a bit too loud, verify the I2S output vdiv (R3 + R10, R8 + R14) values so that the volume is similar to the radio
 - determine if low pass filter after audio selection is useful, and its values (R4 + C13, R13 + C19)
 - determine useful headphone max volume (R7, R12). Setting this to non-zero may also mean that we can use smaller value for the headphone decoupling caps (C10, C14)
+- determine TPA311 amplification (max speaker & headphone volume when speaker in case - R1, R11)
 
 # SW
 
+- radio stereo mode check/change/etc
 
-- PINS changed for ATTiny to free TXD port
-- set radio frequency to first radio station upon complete start
+- idle light show for audio lights
+- is the play after wakeup really what we want? 
+- setting the radio station immediately after startup does not really work and produces noise for a long time... (seems like issue with the radio chip)
+- headphones can be set to output and LOW to disable speaker any time
 
 - add the following to the settings:
     - power off timeout
@@ -27,6 +33,8 @@
 
 # ATTiny
 
+- wakeup eventually resets the AVR, which makes the ex state reset as well... (check if its power, determine reset cause, etc.)
+- extend binary clock to proper one
 
 - what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
@@ -35,15 +43,14 @@
 
 # ESP
 
+
 - check heap and health and reset when necessary
 
 - only one channel for the Walkie-Talkie bot 
 - approaching memory limit for ESP...
 - actually implement downloading telegram file
-- wifi connecting gauge is wrong direction
 - check time and update it
 - longer delay before power down in night light mode
-- wifi_off (http) does not inform about success
 - add authentication
 
  # Missing Features

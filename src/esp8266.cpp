@@ -63,30 +63,40 @@ public:
         // initialize the IRQ pin and attach interrupt
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), avrIrq, FALLING);
-        // enable I2C and request state
+        // enable I2C and request the current state and the extended state
         Wire.begin(I2C_SDA, I2C_SCL);
         Wire.setClock(400000);
         updateState();
-        //send(msg::LightsBar{2,8,DEFAULT_COLOR.withBrightness(ex_.nightmaxBrightness_)});
-        // get the whole extended state, making sure we fit in the buffer
         getExtendedState(ex_);
         ex_.log();
-        // Initialize the core subsystems and report back
+        send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        // initialize the chip and core peripherals
         initializeESP();
         initializeLittleFS();
+        send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         initializeSDCard();
-        // 
+        send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
         initializePlaylists();
+        send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         initializeRadioStations();
+        send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        //initializeWalkieTalkie()
+        send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         //initializeSettings();
-
-
-        // the extended state could have changed when initializing from the SD card, store it all
+        // if this is the initial state, write basic settings from the mode configuration to cached state
+        if (state_.initialPowerOn()) {
+            LOG("Initial power on");
+            ex_.radio.stationId = 0;
+            ex_.radio.frequency = radioStations_[0];
+        }
+        // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
-
-        setMode(Mode::Radio);
-
+        send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
+        // enter the last used mode
+        state_.setIdle(false);
+        setMode(state_.mode(), /* force */ true);
     }
 
     static void loop() {
@@ -181,13 +191,22 @@ private:
     }
 
     template<typename T>
-    static void send(T const & msg) {
-        Wire.beginTransmission(AVR_I2C_ADDRESS);
-        unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
-        Wire.write(msgBytes, sizeof(T));
-        uint8_t status = Wire.endTransmission();
-        if (status != 0)
-            ERROR("I2C command failed: %u", status);
+    static void send(T const & msg, unsigned retries = 1) {
+        while (true) {
+            Wire.beginTransmission(AVR_I2C_ADDRESS);
+            unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
+            Wire.write(msgBytes, sizeof(T));
+            uint8_t status = Wire.endTransmission();
+            if (status == 0)
+                return;
+            if (retries-- == 0) {
+                ERROR("I2C command failed: %u", status);
+                return;
+            } else {
+                LOG("retrying I2C command, failed: %u", status);
+            }
+            delay(10); 
+        }
     }
 
     template<typename T>
@@ -227,7 +246,7 @@ private:
             State old = state_;
             Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
             // check available events and react accordingly
-            if (state_.controlValue() != old.controlValue()) 
+            if (state_.controlTurn()) 
                 controlTurn();
             if (state_.controlButtonDown() != old.controlButtonDown())
                 state_.controlButtonDown() ? controlDown() : controlUp();
@@ -235,7 +254,7 @@ private:
                 controlPress();
             if (state_.controlButtonLongPress())
                 controlLongPress();
-            if (state_.volumeValue() != old.volumeValue())
+            if (state_.volumeTurn())
                 volumeTurn();
             if (state_.volumeButtonDown() != old.volumeButtonDown())
                 state_.volumeButtonDown() ? volumeDown() : volumeUp();
@@ -266,7 +285,11 @@ private:
 
     static void controlDown() {
         LOG("Control down");
-
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                 if (status_.recording)
+                     stopRecording(/*cancel*/ true);
+        }
     }
 
     static void controlUp() {
@@ -300,10 +323,10 @@ private:
             }
             case Mode::NightLight: {
                 uint8_t i = static_cast<uint8_t>(ex_.nightLight.effect) + 1;
-                if (i == 7)
+                if (i == 8)
                     i = 0;
                 setNightLightEffect(static_cast<NightLightEffect>(i));
-                send(msg::LightsPoint{i, 6, MODE_COLOR_NIGHT_LIGHT});
+                send(msg::LightsPoint{i, 7, MODE_COLOR_NIGHT_LIGHT});
                 break;
             }
             default:
@@ -361,11 +384,20 @@ private:
      */
     static void volumeDown() {
         LOG("Volume down");
-
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                startRecording();
+                break;
+        }
     }
 
     static void volumeUp() {
         LOG("Volume up");
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                stopRecording();
+                break;
+        }
     }
 
     /** Play/Pause in mp3, radio and night-lights mode. 
@@ -397,6 +429,7 @@ private:
     /** Changes volume. 
      */
     static void volumeTurn() {
+        // TODO check that the volume is within the settings available
         LOG("Volume: %u", state_.volumeValue());
         switch (state_.mode()) {
             case Mode::MP3:
@@ -410,6 +443,7 @@ private:
             default:
                 break;
         }
+        send(msg::LightsBar{state_.volumeValue() + 1, 16, DEFAULT_COLOR});
     }
 
     /** Turns wifi on/off, turns the player off. 
@@ -439,24 +473,23 @@ private:
     
     /** Enters the provided mode. 
      */
-    static void setMode(Mode mode) {
+    static void setMode(Mode mode, bool force = false) {
         LOG("Setting mode %u", mode);
-        if (state_.mode() == mode)
+        if ((state_.mode() == mode) && ! force)
             return;
-        if (! state_.idle())
-            pause(/* changeIdle */ false);
+        bool resume = ! state_.idle();
+        if (resume)
+            pause();
         state_.setMode(mode);
         send(msg::SetMode(mode));
-        if (! state_.idle())
-            play(/* changeIdle */ false);
+        if (resume)
+            play();
     }
 
-    static void play(bool changeIdle = true) {
+    static void play() {
         LOG("Play");
-        if (changeIdle) {
-            state_.setIdle(false);
-            send(msg::SetIdle{false});
-        }
+        state_.setIdle(false);
+        send(msg::SetIdle{false, timeoutPlay_});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Play();
@@ -475,12 +508,10 @@ private:
 
     }
 
-    static void pause(bool changeIdle = true) {
+    static void pause() {
         LOG("Pause");
-        if (changeIdle) {
-            state_.setIdle(true);
-            send(msg::SetIdle{true});
-        }
+        state_.setIdle(true);
+        send(msg::SetIdle{true, timeoutIdle_});
         switch (state_.mode()) {
             case Mode::MP3:
                 mp3Pause();
@@ -576,7 +607,7 @@ private:
 
     static void mp3UpdateVolume() {
         if (mp3_.isRunning()) {
-            i2s_.SetGain(static_cast<float>(state_.volumeValue()) / 15);
+            i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
         }
     }
 
@@ -619,7 +650,7 @@ private:
                     memcpy(filename + 2, f.name(), strlen(f.name()) + 1);
                     f.close();
                     mp3File_.open(filename);
-                    i2s_.SetGain(static_cast<float>(state_.volumeValue()) / 15);
+                    i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
                     mp3_.begin(& mp3File_, & i2s_);
                     LOG("Track %u, file: %s", index, filename);
                     ex_.mp3.trackId = index;
@@ -669,6 +700,8 @@ private:
     //@}
 
     /** \name Radio Mode
+     
+        When enabled, allows the reception of FM radio via a RDA5807M module.
      */
     //@{
     /** Initializes the predefined radio stations from the SD card. 
@@ -744,19 +777,35 @@ private:
     //@}
 
     /** \name Walkie-Talkie Mode
+     
+        The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
      */
     //@{
+
+    static void startRecording() {
+        if (!recordingReady_ || !recording_.begin("/rec.wav")) {
+            LOG("Unable to open recording target file or recording not ready");
+            send(msg::LightsFill{Color::Red().withBrightness(ex_.settings.maxBrightness)});
+        } else {
+            LOG("Recording...");
+            status_.recording = true;
+            send(msg::StartRecording());
+            recordingReady_ = false;
+        }        
+    }
         
     static void stopRecording(bool cancel = false) {
         if (status_.recording) {
             // tell avr to return to normal state & stop own recording
             send(msg::StopRecording{});
             recording_.end();
-            if (! cancel) {
-                LOG("Recording done");
-                // TODO
-            } else {
+            status_.recording = false;
+            if (cancel) {
                 LOG("Recording cancelled");
+                send(msg::LightsFill{Color::Red().withBrightness(ex_.settings.maxBrightness)});
+                recordingReady_ = true;
+            } else {
+                LOG("Recording done");
                 // TODO
             }
         }
@@ -785,6 +834,12 @@ private:
         }
     }
 
+    /** If true when recording can be done, i.e. the prevcious recording buffer has been sent. False if the buffer is currently being sent. 
+     */
+    static inline bool recordingReady_ = true;
+
+    /** The WAV 8kHz recorder to an SD card file
+     */
     static inline WavWriter recording_;
 
     //@}
@@ -834,6 +889,14 @@ private:
 
     //@}
 
+    /** \name WiFi & Server
+     */
+    //@{
+
+    //static inline ESP8266WebServer Server_{80};
+
+    //@}
+
 
 
 
@@ -845,6 +908,9 @@ private:
 
     static inline State state_;
     static inline ExtendedState ex_;
+
+    static inline uint8_t timeoutIdle_ = DEFAULT_IDLE_TIMEOUT;
+    static inline uint8_t timeoutPlay_ = DEFAULT_PLAY_TIMEOUT;
 
 }; // Player
 
@@ -1436,247 +1502,8 @@ private:
         Status_.powerOffCountdown = Settings_.powerOffTimeout;
     }
 
-    /** Looks at the SD card and finds valid playlists. 
-     
-        Up to 8 playlists are supported, which can be found in directories labelled 1..8. If the directory contains file `playlist.txt`, then it is a valid playlist. The file contains whether the playlist is enabled (1) or hidden (0) followed by the optional name of the playlist. 
-     */
-    static void InitializeMP3Playlists() {
-        LOG("Initializing MP3 Playlists...");
-        for (size_t i = 0; i < 8; ++i)
-            MP3Playlists_[i].invalidate();
-        File f = SD.open("player/playlists.json", FILE_READ);
-        if (f) {
-            DynamicJsonDocument json{1024};
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                uint8_t i = 0;
-                for (JsonVariant playlist : json.as<JsonArray>()) {
-                    uint8_t id = playlist["id"];
-                    uint16_t numTracks = GetPlaylistTracks(id);
-                    MP3Playlists_[i++] = PlaylistInfo{id, numTracks};
-                    LOG("  %u: %s (%u tracks)",id, playlist["name"].as<char const *>(), numTracks);
-                }
-            } else {
+    
 
-            }
-            f.close();
-        }
-    }
-
-    /** Returns the number of tracks available for given playlist. 
-     
-        Assumes the playlist is valid. 
-     */
-    static uint16_t GetPlaylistTracks(uint8_t playlist) {
-        uint16_t result = 0;
-        File d = SD.open(STR(playlist));
-        while (true) {
-            File f = d.openNextFile();
-            if (!f)
-                break;
-            // this should not happen, but let's be sure
-            if (f.isDirectory())
-                continue;
-            if (String{f.name()}.endsWith(".mp3")) 
-                ++result;
-        }
-        if (result > 1023) {
-            LOG("Error: Playlist %u has %u tracks where only 1023 is allowed", playlist, result);
-            result = 1023;
-        }
-        d.close();
-        return result;
-    }
-
-    /** Sets the playlist with given index and starts playint its first track. 
-
-        The index is the index to the runtime playlist table, not the id of the playlist on the SD card.  
-     */
-    static void SetPlaylist(uint8_t index) {
-        LOG("Playlist %u (folder %u)", index, MP3Playlists_[index].id);
-        CurrentPlaylist_.close();
-        CurrentPlaylist_ = SD.open(STR(MP3Playlists_[index].id));
-        State_.setMp3PlaylistId(index);
-        State_.setMp3TrackId(0);
-        SetTrack(0);
-        State_.resetControl(0, NumTracks(State_.mp3PlaylistId()));
-    }
-
-    /** Starts playing the given track id within the current playlist. 
-     */
-    static void SetTrack(uint16_t index) {
-        // pause current playback if any
-        if (MP3_.isRunning()) {
-            MP3_.stop();
-            I2S_.stop();
-            MP3File_.close();
-        }
-        // determune whether we have to start from the beginning, or can go forward from current track
-        uint16_t nextTrack = State_.mp3TrackId() + 1;
-        if (index < nextTrack) {
-            CurrentPlaylist_.rewindDirectory();
-            nextTrack = 0;
-        }
-        while (true) {
-            File f = CurrentPlaylist_.openNextFile();
-            if (!f)
-                break;
-            LOG("Checking file %s, index %u, nexttrack %u", f.name(), index, nextTrack);
-            if (String(f.name()).endsWith(".mp3")) {
-                if (index == nextTrack) {
-                    String filename{STR(MP3Playlists_[State_.mp3PlaylistId()].id + "/" + f.name())};
-                    f.close();
-                    MP3File_.open(filename.c_str());
-                    I2S_.SetGain(State_.volume() * ESP_VOLUME_STEP);
-                    MP3_.begin(& MP3File_, & I2S_);
-                    LOG("Track %u, file: %s", index, filename.c_str());
-                    State_.setMp3TrackId(index);
-                    msg::Send(msg::SetMP3Settings{State_});
-                    return;
-                } else {
-                    ++nextTrack;
-                }
-            } 
-            f.close();
-        }
-        LOG("No file found");
-        // TODO error
-    }
-
-    static void PlayNextTrack() {
-        if (State_.mp3TrackId() + 1 < NumTracks(State_.mp3PlaylistId())) {
-            SetTrack(State_.mp3TrackId() + 1);
-            SetMode(State_.mode());
-            msg::Send(msg::SetMP3Settings{State_});
-        } else {
-            Pause();
-        }
-    }
-
-    /** Returns the number of tracks available in the given playlist. 
-     */
-    static uint16_t NumTracks(uint8_t playlistId) {
-        if (playlistId >= 8)
-            return 0;
-        return MP3Playlists_[playlistId].numTracks;
-    }
-
-    /** Returns the available number of mp3 playlists. 
-     */
-    static uint8_t NumPlaylists() {
-        uint8_t i = 0;
-        for (; i < 8; ++i)
-            if (! MP3Playlists_[i].isValid())
-                break;
-        return i;
-    }
-
-    struct PlaylistInfo {
-        unsigned id : 4;
-        unsigned numTracks : 10;
-
-        PlaylistInfo():
-            id{0},
-            numTracks{0} {
-        }
-
-        PlaylistInfo(uint8_t id, uint16_t numTracks):
-            id{id},
-            numTracks{numTracks} {
-        }
-
-        bool isValid() const {
-            return id != 0;
-        }
-
-        void invalidate() {
-            id = 0;
-        }
-    }; // 
-
-    static inline AudioGeneratorMP3 MP3_;
-    static inline AudioGeneratorWAV WAV_;
-    static inline AudioOutputI2S I2S_;
-    static inline AudioFileSourceSD MP3File_;
-    static inline PlaylistInfo MP3Playlists_[8];
-
-    static inline File CurrentPlaylist_;
-
-    /** Initializes the predefined radio stations from the SD card. 
-     
-        The stations are defined in the `stations.txt` file, one station per line, first the frequency and then optional name separated by a new line. 
-     */
-    static void InitializeRadioStations() {
-        LOG("Initializing radio stations...");
-        for (int i = 0; i < 7; ++i)
-            RadioStations_[i] = RADIO_STATION_NONE;
-        File f = SD.open("radio/stations.json", FILE_READ);
-        if (f) {
-            DynamicJsonDocument json{1024};
-            int i = 0;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                for (JsonVariant station : json.as<JsonArray>()) {
-                    RadioStations_[i++] = station["freq"];
-                    LOG("  %s: %u", station["name"].as<char const *>(), station["freq"].as<unsigned>());
-                }
-            } else {
-                LOG("  radio/stations.json file not found");
-            }
-            f.close();
-        } else {
-            LOG("  radio/stations.json file not found");
-        }
-    }
-
-    static void SetRadioFrequency(uint16_t mhzx10) {
-        LOG("Radio frequency: %u", mhzx10);
-        if (State_.mode() == Mode::Radio) {
-            Radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
-            State_.setRadioFrequency(mhzx10);
-        }
-        msg::Send(msg::SetRadioSettings{State_});
-    }
-
-    static void SetRadioStation(uint8_t index) {
-        LOG("Radio station: %u", index);
-        if (State_.mode() == Mode::Radio) {
-            Radio_.setBandFrequency(RADIO_BAND_FM, RadioStations_[index] * 10);
-            State_.setRadioFrequency(RadioStations_[index]);
-            State_.setRadioStation(index);            
-            State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
-        }
-        msg::Send(msg::SetRadioSettings{State_});
-    }
-
-    /** Returns the number of valid stations. 
-     */
-    static uint8_t NumRadioStations() {
-        uint8_t result = 0;
-        while (result < 8 && RadioStations_[result] != RADIO_STATION_NONE)
-            ++result;
-        return result;
-    }
-
-    static inline RDA5807M Radio_;
-
-    static constexpr uint16_t RADIO_STATION_NONE = 0xffff;
-    static inline uint16_t RadioStations_[8];
-
-/** \name Night Lights
- */
-//@{
-
-    static void SetNightLightEffect(NightLightEffect effect) {
-        LOG("Night light effect: %i", static_cast<int>(effect));
-        State_.setNightLightEffect(effect);
-        msg::Send(msg::SetNightLightSettings{State_});
-    }
-
-    static void SetNightLightHue(uint8_t hue) {
-        LOG("Night light hue: %u", hue);
-        State_.setNightLightHue(hue);
-        msg::Send(msg::SetNightLightSettings{State_});
-    }
-//@}
 
 
 /** \name Walkie-Talkie
