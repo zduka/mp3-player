@@ -49,15 +49,15 @@
 #define HEADPHONES 14
 #define MIC 10
 #define DEBUG_PIN 7
+#define CHARGING 5
 
 
 #define AUDIO_SRC_ESP HIGH
 #define AUDIO_SRC_RADIO LOW
 
-#define NOTIFICATION_LOW_BATTERY_COLOR Color::Red()
-#define NOTIFICATION_NEW_MESSAGE_COLOR Color::Green()
-#define NOTIFICATION_WIFI_CONNECTING_COLOR Color::Blue()
-#define NOTIFICATION_WIFI_AP_COLOR Color::Cyan()
+#define DCDC_PWR_ON LOW
+#define DCDC_PWR_OFF HIGH
+
 
 extern "C" void RTC_PIT_vect(void) __attribute__((signal));
 extern "C" void TWI0_TWIS_vect(void) __attribute__((signal));
@@ -69,6 +69,14 @@ class AVRState {
 public:
     volatile State state;
     ExtendedState ex;
+
+    void saveToEEPROM() {
+
+    }
+
+    void loadFromEEPROM() {
+        
+    }
 } __attribute__((packed));
 
 static_assert(sizeof(AVRState) == sizeof(State) + sizeof(ExtendedState));
@@ -138,9 +146,12 @@ class Player {
 public:
     static void initialize() {
         Serial.begin(115200);
+        pinMode(DEBUG_PIN, OUTPUT);
+        digitalWrite(DEBUG_PIN, LOW);
         delay(10);
         USART0.CTRLB &= ~ USART_RXEN_bm;
         LOG("Initializing AVR");
+        initializeAtTiny();
 
         //pinMode(DEBUG_PIN, OUTPUT);
         //digitalWrite(DEBUG_PIN, LOW);
@@ -171,10 +182,7 @@ public:
         volumeBtn_.setInterrupt(volumeButtonChanged);
         // initialize comms
         initializeI2C();
-
-        // set state to initial power on and proceed with a wakeup
-        state_.state.setInitialPowerOn(true);
-
+        // proceed with wakeup
         wakeup();
     }
 
@@ -184,8 +192,14 @@ public:
         if (status_.i2cRxReady)
             processCommand();
         // if the measurement (headphones, voltage, temp, ...) is ready, measure
-        if (ADC0.INTFLAGS & ADC_RESRDY_bm)
+        if (ADC0.INTFLAGS & ADC_RESRDY_bm) {
             measurementsADCReady();
+            if (undervoltageCountdown_ == 0) {
+                criticalBatteryWarning();
+                sleep();
+            }
+        }
+
     }
 
 private:
@@ -193,6 +207,24 @@ private:
 /** \name ATTiny Management. 
  */
 //@{
+
+    /** Initializes the ATTiny chip. 
+     
+        Checks the reset reason and updates the state accordingly.
+     */ 
+    static void initializeAtTiny() {
+        if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) {
+            LOG("  power-on reset");
+            // set state to initial power on and proceed with a wakeup
+            state_.state.setInitialPowerOn(true);
+        }
+        if (RSTCTRL.RSTFR & RSTCTRL_BORF_bm)
+            LOG("  brown-out reset");
+        if (RSTCTRL.RSTFR & RSTCTRL_WDRF_bm)
+            LOG("  watchdog reset");
+        if (RSTCTRL.RSTFR & RSTCTRL_SWRF_bm)
+            LOG("  software reset");
+    }
 
     /** Initializes the real-time clock. 
      
@@ -216,6 +248,10 @@ private:
         ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
         ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
         ADC0.SAMPCTRL = 31;
+        static_assert(CHARGING == 5, "Charging pin must be PB4, AIN_9 for the charging detection to work");
+        PORTB.PIN4CTRL &= ~PORT_ISC_gm;
+        PORTB.PIN4CTRL |= PORT_ISC_INPUT_DISABLE_gc;
+        PORTB.PIN4CTRL &= ~PORT_PULLUPEN_bm;
     }
     
     static void tick() {
@@ -260,6 +296,8 @@ private:
             LOG("sleep");
             state_.ex.log();
             status_.sleep = true;
+            // clear the reset flags in CPU
+            RSTCTRL.RSTFR = 0;
             while (status_.sleep)
                 sleep_cpu();
             // clear the button events that led to the wakeup
@@ -280,14 +318,16 @@ private:
         status_.wakeup = false;
         state_.state.setVolumeButtonDown(false);
         state_.state.setControlButtonDown(false);
-        // start ADC0 to measure the VCC and wait for the first measurement to be done
+        // start ADC0 to measure the VCC and wait enough measurements to be done to determine if battery is a problem so that we can overcome any initial surges
         ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
         ADC0.COMMAND = ADC_STCONV_bm;
-        // wait for the voltage measurement to finish
-        while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
+        for (uint16_t i = 0; i < UNDERVOLTAGE_TIMEOUT * 3; ++i) {
+            // wait for the voltage measurement to finish
+            while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
+            }
+            measurementsADCReady();
         }
-        measurementsADCReady();
-        if (state_.ex.measurements.vcc <= BATTERY_CRITICAL_VCC) {
+        if (undervoltageCountdown_ == 0) {
             criticalBatteryWarning();
             status_.sleep = true;
         } else {
@@ -349,14 +389,28 @@ private:
         LOG("3V3 PowerOn");
         clearIrq();
         pinMode(DCDC_PWR, OUTPUT);
-        digitalWrite(DCDC_PWR, LOW);
-        // add a delay so that the capacitor can be charged and voltage stabilized
-        delay(50);
+        digitalWrite(DCDC_PWR, DCDC_PWR_ON);
+        // add a delay so that the capacitors can be charged, voltage stabilized and ESP started
+        delay(100);
+        // enable the headphones interrupt detection and set the current headphones state
+        attachInterrupt(digitalPinToInterrupt(HEADPHONES), Player::headphonesChange, CHANGE);
+        cli(); // the headphones change expects to run as an interrupt already
+        headphonesChange();
+        sei();
     }
 
     static void peripheralPowerOff() {
         LOG("3V3 PowerOff");
+        detachInterrupt(digitalPinToInterrupt(HEADPHONES));
+        pinMode(HEADPHONES, INPUT);
         pinMode(DCDC_PWR, INPUT);
+    }
+
+    /** Triggered when the headphones pin changes its value. 
+     */
+    static void headphonesChange() {
+        state_.state.setHeadphonesConnected(! digitalRead(HEADPHONES));
+        setIrq();
     }
 
     /** Processes the voltage, temperature and headphones measurements. 
@@ -373,6 +427,17 @@ private:
                 cli();
                 state_.ex.measurements.vcc = value;
                 sei();
+                // set the undevoltage timeout - don't just sleep yet, for better clarity we initiate the sleep in the main loop
+                if (value >= BATTERY_CRITICAL_VCC)
+                    undervoltageCountdown_ = UNDERVOLTAGE_TIMEOUT;
+                else if (undervoltageCountdown_ > 0)
+                    --undervoltageCountdown_; 
+                // check the battery mode voltage threshold
+                bool batteryMode = state_.ex.measurements.vcc <= USB_VOLTAGE_THRESHOLD;
+                if (batteryMode != state_.state.batteryMode()) {
+                    state_.state.setBatteryMode(batteryMode);
+                    setIrq();
+                }
                 // switch the ADC to be ready to measure the temperature
                 ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
                 ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
@@ -383,6 +448,18 @@ private:
                 cli();
                 state_.ex.measurements.temp = value;
                 sei();
+                ADC0.MUXPOS = ADC_MUXPOS_AIN9_gc;
+                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
+                break;
+            }
+            case ADC_MUXPOS_AIN9_gc: { // charging voltage 
+                bool charging = value > 512;
+                if (state_.state.charging() != charging) {
+                    cli();
+                    state_.state.setCharging(charging);
+                    sei();
+                    setIrq();
+                }
                 // fallthrough to the default where we set the next measurement to be that of input voltage
             }
             default:
@@ -606,7 +683,21 @@ private:
                 // fallthrough to BinaryClock
             }
             case NightLightEffect::BinaryClock: {
-                showByte(state_.ex.time.second(), Color::Red().withBrightness(state_.ex.settings.maxBrightness));
+                if (state_.state.charging()) {
+                    strip_.showBar((state_.ex.time.second() % 2 * 64) + tickCountdown_ % 64, 128, BINARY_CLOCK_CHARGING.withBrightness(state_.ex.settings.maxBrightness));
+                } else {
+                    switch (state_.ex.time.second() % (state_.state.batteryMode() ? 3 : 2)) {
+                        case 0:
+                            showByte(state_.ex.time.hour(), BINARY_CLOCK_HOURS.withBrightness(state_.ex.settings.maxBrightness));
+                            break;
+                        case 1:
+                            showByte(state_.ex.time.minute(), BINARY_CLOCK_MINUTES.withBrightness(state_.ex.settings.maxBrightness));
+                            break;
+                        case 2:
+                            strip_.showBar(min(state_.ex.measurements.vcc, 420) - 340,80, BINARY_CLOCK_BATTERY.withBrightness(state_.ex.settings.maxBrightness));
+                            break;
+                    }
+                }
                 return;
             }
             case NightLightEffect::Breathe: {
@@ -764,9 +855,13 @@ private:
         TWI0.MCTRLA = TWI_ENABLE_bm;   
     }
     
+    /** Sets the IRQ to inform ESP that there is a state change it should attend to. 
+     
+        The IRQ is only set if ESP is altready powered on as otherwise pulling the AVR_IRQ pin low would mean next ESP boot will not be in normal mode. 
+     */
     static void setIrq() {
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-            if (! status_.irq) {
+            if (! status_.irq && digitalRead(DCDC_PWR) == DCDC_PWR_ON) {
                 status_.irq = true;
                 irqCountdown_ = IRQ_RESPONSE_TIMEOUT;
                 pinMode(AVR_IRQ, OUTPUT);
@@ -1040,7 +1135,8 @@ private:
 
     } status_;
 
-    static inline uint8_t irqCountdown_;
+    static inline uint8_t undervoltageCountdown_ = UNDERVOLTAGE_TIMEOUT;
+    static inline uint8_t irqCountdown_ = 0;
     static inline uint8_t tickCountdown_ = 0; 
     static inline uint16_t powerCountdown_ = 60;
     static inline uint8_t longPressCounter_ = 0; // [isr]

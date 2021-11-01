@@ -3,7 +3,25 @@
 #define AVR_I2C_ADDRESS 67
 #define IRQ_RESPONSE_TIMEOUT 64
 
+
+#define USB_VOLTAGE_THRESHOLD 440
+
+/** When battery reaches this voltage, the critical alert (three red flashes) will be displayed and the player will go to sleep immediately. 
+ */
 #define BATTERY_CRITICAL_VCC 340
+
+/** When battery reaches this level, no warnings are displayed even and the sleep is immediately resumed. 
+ */
+#define BATTERY_DEAD_VCC 320
+
+/** The battery undervoltage (critical or dead) must be detected consecutively for the specified number of measurements for the action to be taken to prevent the player reacting to quick power fluctuations. 
+ 
+    Upon wakeup, the AVR waits the given ammount of time for the measurements to make sure ESP is not powered up in vain. 
+ */
+#define UNDERVOLTAGE_TIMEOUT 20
+
+
+
 
 #define DEFAULT_VOLUME 5
 
@@ -36,11 +54,16 @@
 #define MODE_COLOR_WALKIE_TALKIE Color::Cyan()
 #define MODE_COLOR_NIGHT_LIGHT Color::Yellow()
 
+/** Colors for the binary clock idle mode. 
+ */
+#define BINARY_CLOCK_HOURS Color::Blue()
+#define BINARY_CLOCK_MINUTES Color::Green()
+#define BINARY_CLOCK_BATTERY Color::Red()
+#define BINARY_CLOCK_CHARGING Color::Cyan()
+
 /** Color of the double long press timeout bar. 
  */
 #define DOUBLE_LONG_PRESS_COLOR Color::Red()
-
-
 
 
 /** Radio frequency min and max values (in Mhz x 10). This must be within the chip's usable range and currently stands at 76.0 - 108.0 Mhz

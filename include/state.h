@@ -73,6 +73,27 @@ public:
             peripherals_ &= ~VOLUME_DOWN_MASK;
     }
 
+    void setHeadphonesConnected(bool value) volatile {
+        if (value)
+            peripherals_ |= HEADPHONES_MASK;
+        else
+            peripherals_ &= ~HEADPHONES_MASK;
+    }
+
+    void setCharging(bool value) volatile {
+        if (value)
+            peripherals_ |= CHARGING_MASK;
+        else
+            peripherals_ &= ~CHARGING_MASK;
+    }
+
+    void setBatteryMode(bool value) volatile {
+        if (value)
+            peripherals_ |= BATTERY_MASK;
+        else
+            peripherals_ &= ~BATTERY_MASK;
+    }
+
 private:
     static constexpr uint8_t CONTROL_DOWN_MASK = 1 << 0;
     static constexpr uint8_t VOLUME_DOWN_MASK = 1 << 1;
@@ -233,7 +254,6 @@ private:
     static constexpr uint8_t MODE_MASK = 7;
     static constexpr uint8_t IDLE_MASK = 8;
     static constexpr uint8_t INITIAL_POWER_ON_MASK = 16;
-
     uint8_t mode_;
 
 
