@@ -667,7 +667,7 @@ private:
             effectHue_ += 1;
             effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
         }
-        state_.ex.nightLight.effect = NightLightEffect::AudioLights;
+        //state_.ex.nightLight.effect = NightLightEffect::AudioLights;
         switch (state_.ex.nightLight.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...
             case NightLightEffect::Off:

@@ -18,7 +18,6 @@
 
 - should idle lights always show status? 
 
-- setting the radio station immediately after startup does not really work and produces noise for a long time... (seems like issue with the radio chip)
 - headphones can be set to output and LOW to disable speaker any time
 
 - add the following to the settings:

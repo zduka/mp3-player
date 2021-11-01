@@ -39,7 +39,7 @@
 /** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 
  */
 #define DEFAULT_IDLE_TIMEOUT 2
-#define DEFAULT_PLAY_TIMEOUT 60
+#define DEFAULT_PLAY_TIMEOUT 10
 
 
 

@@ -736,6 +736,9 @@ private:
         radio_.setVolume(state_.volumeValue());
         setRadioFrequency(ex_.radio.frequency);
         setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+        // for reasons unknown to me, the RDA does not always work immediately after power on/wakeup unless we set the frequency again after a while
+        delay(100);
+        setRadioFrequency(ex_.radio.frequency);
     }
 
     static void radioPause() {
