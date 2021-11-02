@@ -1,5 +1,6 @@
 # HW
 
+- antenna should go on the top only as far away from neopixel rail as possible
 - buy the extra things needed
 - smaller divider for I2S to audio
 - some resistors for the headphones to lower volume
@@ -34,6 +35,9 @@
 - determine decent speed settings for the night light effects
 
 # ESP
+
+
+heap 48k
 
 
 - check heap and health and reset when necessary

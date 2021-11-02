@@ -121,14 +121,11 @@ A lot more can be configured via the web interface.
 
 ## TODO
 
-- lights do not always turn themselves off?
-- determine better indicator for the audio strength (some annaeling?)
 
 - repeat modes for mp3
 - some mp3 files take time to load and make avr reset esp, see why?
 - extra settings, such as time limited volume, radio, 
 
-- AGND and GND should be joined at 5V regulator
 
 ## AVR
 
@@ -136,8 +133,6 @@ A lot more can be configured via the web interface.
 - this means that neopixel and rx pin must be level shifted - do they at 3.4V which is the lowest we go? 
 
 ## ESP8266 Core
-
-
 
 ### Exceptions Decoder
 

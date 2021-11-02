@@ -73,6 +73,8 @@ public:
         // initialize the chip and core peripherals
         initializeESP();
         initializeLittleFS();
+        initializeWiFi();
+        initializeServer();
         send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         initializeSDCard();
         send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
@@ -102,15 +104,13 @@ public:
     static void loop() {
         if (status_.irq) 
             status_.recording ? record() : updateState();
-        if (mp3_.isRunning()) {
+        if ( mp3_.isRunning() && !state_.idle()) {
             if (!mp3_.loop()) {
                 mp3_.stop();
                 LOG("MP3 playback done");
                 playNextTrack();
             }
         }
-    
-    
     }
 
 private:
@@ -479,7 +479,7 @@ private:
             return;
         bool resume = ! state_.idle();
         if (resume)
-            pause();
+            stop();
         state_.setMode(mode);
         send(msg::SetMode(mode));
         if (resume)
@@ -492,7 +492,9 @@ private:
         send(msg::SetIdle{false, timeoutPlay_});
         switch (state_.mode()) {
             case Mode::MP3:
-                mp3Play();
+                // if we are resuming from pause, just setting idle to false above did the trick
+                if (! mp3_.isRunning())
+                    mp3Play();
                 break;
             case Mode::Radio:
                 radioPlay();
@@ -505,9 +507,12 @@ private:
             default:
                 break;
         }
-
     }
 
+    /** Pauses the playback so that it can be resumed later on. 
+     
+        At this point it has only meaning for mp3 playback, for all else it is equivalent to a full stop.
+     */
     static void pause() {
         LOG("Pause");
         state_.setIdle(true);
@@ -517,17 +522,39 @@ private:
                 mp3Pause();
                 break;
             case Mode::Radio:
-                radioPause();
+                radioStop();
                 break;
             case Mode::WalkieTalkie:
                 break;
             case Mode::NightLight:
-                nightLightPause();
+                nightLightStop();
                 break;
             default:
                 break;
         }
+    }
 
+    /** Stops the playback. 
+     */
+    static void stop() {
+        LOG("Stop");
+        state_.setIdle(true);
+        send(msg::SetIdle{true, timeoutIdle_});
+        switch (state_.mode()) {
+            case Mode::MP3:
+                mp3Stop();
+                break;
+            case Mode::Radio:
+                radioStop();
+                break;
+            case Mode::WalkieTalkie:
+                break;
+            case Mode::NightLight:
+                nightLightStop();
+                break;
+            default:
+                break;
+        }
     }
 
     static void setVolume() {
@@ -598,6 +625,16 @@ private:
     }
 
     static void mp3Pause() {
+        /*
+        if (mp3_.isRunning()) {
+            mp3_.stop();
+            i2s_.stop();
+            mp3File_.close();
+        }
+        */
+    }
+
+    static void mp3Stop() {
         if (mp3_.isRunning()) {
             mp3_.stop();
             i2s_.stop();
@@ -630,7 +667,7 @@ private:
 
     static void setTrack(uint16_t index) {
         // pause current playback if any
-        mp3Pause();
+        mp3Stop();
         // determune whether we have to start from the beginning, or can go forward from current track
         uint16_t nextTrack = ex_.mp3.trackId + 1;
         if (index < nextTrack) {
@@ -670,6 +707,7 @@ private:
         if (ex_.mp3.trackId + 1 < playlists_[ex_.mp3.playlistId].numTracks) {
             setTrack(ex_.mp3.trackId + 1);
         } else {
+            mp3Stop();
             pause();
         }
     }
@@ -741,7 +779,7 @@ private:
         setRadioFrequency(ex_.radio.frequency);
     }
 
-    static void radioPause() {
+    static void radioStop() {
         radio_.term();
     }
 
@@ -856,7 +894,7 @@ private:
         // TODO play lullaby? 
     }
 
-    static void nightLightPause() {
+    static void nightLightStop() {
         // TODO stop playing lullaby?
     }
 
@@ -892,13 +930,123 @@ private:
 
     //@}
 
-    /** \name WiFi & Server
+    /** \name WiFi Connection
      */
     //@{
 
-    //static inline ESP8266WebServer Server_{80};
+    static void initializeWiFi() {
+        LOG("Initializing WiFi...");
+        wifiConnectedHandler_ = WiFi.onStationModeConnected(onWiFiConnected);
+        wifiIPAssignedHandler_ = WiFi.onStationModeGotIP(onWiFiIPAssigned);
+        wifiDisconnectedHandler_ = WiFi.onStationModeDisconnected(onWiFiDisconnected);
+    }
+
+    static void connectWiFi() {
+
+    }
+
+    static void disconnectWiFi() {
+        LOG("WiFi: Disconnecting");
+        WiFi.mode(WIFI_OFF);
+        WiFi.forceSleepBegin();
+        yield();
+        //State_.setWiFiStatus(WiFiStatus::Off);
+        //msg::Send(msg::SetWiFiStatus{State_});
+    }
+
+    static void onWiFiConnected(WiFiEventStationModeConnected const & e) {
+        LOG("WiFi: connected to %s, channel %u", e.ssid.c_str(), e.channel);
+    }
+
+    static void onWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
+        LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
+        //State_.setWiFiStatus(WiFiStatus::Connected);
+        //msg::Send(msg::SetWiFiStatus{State_});
+    }
+
+    /** TODO what to do when the wifi disconnects, but we did not initiate it? 
+     */
+    static void onWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
+        LOG("WiFi: disconnected, reason: %u", e.reason);
+    }
+
+    static inline WiFiEventHandler wifiConnectedHandler_;
+    static inline WiFiEventHandler wifiIPAssignedHandler_;
+    static inline WiFiEventHandler wifiDisconnectedHandler_;
 
     //@}
+
+    /** \name Web Server & Remote Control
+       
+     */
+    //@{
+
+    static void initializeServer() {
+        LOG("Initializing WebServer...");
+        server_.onNotFound(http404);
+        server_.serveStatic("/", LittleFS, "/index.html");
+        server_.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
+        server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
+        server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
+        server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
+        server_.serveStatic("/lame.min.js", LittleFS, "/lame.min.js");
+/*        server_.on("/status", httpStatus);
+        server_.on("/cmd", httpCommand);
+    */
+        server_.on("/sdls", httpSDls);
+        server_.on("/sd", httpSD);
+    }
+
+    static void http404() {
+        server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + server_.uri() + "\" }");
+    }
+
+    /** Lists a directory on the SD card and returns its contents in a JSON format. 
+     */
+    static void httpSDls() {
+        String const & path = server_.arg("path");
+        File d = SD.open(path.c_str());
+        if (!d || !d.isDirectory())
+            return http404();
+        LOG("WebServer: Listing directory %s", path.c_str());
+        server_.send(200, "text/json", "[");
+        int n = 0;
+        while(true) {
+            File f = d.openNextFile();
+            if (!f)
+                break;
+            if (n++ > 0)
+                server_.sendContent(",");
+            if (f.isDirectory())
+                server_.client().printf_P(PSTR("{\"name\":\"%s\", \"size\":\"dir\"}"), f.name());
+            else 
+                server_.client().printf_P(PSTR("{\"name\":\"%s\", \"size\":\"%u\"}"), f.name(), f.size());
+        } 
+        server_.sendContent("]");
+    }
+
+    /** Returns any given file on the SD card. 
+     */
+    static void httpSD() {
+        String const & path = server_.arg("path");
+        File f = SD.open(path.c_str(), FILE_READ);
+        if (!f || !f.isFile())
+            return http404();
+        LOG("WebServer: Serving file %s", path.c_str());
+        if (path.endsWith("mp3"))
+            server_.streamFile(f, mp3Mime_);
+        else
+            server_.streamFile(f, genericMime_);
+        f.close();
+    }
+
+    static inline ESP8266WebServer server_{80};
+    static inline String const genericMime_{"text/plain"};
+    static inline String const mp3Mime_{"audio/mp3"};
+
+    //@}
+
+
 
 
 
