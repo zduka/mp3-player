@@ -2,23 +2,15 @@
 
 - antenna should go on the top only as far away from neopixel rail as possible
 - buy the extra things needed
-- smaller divider for I2S to audio
-- some resistors for the headphones to lower volume
 
 - audio feedback opamp can have bigger gain, most likely. Needs checking...
-- where to put the extra LC filter for audio?
 
 - V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
-- check charging detection & charging power dissipation, low battery, AC power - lower charging power to ~0.5A to be on the safe side (2k7), remove LEDs
-
-- radio antenna seems to pickup some LED stuff, should only be on the upper PCB half
 
 
 # SW
 
 - radio frequency right after start still does not work well, maybe bigger interval
-
-
 
 - should idle lights always show status? 
 
