@@ -154,6 +154,13 @@ namespace msg {
     MESSAGE(StopRecording);
     //@}
 
+    MESSAGE(SetWiFiStatus, 
+        WiFiStatus mode;
+        SetWiFiStatus(WiFiStatus mode):
+            mode{mode} {
+        }
+    );
+
 
 
 #undef MESSAGE

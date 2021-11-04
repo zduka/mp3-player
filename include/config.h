@@ -1,8 +1,10 @@
 #pragma once
 
+#define DEFAULT_AP_SSID "mp3-player"
+#define DEFAULT_AP_PASSWORD "mp3-player"
+
 #define AVR_I2C_ADDRESS 67
 #define IRQ_RESPONSE_TIMEOUT 64
-
 
 #define USB_VOLTAGE_THRESHOLD 440
 

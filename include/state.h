@@ -26,7 +26,7 @@ enum class WiFiStatus : uint8_t {
     Off = 0,
     Connecting = 1,
     Connected = 2,
-    SoftAP = 3
+    AP = 3
 }; // WiFiStatus
 
 /** Current state of the player controls 
@@ -57,10 +57,6 @@ public:
 
     bool batteryMode() const volatile {
         return peripherals_ & BATTERY_MASK;
-    }
-
-    WiFiStatus wifiStatus() const volatile {
-        return static_cast<WiFiStatus>((peripherals_ & WIFI_STATUS_MASK) >> 6);
     }
 
     void setControlButtonDown(bool value = true) volatile {
@@ -105,7 +101,6 @@ private:
     static constexpr uint8_t CHARGING_MASK = 1 << 3;
     static constexpr uint8_t BATTERY_MASK = 1 << 4;
     static constexpr uint8_t LOW_BATTERY_MASK = 1 << 5;
-    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
     volatile uint8_t peripherals_; 
 //@}
 /** \name Events register. 
@@ -269,11 +264,24 @@ public:
             mode_ &= ~INITIAL_POWER_ON_MASK;
     }
 
+    /** WiFi mode. 
+     */
+    WiFiStatus wifiStatus() const volatile {
+        return static_cast<WiFiStatus>((mode_ & WIFI_STATUS_MASK) >> 6);
+    }
+
+    void setWiFiStatus(WiFiStatus mode) volatile {
+        mode_ &= ~WIFI_STATUS_MASK;
+        mode_ |= (static_cast<uint8_t>(mode) << 6);
+    }
+
+
 private:
     static constexpr uint8_t MODE_MASK = 7;
-    static constexpr uint8_t MUSIC_MODE_MASK = 8;
-    static constexpr uint8_t IDLE_MASK = 16;
-    static constexpr uint8_t INITIAL_POWER_ON_MASK = 32;
+    static constexpr uint8_t MUSIC_MODE_MASK = 1 << 3;
+    static constexpr uint8_t IDLE_MASK = 1 << 4;
+    static constexpr uint8_t INITIAL_POWER_ON_MASK = 1 << 5;
+    static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
     uint8_t mode_;
 
 

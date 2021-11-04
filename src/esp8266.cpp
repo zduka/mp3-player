@@ -495,7 +495,12 @@ private:
         LOG("Setting mode %u", mode);
         switch (mode) {
             case Mode::Music: {
-                bool resume = state_.mode() == Mode::WalkieTalkie;
+                bool resume = false;
+                // if we are coming from walkie talkie, disconnect WiFi too
+                if (state_.mode() == Mode::WalkieTalkie) {
+                    disconnectWiFi();
+                    resume = true;
+                }
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 if (resume)
@@ -517,6 +522,8 @@ private:
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 // TODO set control range
+                // connect to WiFi
+                connectWiFi();
                 break;
             }
         }
@@ -940,6 +947,8 @@ private:
      */
     //@{
 
+    /** WiFi initialization routine. 
+     */
     static void initializeWiFi() {
         LOG("Initializing WiFi...");
         wifiConnectedHandler_ = WiFi.onStationModeConnected(onWiFiConnected);
@@ -947,8 +956,73 @@ private:
         wifiDisconnectedHandler_ = WiFi.onStationModeDisconnected(onWiFiDisconnected);
     }
 
+    /** Connects to the WiFi. 
+     
+     
+     */
     static void connectWiFi() {
+        LOG("WiFi: Scanning networks...");
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect();
+        WiFi.scanNetworksAsync([](int n) {
+            LOG("WiFi: Networks found: %i", n);
+            File f = SD.open("player/wifi.json", FILE_READ);
+            if (f) {
+                StaticJsonDocument<1024> json;
+                if (deserializeJson(json, f) == DeserializationError::Ok) {
+                    for (JsonVariant network : json["networks"].as<JsonArray>()) {
+                        for (int i = 0; i < n; ++i) {
+                            if (WiFi.SSID(i) == network["ssid"]) {
+                                LOG("WiFi: connecting to %s, rssi: %i, channel: %i", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
+                                state_.setWiFiStatus(WiFiStatus::Connecting);
+                                send(msg::SetWiFiStatus{WiFiStatus::Connecting});
+                                WiFi.begin(network["ssid"].as<char const *>(), network["password"].as<char const *>());
+                                // so that we do not start the access point just yet
+                                WiFi.scanDelete();
+                                f.close();
+                                return;
+                            }
+                        }
+                    }
+                } else {
+                    LOG("");
+                }
+                f.close();
+            } else {
+                LOG("WiFi: No player/wifi.json found");
+            }
+            WiFi.scanDelete();
+            // if no networks were recognized, start AP
+            startWiFiAP();
+        });
+    }
 
+    static void startWiFiAP() {
+        File f = SD.open("player/wifi.json", FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                char const * ssid = json["ap"]["ssid"];
+                char const * pass = json["ap"]["pass"];
+                if (ssid == nullptr || ssid[0] == 0) {
+                    ssid = DEFAULT_AP_SSID;
+                    if (pass == nullptr || pass[0] == 0)
+                        pass = DEFAULT_AP_PASSWORD;
+                }
+                LOG("Initializing soft AP, ssid %s, password %p", ssid, pass);
+                LOG("    own ip: 10.0.0.1");
+                LOG("    subnet: 255.255.255.0");
+                IPAddress ip{10,0,0,1};
+                IPAddress subnet{255, 255, 255, 0};
+                WiFi.softAPConfig(ip, ip, subnet);
+                if (!WiFi.softAP(ssid, pass)) {
+                    // TODO error
+                } else {
+                    state_.setWiFiStatus(WiFiStatus::AP);
+                    send(msg::SetWiFiStatus{WiFiStatus::AP});
+                }
+            }
+        }
     }
 
     static void disconnectWiFi() {
@@ -956,8 +1030,8 @@ private:
         WiFi.mode(WIFI_OFF);
         WiFi.forceSleepBegin();
         yield();
-        //State_.setWiFiStatus(WiFiStatus::Off);
-        //msg::Send(msg::SetWiFiStatus{State_});
+        state_.setWiFiStatus(WiFiStatus::Off);
+        send(msg::SetWiFiStatus{WiFiStatus::Off});
     }
 
     static void onWiFiConnected(WiFiEventStationModeConnected const & e) {
@@ -966,8 +1040,8 @@ private:
 
     static void onWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
         LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
-        //State_.setWiFiStatus(WiFiStatus::Connected);
-        //msg::Send(msg::SetWiFiStatus{State_});
+        state_.setWiFiStatus(WiFiStatus::Connected);
+        send(msg::SetWiFiStatus{WiFiStatus::Connected});
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
