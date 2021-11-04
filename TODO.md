@@ -13,9 +13,12 @@
 
 - radio antenna seems to pickup some LED stuff, should only be on the upper PCB half
 
-- determine useful headphone max volume (R7, R12). Setting this to non-zero may also mean that we can use smaller value for the headphone decoupling caps (C10, C14)
 
 # SW
+
+- radio frequency right after start still does not work well, maybe bigger interval
+
+
 
 - should idle lights always show status? 
 

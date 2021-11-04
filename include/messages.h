@@ -38,10 +38,14 @@ namespace msg {
 
     MESSAGE(SetMode,
         Mode mode;
-        SetMode(Mode mode):
-            mode{mode} {
+        MusicMode musicMode;
+        SetMode(Mode mode, MusicMode musicMode):
+            mode{mode},
+            musicMode{musicMode} {
         }
     );
+
+    static_assert(sizeof(SetMode) == 3);
 
     /** Turns the player's idle state on/off explicitly.
      

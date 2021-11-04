@@ -96,9 +96,9 @@ public:
         setExtendedState(ex_);
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
-        // enter the last used mode
-        state_.setIdle(false);
-        setMode(state_.mode(), /* force */ true);
+        // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
+        state_.setMode(Mode::WalkieTalkie);
+        setMode(Mode::Music);
     }
 
     static void loop() {
@@ -302,31 +302,31 @@ private:
     static void controlPress() {
         LOG("Control press");
         switch (state_.mode()) {
-            case Mode::MP3: {
-                uint8_t i = ex_.mp3.playlistId + 1;
-                if (i >= numPlaylists_)
-                    i = 0;
-                setPlaylist(i);
-                send(msg::LightsPoint{i, numPlaylists_ - 1, MODE_COLOR_MP3});
-                break;
-            }
-            case Mode::Radio: {
-                uint8_t i = ex_.radio.stationId + 1;
-                if (i >= numRadioStations_)
-                    i = 0;
-                setRadioStation(i);
-                send(msg::LightsPoint{i, numRadioStations_ - 1, MODE_COLOR_RADIO});
+            case Mode::Music: {
+                if (state_.musicMode() == MusicMode::MP3) {
+                    uint8_t i = ex_.mp3.playlistId + 1;
+                    if (i >= numPlaylists_)
+                        i = 0;
+                    setPlaylist(i);
+                    send(msg::LightsPoint{i, numPlaylists_ - 1, MODE_COLOR_MP3});
+                } else {
+                    uint8_t i = ex_.radio.stationId + 1;
+                    if (i >= numRadioStations_)
+                        i = 0;
+                    setRadioStation(i);
+                    send(msg::LightsPoint{i, numRadioStations_ - 1, MODE_COLOR_RADIO});
+                }
                 break;
             }
             case Mode::WalkieTalkie: {
                 break;
             }
-            case Mode::NightLight: {
-                uint8_t i = static_cast<uint8_t>(ex_.nightLight.effect) + 1;
+            case Mode::Lights: {
+                uint8_t i = static_cast<uint8_t>(ex_.lights.effect) + 1;
                 if (i == 8)
                     i = 0;
-                setNightLightEffect(static_cast<NightLightEffect>(i));
-                send(msg::LightsPoint{i, 7, MODE_COLOR_NIGHT_LIGHT});
+                setLightsEffect(static_cast<LightsEffect>(i));
+                send(msg::LightsPoint{i, 7, MODE_COLOR_LIGHTS});
                 break;
             }
             default:
@@ -338,7 +338,11 @@ private:
      */
     static void controlLongPress() {
         LOG("Control long press");
-        setMode(ex_.getNextMode(state_.mode()));
+        if (state_.mode() == Mode::Music) {
+            setMusicMode(ex_.getNextMusicMode(state_.mode(), state_.musicMode()));
+        } else {
+            setMode(Mode::Music);
+        }
     }
 
     /** Selects track id in mp3 mode, radio frequency in radio, or changes hue in night lights mode. 
@@ -348,19 +352,20 @@ private:
     static void controlTurn() {
         LOG("Control: %u", state_.controlValue());
         switch (state_.mode()) {
-            case Mode::MP3:
-                send(msg::LightsPoint{state_.controlValue(), ex_.mp3.playlistId, MODE_COLOR_MP3});
-                setTrack(state_.controlValue());
-                break;
-            case Mode::Radio:
-                send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO});
-                setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
+            case Mode::Music:
+                if (state_.musicMode() == MusicMode::MP3) {
+                    send(msg::LightsPoint{state_.controlValue(), ex_.mp3.playlistId, MODE_COLOR_MP3});
+                    setTrack(state_.controlValue());
+                } else {
+                    send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO});
+                    setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
+                }
                 break;
             case Mode::WalkieTalkie:
                 break;
-            case Mode::NightLight: {
+            case Mode::Lights: {
                 setNightLightHue(state_.controlValue());
-                if (ex_.nightLight.hue == NightLightState::HUE_RAINBOW)
+                if (ex_.lights.hue == LightsState::HUE_RAINBOW)
                     send(msg::LightsColors{
                         Color::HSV(0 << 13, 255, ex_.settings.maxBrightness),
                         Color::HSV(1 << 13, 255, ex_.settings.maxBrightness),
@@ -372,7 +377,7 @@ private:
                         Color::HSV(7 << 13, 255, ex_.settings.maxBrightness)
                     });
                 else
-                    send(msg::LightsBar{8, 8, Color::HSV(ex_.nightLight.colorHue(), 255, ex_.settings.maxBrightness)});
+                    send(msg::LightsBar{8, 8, Color::HSV(ex_.lights.colorHue(), 255, ex_.settings.maxBrightness)});
                 break;
             }
             default:
@@ -400,46 +405,48 @@ private:
         }
     }
 
-    /** Play/Pause in mp3, radio and night-lights mode. 
+    /** Play/Pause in mp3, radio and lights settings mode. 
      
         Does nothing in walkie-talkie mode as volume key press & hold is used to record messages. 
       */
     static void volumePress() {
         LOG("Volume press");
         switch (state_.mode()) {
-            case Mode::MP3:
-            case Mode::Radio:
-            case Mode::NightLight:
+            case Mode::Music:
+            case Mode::Lights:
                 if (state_.idle())
                     play();
                 else
                     pause();
                 break;
-            case Mode::WalkieTalkie:
             default:
                 break;
         }
     }
 
-
     static void volumeLongPress() {
         LOG("Volume long press");
+        setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
     }
 
     /** Changes volume. 
+     
+        In music and lights settings mode updates the volume of the underlying music provider (mp3/radio). 
+
+        TODO in walkie talkie updates the WAV/MP3 player volume settings properly. 
      */
     static void volumeTurn() {
         // TODO check that the volume is within the settings available
         LOG("Volume: %u", state_.volumeValue());
         switch (state_.mode()) {
-            case Mode::MP3:
-                mp3UpdateVolume();
-                break;
-            case Mode::Radio:
-                radioUpdateVolume();
+            case Mode::Music:
+            case Mode::Lights:
+                if (state_.musicMode() == MusicMode::MP3)
+                    mp3UpdateVolume();
+                else
+                    radioUpdateVolume();
                 break;
             case Mode::WalkieTalkie:
-            case Mode::NightLight:
             default:
                 break;
         }
@@ -450,7 +457,7 @@ private:
      */
     static void doubleLongPress() {
         LOG("Double long press");
-
+        setMode(state_.mode() == Mode::Music ? Mode::WalkieTalkie : Mode::Music);
     }
 
     //@}
@@ -470,41 +477,63 @@ private:
         state_.setControlValue(value);
         send(msg::SetControlRange{value, max});
     }
-    
-    /** Enters the provided mode. 
+
+    /** Sets the music mode. 
      */
-    static void setMode(Mode mode, bool force = false) {
-        LOG("Setting mode %u", mode);
-        if ((state_.mode() == mode) && ! force)
-            return;
-        bool resume = ! state_.idle();
+    static void setMusicMode(MusicMode mode) {
+        LOG("Setting music mode %u", mode);
+        bool resume = ! state_.idle() && state_.mode() == Mode::Music;
         if (resume)
             stop();
-        state_.setMode(mode);
-        send(msg::SetMode(mode));
+        state_.setMusicMode(mode);
+        send(msg::SetMode{state_.mode(), state_.musicMode()});
         if (resume)
             play();
+    }    
+
+    static void setMode(Mode mode) {
+        LOG("Setting mode %u", mode);
+        switch (mode) {
+            case Mode::Music: {
+                bool resume = state_.mode() == Mode::WalkieTalkie;
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                if (resume)
+                    play();
+                else if (state_.musicMode() == MusicMode::MP3)
+                    setControlRange(ex_.mp3.trackId, playlists_[ex_.mp3.playlistId].numTracks);
+                else
+                    setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+                break;
+            }
+            case Mode::Lights: {
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                setControlRange(ex_.lights.hue, LightsState::HUE_RAINBOW + 1);
+                break;
+            }
+            case Mode::WalkieTalkie: {
+                stop(); // stop music if any 
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                // TODO set control range
+                break;
+            }
+        }
     }
 
     static void play() {
         LOG("Play");
         state_.setIdle(false);
         send(msg::SetIdle{false, timeoutPlay_});
-        switch (state_.mode()) {
-            case Mode::MP3:
+        switch (state_.musicMode()) {
+            case MusicMode::MP3:
                 // if we are resuming from pause, just setting idle to false above did the trick
                 if (! mp3_.isRunning())
                     mp3Play();
                 break;
-            case Mode::Radio:
+            case MusicMode::Radio:
                 radioPlay();
-                break;
-            case Mode::WalkieTalkie:
-                break;
-            case Mode::NightLight:
-                nightLightPlay();
-                break;
-            default:
                 break;
         }
     }
@@ -517,19 +546,12 @@ private:
         LOG("Pause");
         state_.setIdle(true);
         send(msg::SetIdle{true, timeoutIdle_});
-        switch (state_.mode()) {
-            case Mode::MP3:
+        switch (state_.musicMode()) {
+            case MusicMode::MP3:
                 mp3Pause();
                 break;
-            case Mode::Radio:
+            case MusicMode::Radio:
                 radioStop();
-                break;
-            case Mode::WalkieTalkie:
-                break;
-            case Mode::NightLight:
-                nightLightStop();
-                break;
-            default:
                 break;
         }
     }
@@ -540,19 +562,12 @@ private:
         LOG("Stop");
         state_.setIdle(true);
         send(msg::SetIdle{true, timeoutIdle_});
-        switch (state_.mode()) {
-            case Mode::MP3:
+        switch (state_.musicMode()) {
+            case MusicMode::MP3:
                 mp3Stop();
                 break;
-            case Mode::Radio:
+            case MusicMode::Radio:
                 radioStop();
-                break;
-            case Mode::WalkieTalkie:
-                break;
-            case Mode::NightLight:
-                nightLightStop();
-                break;
-            default:
                 break;
         }
     }
@@ -589,9 +604,9 @@ private:
         } else {
             LOG("player/playlists.json not found");
         }
-        // disable mp3 mode if no playlists are found
-        if (numPlaylists_ == 0)
-            ex_.settings.setMp3Enabled(false);
+        // TODO add the feed me with music playlist if there are no playlists provided
+        //if (numPlaylists_ == 0)
+        //    ex_.settings.setMp3Enabled(false);
     }
 
     /** Searches the playlist to determine the number of tracks it contains. 
@@ -784,14 +799,14 @@ private:
     }
 
     static void radioUpdateVolume() {
-        if (state_.mode() == Mode::Radio) {
+        if (state_.mode() == Mode::Music && state_.musicMode() == MusicMode::Radio) {
             radio_.setVolume(state_.volumeValue());
         }
     }
 
     static void setRadioFrequency(uint16_t mhzx10) {
         LOG("Radio frequency: %u", mhzx10);
-        if (state_.mode() == Mode::Radio) {
+        if (state_.mode() == Mode::Music && state_.musicMode() == MusicMode::Radio) {
             ex_.radio.frequency = mhzx10;
             radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
             setExtendedState(ex_.radio);
@@ -800,7 +815,7 @@ private:
 
     static void setRadioStation(uint8_t index) {
         LOG("Radio station: %u", index);
-        if (state_.mode() == Mode::Radio) {
+        if (state_.mode() == Mode::Music && state_.musicMode() == MusicMode::Radio) {
             ex_.radio.stationId = index;
             ex_.radio.frequency = radioStations_[index];
             radio_.setBandFrequency(RADIO_BAND_FM, ex_.radio.frequency * 10);
@@ -889,25 +904,16 @@ private:
      */
     //@{
 
-    static void nightLightPlay() {
-        setControlRange(ex_.nightLight.hue, NightLightState::HUE_RAINBOW + 1);
-        // TODO play lullaby? 
-    }
-
-    static void nightLightStop() {
-        // TODO stop playing lullaby?
-    }
-
-    static void setNightLightEffect(NightLightEffect effect) {
-        LOG("Night light effect: %u", static_cast<uint8_t>(effect));
-        ex_.nightLight.effect = effect;
-        setExtendedState(ex_.nightLight);
+    static void setLightsEffect(LightsEffect effect) {
+        LOG("Lights effect: %u", static_cast<uint8_t>(effect));
+        ex_.lights.effect = effect;
+        setExtendedState(ex_.lights);
     }
 
     static void setNightLightHue(uint8_t hue) {
-        LOG("Night light hue: %u", hue);
-        ex_.nightLight.hue = hue;
-        setExtendedState(ex_.nightLight);
+        LOG("Light hue: %u", hue);
+        ex_.lights.hue = hue;
+        setExtendedState(ex_.lights);
     }
 
     //@}

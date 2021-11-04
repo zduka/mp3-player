@@ -52,7 +52,7 @@
 #define MODE_COLOR_MP3 Color::Blue()
 #define MODE_COLOR_RADIO Color::Green()
 #define MODE_COLOR_WALKIE_TALKIE Color::Cyan()
-#define MODE_COLOR_NIGHT_LIGHT Color::Yellow()
+#define MODE_COLOR_LIGHTS Color::Yellow()
 
 /** Colors for the binary clock idle mode. 
  */

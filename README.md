@@ -6,7 +6,30 @@ The player can be controlled via two push-button knobs and more advanced setting
 
 # Controls & Modes
 
+## MP3 Player & FM Radio
+
+CONTROL long press switches between these two. CONTROL short press cycles through playlists (mp3) or preset radio stations (radio). CONTROL turn selects track within a playlist (mp3) or manual frequency selection (radio). VOLUME press is play/pause, VOLUME turn is volume. 
+
+VOLUME long press goes to lights settings. Both keys long press turns on the WiFi and goes to the walkie-talkie mode. 
+
+## Walkie-Talkie & Webserver
+
+CONTROL long press or both keys returns to the music mode.  
+
+CONTROL press plays / stops the playback of the last recorded message, while CONTROL turn allows selecting older messages, if any. 
+
+VOLUME turn is volume, VOLUME down is start recording, VOLUME up then stops recording and sends the audio file. 
+
+## Lights Settings
+
+CONTROL press switches between light effects, CONTROL turn sets the color of the effect (either hue, or cycle through hues). VOLUME press is play/pause of the underlying mode (mp3 or radio). VOLUME turn is still volume. VOLUME long press or CONTROL long press returns to the previous mode (mp3 or radio). 
+
+
 The two rotary encoders are called CONTROL (top) and VOLUME (down).
+
+CONTROL long press switches between mp3 and radio mode. 
+
+VOLUME long press enters the night light settings mode
 
 ## Setup & Build
 

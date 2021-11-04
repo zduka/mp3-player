@@ -600,16 +600,17 @@ private:
  */
 //@{
 
-    static Color getModeColor(Mode mode) {
+    static Color getModeColor(Mode mode, MusicMode musicMode) {
         switch (mode) {
-            case Mode::MP3:
-                return MODE_COLOR_MP3;
-            case Mode::Radio:
-                return MODE_COLOR_RADIO;
+            case Mode::Music:
+                if (musicMode == MusicMode::MP3)
+                    return MODE_COLOR_MP3;
+                else
+                    return MODE_COLOR_RADIO;
             case Mode::WalkieTalkie:
                 return MODE_COLOR_WALKIE_TALKIE;
-            case Mode::NightLight:
-                return MODE_COLOR_NIGHT_LIGHT;
+            case Mode::Lights:
+                return MODE_COLOR_LIGHTS;
             default:
                 return DEFAULT_COLOR;
         }
@@ -621,26 +622,28 @@ private:
      */
     static void lightsTick() {
         uint8_t step = 1;
-        if (state_.state.controlButtonDown() && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
-            // if the long press counter is not 0, display the countdown bar
-            if (longPressCounter_ != 0) {
-                Color color = state_.state.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.state.mode());
+        if ((state_.state.controlButtonDown() || state_.state.volumeButtonDown()) && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
+            if (longPressCounter_ != 0) { // if the long press is not active, show progress bar in the color of the current mode
+                Color color = getModeColor(state_.state.mode(), state_.state.musicMode());
                 color = color.withBrightness(state_.ex.settings.maxBrightness);
                 strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
                 step = 255;
             } else {
-                Color color = state_.state.volumeButtonDown() ? DOUBLE_LONG_PRESS_COLOR : getModeColor(state_.ex.getNextMode(state_.state.mode()));
+                Color color = MODE_COLOR_WALKIE_TALKIE; // both buttons are pressed down
+                if (! state_.state.volumeButtonDown())
+                    color = getModeColor(Mode::Music, state_.ex.getNextMusicMode(state_.state.mode(), state_.state.musicMode()));
+                else if (! state_.state.controlButtonDown()) // TODO what to with walkie-talkie long press
+                    color = MODE_COLOR_LIGHTS;
                 color = color.withBrightness(state_.ex.settings.maxBrightness);
                 strip_.fill(color);
             }
-            // set effect timeout to one, which will immediately trigger revert back to night lights mode as soon as the button is released
             effectTimeout_ = 1;
         } else if (effectTimeout_ > 0) {
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
-                effectHue_ = state_.ex.nightLight.colorHue();
+                effectHue_ = state_.ex.lights.colorHue();
                 effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
-                if (state_.ex.nightLight.effect == NightLightEffect::AudioLights) {
+                if (state_.ex.lights.effect == LightsEffect::AudioLights) {
                     effect_.audio.maxDelta = 0;
                     effect_.audio.minDelta = 255;
                 }
@@ -649,7 +652,7 @@ private:
             audioLightsTick(step);
         } else {
             //digitalWrite(DEBUG_PIN, HIGH);            
-            nightLightsTick(step);
+            lightsTick(step);
             //digitalWrite(DEBUG_PIN, LOW);            
         }
         // once we have the tick, update the actual neopixels with the calculated strip value & step
@@ -661,28 +664,28 @@ private:
      
         
      */
-    static void nightLightsTick(uint8_t & step) {
+    static void lightsTick(uint8_t & step) {
         // update the hue of the effect color, if in rainbow mode
-        if (/*tickCountdown_ % 16 == 0 && */ state_.ex.nightLight.hue == NightLightState::HUE_RAINBOW) {
+        if (/*tickCountdown_ % 16 == 0 && */ state_.ex.lights.hue == LightsState::HUE_RAINBOW) {
             effectHue_ += 1;
             effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
         }
-        //state_.ex.nightLight.effect = NightLightEffect::AudioLights;
-        switch (state_.ex.nightLight.effect) {
+        //state_.ex.nightLight.effect = LightsEffect::AudioLights;
+        switch (state_.ex.lights.effect) {
             // turn off the strip, don't change step so that the fade to black is gradual...
-            case NightLightEffect::Off:
+            case LightsEffect::Off:
             default:
                 strip_.fill(Color::Black());
                 return;
             // 
-            case NightLightEffect::AudioLights: {
+            case LightsEffect::AudioLights: {
                 if (! state_.state.idle()) {
                     audioLightsTick(step);
                     return;
                 }
                 // fallthrough to BinaryClock
             }
-            case NightLightEffect::BinaryClock: {
+            case LightsEffect::BinaryClock: {
                 if (state_.state.charging()) {
                     strip_.showBar((state_.ex.time.second() % 2 * 64) + tickCountdown_ % 64, 128, BINARY_CLOCK_CHARGING.withBrightness(state_.ex.settings.maxBrightness));
                 } else {
@@ -700,25 +703,25 @@ private:
                 }
                 return;
             }
-            case NightLightEffect::Breathe: {
+            case LightsEffect::Breathe: {
                 strip_.fill(effectColor_.withBrightness(effectCounter_ & 0xff));
                 break;
             }
-            case NightLightEffect::BreatheBar: {
+            case LightsEffect::BreatheBar: {
                 //strip_.centeredBar(effectColor_, effectCounter_ & 0xff, 255);
                 strip_.showBarCentered((effectCounter_ & 0xff) / 4, 64, effectColor_);
                 break;
             }
-            case NightLightEffect::KnightRider: {
+            case LightsEffect::KnightRider: {
                 strip_.showPoint((effectCounter_ & 0xff) / 4, 64, effectColor_);
                 break;
             }
-            case NightLightEffect::StarryNight: {
+            case LightsEffect::StarryNight: {
                 strip_.fill(Color::Black());
                 return;
             }
             // solid color that simply fills the whole strip with the effect color
-            case NightLightEffect::SolidColor: {
+            case LightsEffect::SolidColor: {
                 strip_.fill(effectColor_);
                 return;
             }
@@ -907,12 +910,13 @@ private:
             }
             case msg::SetMode::Id: {
                 auto m = pointer_cast<msg::SetMode*>(& i2cRxBuffer_);
-                LOG("cmd SetMode m: %u", m->mode);
+                LOG("cmd SetMode m: %u, %u", (uint8_t)m->mode, (uint8_t)m->musicMode);
                 state_.state.setMode(m->mode);
-                if (m->mode == Mode::Radio)
-                    digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
-                else 
+                state_.state.setMusicMode(m->musicMode);
+                if (m->mode == Mode::WalkieTalkie || m->musicMode == MusicMode::MP3)
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
+                else 
+                    digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
                 break;
             }
             case msg::SetIdle::Id: {
@@ -1590,20 +1594,20 @@ private:
 
     static void NightLight(uint8_t & step) {
         step = 255; // pixels will be synced, not moved towards
-        switch (state_.state.nightLightEffect()) {
-            case NightLightEffect::Color:
+        switch (state_.state.LightsEffect()) {
+            case LightsEffect::Color:
                 Lights_.fill(EffectColor_);
                 break;
-            case NightLightEffect::Breathe:
+            case LightsEffect::Breathe:
                 Lights_.fill(EffectColor_.withBrightness(EffectCounter_ >> 8));
                 break;
-            case NightLightEffect::BreatheBar:
+            case LightsEffect::BreatheBar:
                 Lights_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
                 break;
-            case NightLightEffect::KnightRider:
+            case LightsEffect::KnightRider:
                 Lights_.showPoint(EffectCounter_, 0xffff, EffectColor_);
                 break;
-            case NightLightEffect::Running:
+            case LightsEffect::Running:
                 break;
         }
         uint16_t speed = 16 * 32;

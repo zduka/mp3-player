@@ -6,11 +6,15 @@
 #include "color.h"
 #include "datetime.h"
 
-enum class Mode : uint8_t {
+enum class MusicMode : uint8_t {
     MP3,
-    Radio,
+    Radio
+};
+
+enum class Mode : uint8_t {
+    Music,
+    Lights,
     WalkieTalkie,
-    NightLight,
     // the alarm clock and birthday greeting modes are not directly accessible via controls, but are automatically selected by the system when appropriate
     AlarmClock,
     BirthdayGreeting,
@@ -222,6 +226,21 @@ public:
         mode_ |= static_cast<uint8_t>(value) & MODE_MASK;
     }
 
+    /** Returns the music mode. 
+     
+        This is either mp3, or radio. 
+     */
+    MusicMode musicMode() const volatile {
+        return static_cast<MusicMode>((mode_ & MUSIC_MODE_MASK) >> 3);
+    }
+
+    void setMusicMode(MusicMode mode) volatile {
+        if (mode == MusicMode::MP3)
+            mode_ &= ~ MUSIC_MODE_MASK;
+        else
+            mode_ |= MUSIC_MODE_MASK;
+    }
+
     /** Returns true if the player is idle. 
      
         This means no playback / recording is happening. 
@@ -252,8 +271,9 @@ public:
 
 private:
     static constexpr uint8_t MODE_MASK = 7;
-    static constexpr uint8_t IDLE_MASK = 8;
-    static constexpr uint8_t INITIAL_POWER_ON_MASK = 16;
+    static constexpr uint8_t MUSIC_MODE_MASK = 8;
+    static constexpr uint8_t IDLE_MASK = 16;
+    static constexpr uint8_t INITIAL_POWER_ON_MASK = 32;
     uint8_t mode_;
 
 
@@ -330,12 +350,9 @@ class Settings {
 public:
 
     Settings() {
-        raw_ = ENABLE_MP3 | ENABLE_RADIO | ENABLE_WALKIE_TALKIE | ENABLE_NIGHT_LIGHT | RADIO_ENABLE_MANUAL_TUNING;
+        raw_ =  ENABLE_RADIO | ENABLE_WALKIE_TALKIE | ENABLE_LIGHTS | RADIO_ENABLE_MANUAL_TUNING;
     }
 
-    bool mp3Enabled() volatile {
-        return raw_ & ENABLE_MP3;
-    }
 
     bool radioEnabled() volatile {
         return raw_ & ENABLE_RADIO;
@@ -346,7 +363,7 @@ public:
     }
 
     bool NightLightEnabled() volatile {
-        return raw_ & ENABLE_NIGHT_LIGHT;
+        return raw_ & ENABLE_LIGHTS;
     }
 
     bool radioManualTuningEnabled() volatile {
@@ -355,10 +372,6 @@ public:
 
     bool radioForceMono() volatile {
         return raw_ & RADIO_FORCE_MONO;
-    }
-
-    void setMp3Enabled(bool value) {
-        raw_ = value ? (raw_ | ENABLE_MP3) : (raw_ & ~ENABLE_MP3);
     }
 
     void setRadioEnabled(bool value) {
@@ -370,7 +383,7 @@ public:
     }
 
     void setNightLightEnabled(bool value) {
-        raw_ = value ? (raw_ | ENABLE_NIGHT_LIGHT) : (raw_ & ~ENABLE_NIGHT_LIGHT);
+        raw_ = value ? (raw_ | ENABLE_LIGHTS) : (raw_ & ~ENABLE_LIGHTS);
     }
 
     void setRadioManualTuningEnabled(bool value) {
@@ -390,12 +403,11 @@ public:
     uint8_t maxBrightness = DEFAULT_BRIGHTNESS; 
 
 private:
-    static constexpr uint16_t ENABLE_MP3 = 1 << 0;
-    static constexpr uint16_t ENABLE_RADIO = 1 << 1;
-    static constexpr uint16_t ENABLE_WALKIE_TALKIE = 1 << 2;
-    static constexpr uint16_t ENABLE_NIGHT_LIGHT = 1 << 3;
-    static constexpr uint16_t RADIO_ENABLE_MANUAL_TUNING = 1 << 4;
-    static constexpr uint16_t RADIO_FORCE_MONO = 1 << 5;
+    static constexpr uint16_t ENABLE_RADIO = 1 << 0;
+    static constexpr uint16_t ENABLE_WALKIE_TALKIE = 1 << 1;
+    static constexpr uint16_t ENABLE_LIGHTS = 1 << 2;
+    static constexpr uint16_t RADIO_ENABLE_MANUAL_TUNING = 1 << 3;
+    static constexpr uint16_t RADIO_FORCE_MONO = 1 << 4;
 
     uint16_t raw_;
 
@@ -454,7 +466,7 @@ static_assert(sizeof(WalkieTalkieState) == 4);
 
 /** The various night light effects the player supports. 
  */
-enum class NightLightEffect : uint8_t {
+enum class LightsEffect : uint8_t {
     Off = 0, 
     AudioLights, 
     Breathe, 
@@ -467,14 +479,14 @@ enum class NightLightEffect : uint8_t {
 
 /** State of the night light mode. 
  */
-class NightLightState {
+class LightsState {
 public:
     static constexpr uint8_t HUE_RAINBOW = 32;
-    NightLightEffect effect = NightLightEffect::AudioLights;
+    LightsEffect effect = LightsEffect::AudioLights;
     uint8_t hue = HUE_RAINBOW;
 
     void log() const {
-        LOG("Night Light State:");
+        LOG("Lights State:");
         LOG("    effect: %u", effect);
         LOG("    hue: %u", hue);
     }
@@ -486,7 +498,7 @@ public:
     
 } __attribute__((packed)); // NightLightState
 
-static_assert(sizeof(NightLightState) == 2);
+static_assert(sizeof(LightsState) == 2);
 
 /** Active notifications. 
  */
@@ -553,38 +565,22 @@ public:
     MP3State mp3;
     RadioState radio;
     WalkieTalkieState walkieTalkie;
-    NightLightState nightLight;
+    LightsState lights;
     Notifications notifications;
     DateTime time;
     DateTime alarm;
 
-    /** Returns the next mode. 
-     
-        This is usually straightforward unless the walkie-talkie mode is disabled. We need to know this inside the extended state as this function is used both by AVR and ESP and the extended state has enough information to determine whether a mode is active or not.
-     */
-    Mode getNextMode(Mode current) volatile {
 
-        switch (current) {
-            case Mode::MP3:
-                if (settings.radioEnabled()) 
-                    return Mode::Radio;
-            case Mode::Radio:
-                if (settings.walkieTalkieEnabled())
-                    return Mode::WalkieTalkie;
-            case Mode::WalkieTalkie:
-                if (settings.NightLightEnabled())
-                    return Mode::NightLight;
-            case Mode::NightLight:
-            default:
-                if (settings.mp3Enabled())
-                    return Mode::MP3;
-                else if (settings.radioEnabled())
-                    return Mode::Radio;
-                else if (settings.walkieTalkieEnabled())
-                    return Mode::WalkieTalkie;
-                else //if (settings.NightLightEnabled()) // ignore this check as we have to return something
-                    return Mode::NightLight;
-        }
+    /** Returns the next music mode. 
+     
+        This is the current music mode if the mode is not music, or the other music mode (if available) and current mode is music. 
+     */
+    MusicMode getNextMusicMode(Mode mode, MusicMode current) volatile {
+        if (mode != Mode::Music)
+            return current;
+        if (current == MusicMode::MP3 && settings.radioEnabled())
+            return MusicMode::Radio;
+        return MusicMode::MP3;
     }
 
     void log() const {
@@ -593,7 +589,7 @@ public:
         mp3.log();
         radio.log();
         walkieTalkie.log();
-        nightLight.log();
+        lights.log();
         notifications.log();
     }
 
