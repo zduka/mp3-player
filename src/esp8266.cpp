@@ -6,7 +6,6 @@
 #include <LittleFS.h>
 #include <SPI.h>
 #include <SD.h>
-#include <DNSServer.h>
 #include <Hash.h>
 #include <ArduinoJson.h>
 
@@ -97,8 +96,10 @@ public:
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-        state_.setMode(Mode::WalkieTalkie);
-        setMode(Mode::Music);
+        //state_.setMode(Mode::WalkieTalkie);
+        //setMode(Mode::Music);
+        state_.setMode(Mode::Music);
+        setMode(Mode::WalkieTalkie);
     }
 
     static void loop() {
@@ -111,6 +112,7 @@ public:
                 playNextTrack();
             }
         }
+        server_.handleClient();
     }
 
 private:
@@ -1045,6 +1047,9 @@ private:
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
+     * 
+     * reason 3?
+     * reason 201?
      */
     static void onWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
         LOG("WiFi: disconnected, reason: %u", e.reason);
@@ -1065,32 +1070,58 @@ private:
         LOG("Initializing WebServer...");
         server_.onNotFound(http404);
         server_.serveStatic("/", LittleFS, "/index.html");
+        server_.serveStatic("/app.js", LittleFS, "/app.js");
+        server_.serveStatic("/glyphicons.woff2", LittleFS, "/glyphicons.woff2");
         server_.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
         server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
         server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
-        server_.serveStatic("/lame.min.js", LittleFS, "/lame.min.js");
-/*        server_.on("/status", httpStatus);
-        server_.on("/cmd", httpCommand);
-    */
+        server_.on("/status", httpStatus);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
+        server_.begin();
+        MDNS.begin("mp3-player");
     }
 
     static void http404() {
         server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + server_.uri() + "\" }");
     }
 
+    /** Returns the status of the player.
+     */ 
+    static void httpStatus() {
+        char buf[300];
+        int len = snprintf_P(buf, sizeof(buf), PSTR("{"
+        "vcc:%u,"
+        "temp:%i,"
+        "mem:%u,"
+        "charging:%u,"
+        "batt:%u,"
+        "headphones:%u"
+        "}"),
+        ex_.measurements.vcc,
+        ex_.measurements.temp,
+        ESP.getFreeHeap(),
+        state_.charging() ? 1 : 0,
+        state_.batteryMode() ? 1 : 0,
+        state_.headphonesConnected() ? 1 : 0
+        );
+        server_.send(200, "text/json", buf, len);
+    }
+
     /** Lists a directory on the SD card and returns its contents in a JSON format. 
      */
     static void httpSDls() {
         String const & path = server_.arg("path");
+        LOG("WebServer: Listing directory %s", path.c_str());
         File d = SD.open(path.c_str());
         if (!d || !d.isDirectory())
             return http404();
-        LOG("WebServer: Listing directory %s", path.c_str());
-        server_.send(200, "text/json", "[");
+        server_.setContentLength(CONTENT_LENGTH_UNKNOWN);            
+        server_.send(200, "text/json", "");
+        server_.sendContent("[");
         int n = 0;
+        char buf[100];
         while(true) {
             File f = d.openNextFile();
             if (!f)
@@ -1098,9 +1129,9 @@ private:
             if (n++ > 0)
                 server_.sendContent(",");
             if (f.isDirectory())
-                server_.client().printf_P(PSTR("{\"name\":\"%s\", \"size\":\"dir\"}"), f.name());
-            else 
-                server_.client().printf_P(PSTR("{\"name\":\"%s\", \"size\":\"%u\"}"), f.name(), f.size());
+                server_.sendContent(buf, snprintf_P(buf, sizeof(buf), PSTR("{\"name\":\"%s\", \"size\":\"dir\"}"), f.name()));
+            else
+                server_.sendContent(buf, snprintf_P(buf, sizeof(buf), PSTR("{\"name\":\"%s\", \"size\":\"%u\"}"), f.name(), f.size()));
         } 
         server_.sendContent("]");
     }
@@ -1109,10 +1140,10 @@ private:
      */
     static void httpSD() {
         String const & path = server_.arg("path");
+        LOG("WebServer: Serving file %s", path.c_str());
         File f = SD.open(path.c_str(), FILE_READ);
         if (!f || !f.isFile())
             return http404();
-        LOG("WebServer: Serving file %s", path.c_str());
         if (path.endsWith("mp3"))
             server_.streamFile(f, mp3Mime_);
         else
@@ -1292,11 +1323,6 @@ public:
 
 private:
 
-    static void Error(uint8_t code = 0) {
-        LOG("ERROR: %u", code);
-        // TODO tell avr
-    }
-
     
     /** Loads the application settings from the SD card. 
      
@@ -1344,92 +1370,6 @@ private:
         if (State_.mode() == Mode::WalkieTalkie && seconds == 0)
             WalkieTalkieCheckUpdates();
     }
-
-    /** Handler for the state update requests.
-
-        These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
-     */
-    static IRAM_ATTR void AVRIrq() {
-        Status_.irq = true;
-    }
-
-    /** Gets the state from ATTiny. 
-     */
-    /*
-    static void UpdateState() {
-        Status_.irq = false;
-        size_t n = 0;
-        if (Status_.recording) {
-            n = Wire.requestFrom(AVR_I2C_ADDRESS, 33);
-            if (n == 33) {
-                // add data to the output file
-                for (uint8_t i = 0; i < 32; ++i)
-                    Recording_.add(Wire.read());
-                // get the first bit of state and determine if we should stop recording or not
-                uint8_t controlState = Wire.read();
-                if (! (controlState & State::VOLUME_DOWN_MASK))
-                    WalkieTalkieStopRecording();
-                else if (controlState & State::CONTROL_DOWN_MASK)
-                    WalkieTalkieStopRecording(/* cancel * / true);
-                return;
-            }
-        } else {
-            n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
-            if (n == sizeof(State)) {
-                State old = State_;
-                Wire.readBytes(pointer_cast<uint8_t*>(& State_), sizeof(State));
-                LOG("I2C State: %u [Vx100], %u [Cx10], CTRL: %u/%u, VOL: %u/%u", State_.voltage(), State_.temp(), State_.control(), State_.maxControl(), State_.volume(), State_.maxVolume());
-                // TODO charging 
-                // TODO headphones
-                // TODO alarm ...................
-
-                if (State_.control() != old.control())
-                    ControlChange();
-                if (State_.controlDown() != old.controlDown())
-                    State_.controlDown() ? ControlDown() : ControlUp();
-                if (State_.controlPress())
-                    ControlPress();
-                if (State_.controlLongPress())
-                    ControlLongPress();
-                if (State_.volume() != old.volume())
-                    VolumeChange();
-                if (State_.volumeDown() != old.volumeDown())
-                    State_.volumeDown() ? VolumeDown() : VolumeUp();
-                if (State_.volumePress())
-                    VolumePress();
-                if (State_.volumeLongPress())
-                    VolumeLongPress();
-                if (State_.doubleLongPress())
-                    DoubleLongPress();
-                State_.clearButtonEvents();
-                return;
-            }
-        }
-        LOG("I2C Err: %u", n);
-    } */
-
-
-    static inline State State_;
-
-    static inline volatile struct {
-        bool idle : 1;
-        bool irq : 1;
-        bool recording : 1;
-        unsigned powerOffCountdown : 12;
-        unsigned wifiCountdown : 12;
-    } Status_;
-
-    static inline struct {
-        Color accentColor;
-        uint8_t maxBrightness : 8;
-        unsigned powerOffTimeout : 12;
-        unsigned wifiTimeout : 12;
-        unsigned nightLightsTimeout : 12;
-        bool allowRadioManualTuning : 1;
-        unsigned maxSpeakerVolume : 4;
-        unsigned maxHeadphonesVolume : 4;
-    } Settings_;
-
     /** Calculates usage statistics for the ESP chip. 
      
         Namely two metrics - the average and maximum distance between two calls to the loop function in milliseconds. 
@@ -1453,285 +1393,6 @@ private:
      * 20k when playing stereo mp3 
      */
 
-/** \name Controls
- 
-    This section contains handlers for the input events such as rotary encoder changes, presses, headphones, etc. 
- */
-//@{
-private:
-
-    static void ControlChange() {
-        LOG("Control: %u", State_.control());
-        switch (State_.mode()) {
-            case Mode::MP3: {
-                SetTrack(State_.control());
-                msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, MP3_TRACK_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                break;
-            }
-            case Mode::Radio: {
-                SetRadioFrequency(State_.control() + RADIO_FREQUENCY_OFFSET);
-                msg::Send(msg::LightsPoint{State_.control(), State_.maxControl() - 1, RADIO_FREQUENCY_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                break;
-            }
-            case Mode::NightLight: {
-                SetNightLightHue(State_.control());
-                if (State_.control() == State::NIGHTLIGHT_RAINBOW_HUE) 
-                    msg::Send(msg::LightsColors{
-                        Color::HSV(0 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(1 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(2 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(3 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(4 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(5 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(6 << 13, 255, Settings_.maxBrightness),
-                        Color::HSV(7 << 13, 255, Settings_.maxBrightness),
-                        DEFAULT_SPECIAL_LIGHTS_TIMEOUT                            
-                    });
-                else 
-                    msg::Send(msg::LightsBar{8, 8, State_.nightLightColor(Settings_.accentColor, Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                break;
-            }
-        }
-    }
-
-    static void ControlDown() {
-        LOG("Control down");
-    }
-
-    static void ControlUp() {
-        LOG("Control up");
-    }
-
-    /** Depending on the current mode, short control press does the following:
-     
-        MP3: Cycles through available playlists
-     */
-    static void ControlPress() {
-        LOG("Control press");
-        switch (State_.mode()) {
-            case Mode::MP3: {
-                uint8_t numPlaylists = NumPlaylists();
-                uint8_t playlist = State_.mp3PlaylistId() + 1;
-                if (playlist >= numPlaylists)
-                    playlist = 0;
-                SetPlaylist(playlist);
-                msg::Send(msg::LightsPoint{playlist, numPlaylists - 1, MP3_PLAYLIST_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                msg::Send(msg::SetMP3Settings{State_});
-                break;
-            }
-            case Mode::Radio: {
-                uint8_t numStations = NumRadioStations();
-                uint8_t station = State_.radioStation() + 1;
-                if (station >= numStations)
-                    station = 0;
-                SetRadioStation(station);
-                msg::Send(msg::LightsPoint{station, numStations - 1, RADIO_STATION_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                msg::Send(msg::SetRadioSettings{State_});
-                break;
-            }
-            case Mode::WalkieTalkie: {
-                break;
-            }
-            case Mode::NightLight: {
-                uint8_t numEffects = static_cast<uint8_t>(NightLightEffect::Sentinel);
-                uint8_t effect = static_cast<uint8_t>(State_.nightLightEffect()) + 1;
-                if (effect >= numEffects)
-                    effect = 0;
-                State_.setNightLightEffect(static_cast<NightLightEffect>(effect));
-                msg::Send(msg::LightsPoint{effect, numEffects - 1, NIGHTLIGHT_EFFECT_COLOR.withBrightness(Settings_.maxBrightness), DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-                msg::Send(msg::SetNightLightSettings{State_});
-                break;
-            }
-        }
-        // update the mode settings, control & volume scales, etc.
-        SetMode(State_.mode());
-    }
-
-    /** Long press of the control button cycles through the available modes. 
-     */ 
-    static void ControlLongPress() {
-        LOG("Control long press");
-        switch (State_.mode()) {
-            case Mode::MP3:
-                SetMode(Mode::Radio);
-                break;
-            case Mode::Radio:
-                if (WalkieTalkieModeEnabled())
-                    SetMode(Mode::WalkieTalkie);
-                else
-                    // TODO change this to nightlight in production
-                    SetMode(Mode::WalkieTalkie);
-                    //SetMode(Mode::NightLight);
-                break;
-            case Mode::WalkieTalkie:
-                SetMode(Mode::NightLight);
-                break;
-            case Mode::NightLight:
-                SetMode(Mode::MP3);
-                break;
-            // in all other cases, namely alarm clock & birthday greeter, move to the mp3 player
-            default:
-                SetMode(Mode::MP3);
-        }
-    }
-
-    /** Volume knob always adjusts the volume. 
-     
-        No need to update any state here as the avr's state has been updated by the user input causing the change and esp state has been updated already - we are simply reacting to the event. 
-     */
-    static void VolumeChange() {
-        uint8_t maxVolume = State_.headphones() ? Settings_.maxHeadphonesVolume : Settings_.maxSpeakerVolume;
-        if (State_.volume() > maxVolume) {
-            State_.setVolume(maxVolume);
-            msg::Send(msg::SetMode{State_});
-        }
-        LOG("Volume: %u", State_.volume());
-        switch (State_.mode()) {
-            case Mode::MP3:
-            case Mode::WalkieTalkie:
-            case Mode::NightLight:
-                I2S_.SetGain(State_.volume() * ESP_VOLUME_STEP);
-                break;
-            case Mode::Radio:
-                Radio_.setVolume(State_.volume());
-                break;
-        }
-        msg::Send(msg::LightsBar{State_.volume(), State_.maxVolume() - 1, VOLUME_COLOR.withBrightness(Settings_.maxBrightness),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-    }
-
-    static void VolumeDown() {
-        LOG("Volume down");
-        if (State_.mode() == Mode::WalkieTalkie) {
-            if (!State_.controlDown())
-                WalkieTalkieStartRecording();
-        }
-    }
-
-    static void VolumeUp() {
-        LOG("Volume up");
-    }
-
-    /** Play/Pause toggle.
-     */
-    static void VolumePress() {
-        LOG("Volume press");
-        if (Status_.idle) 
-            Play();
-        else
-            Pause();
-    }
-
-    /** Enables or disables the audio lights. 
-     */
-    static void VolumeLongPress() {
-        LOG("Volume long press");
-        State_.setAudioLights(! State_.audioLights());
-        msg::Send(msg::SetAudioLights{State_});
-    }
-
-    /** Enables or disables the WiFi and with it the walkie-talkie mode. 
-     */
-    static void DoubleLongPress() {
-        LOG("Double long press");
-        if (State_.wifiStatus() == WiFiStatus::Off) 
-            WiFiConnect();
-        else
-            WiFiDisconnect();
-    }
-
-//@}
-
-    /** Changes the player's mode. 
-     */
-    static void SetMode(Mode mode) {
-        // if the new mode is different than the old mode, we must first close the old mode
-        if (State_.mode() != mode) {
-            switch (State_.mode()) {
-                case Mode::MP3:
-                case Mode::Radio:
-                case Mode::NightLight:
-                    Pause();
-                    break;
-                case Mode::WalkieTalkie:
-                    break;
-            }
-
-        }
-        // set the new mode
-        State_.setMode(mode);
-        switch (mode) {
-            case Mode::MP3: {
-                LOG("Mode: MP3");
-                State_.resetControl(State_.mp3TrackId(), NumTracks(State_.mp3PlaylistId()));
-                Play();
-                break;
-            }
-            case Mode::Radio: {
-                LOG("Mode: radio");
-                State_.resetControl(State_.radioFrequency() - RADIO_FREQUENCY_OFFSET, RADIO_FREQUENCY_MAX);
-                Play();
-                break;
-            }
-            case Mode::WalkieTalkie: {
-                LOG("Mode: Walkie-talkie");
-                break;
-            }
-            case Mode::NightLight: {
-                LOG("Mode: NightLight");
-                Status_.powerOffCountdown = Settings_.nightLightsTimeout;
-                State_.resetControl(0, 32);
-                // TODO play a lullaby ?
-                break;
-            }
-        }
-
-        // finally, inform the AVR of the mode change and other updates
-        msg::Send(msg::SetMode{State_});
-    }
-
-    /** Resumes playback.
-     */ 
-    static void Play() {
-        msg::Send(msg::Play{});
-        switch (State_.mode()) {
-            case Mode::MP3:
-                SetPlaylist(State_.mp3PlaylistId());
-                break;
-            case Mode::Radio:
-                Radio_.init();
-                Radio_.setMono(true);
-                Radio_.setVolume(State_.volume());
-                Radio_.setBandFrequency(RADIO_BAND_FM, State_.radioFrequency() * 10);
-                break;
-            case Mode::NightLight:
-                break;
-            // don't do anything for walkie talkie ?
-        }
-        Status_.idle = false;
-    }
-
-    /** Pauses or stops playback. 
-     */
-    static void Pause() {
-        switch (State_.mode()) {
-            case Mode::MP3:
-                if (MP3_.isRunning()) {
-                    MP3_.stop();
-                    I2S_.stop();
-                    MP3File_.close();
-                }
-                break;
-            case Mode::Radio:
-                Radio_.term();
-                break;
-            case Mode::NightLight:
-                break;
-            // don't do anything for walkie talkie ?
-        }
-        msg::Send(msg::Pause{});
-        Status_.idle = true;
-        Status_.powerOffCountdown = Settings_.powerOffTimeout;
-    }
 
     
 
@@ -1893,253 +1554,12 @@ private:
 
 //@}
 
-/** \name Webserver
- */
-//@{
-private:
-
-    static void InitializeWiFi() {
-        WiFiConnectedHandler_ = WiFi.onStationModeConnected(OnWiFiConnected);
-        WiFiIPAssignedHandler_ = WiFi.onStationModeGotIP(OnWiFiIPAssigned);
-        WiFiDisconnectedHandler_ = WiFi.onStationModeDisconnected(OnWiFiDisconnected);
-    }
-
-    static void WiFiConnect(bool forceAp = false) {
-        LOG("WiFi: Scanning networks...");
-        WiFi.mode(WIFI_STA);
-        WiFi.disconnect();
-        WiFi.scanNetworksAsync([forceAp](int n) {
-            LOG("WiFi: Networks found: %i", n);
-            File f = SD.open("player/wifi.json", FILE_READ);
-            if (f) {
-                DynamicJsonDocument json{1024};
-                if (deserializeJson(json, f) == DeserializationError::Ok) {
-                    if (! forceAp) {
-                        for (JsonVariant network : json["networks"].as<JsonArray>()) {
-                            for (int i = 0; i < n; ++i) {
-                                if (WiFi.SSID(i) == network["ssid"]) {
-                                    LOG("WiFi: connecting to %s, rssi: %i, channel: %i", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
-                                    State_.setWiFiStatus(WiFiStatus::Connecting);
-                                    msg::Send(msg::SetWiFiStatus{State_});
-                                    WiFi.begin(network["ssid"].as<char const *>(), network["password"].as<char const *>());
-                                    // so that we do not start the access point just yet
-                                    WiFi.scanDelete();
-                                    f.close();
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    // either we are forcing the AP mode, or no suitable networks were found
-                    char const * ssid = json["ap"]["ssid"];
-                    char const * pass = json["ap"]["pass"];
-                    if (ssid == nullptr || ssid[0] == 0) {
-                        ssid = DEFAULT_AP_SSID;
-                        if (pass == nullptr || pass[0] == 0)
-                            pass = DEFAULT_AP_PASSWORD;
-                    }
-                    LOG("Initializing soft AP, ssid %s, password %p", ssid, pass);
-                    LOG("    own ip: 10.0.0.1");
-                    LOG("    subnet: 255.255.255.0");
-                    IPAddress ip{10,0,0,1};
-                    IPAddress subnet{255, 255, 255, 0};
-                    WiFi.softAPConfig(ip, ip, subnet);
-                    if (!WiFi.softAP(ssid, pass)) 
-                        return Error();            
-                    State_.setWiFiStatus(WiFiStatus::SoftAP);
-                    msg::Send(msg::SetWiFiStatus{State_});
-                } else {
-                    LOG("");
-                }
-                f.close();
-            } else {
-                LOG("WiFi: No player/wifi.json found");
-            }
-            WiFi.scanDelete();
-        });
-    }
-
-    static void WiFiDisconnect() {
-        LOG("WiFi: Disconnecting");
-        WiFi.mode(WIFI_OFF);
-        WiFi.forceSleepBegin();
-        yield();
-        State_.setWiFiStatus(WiFiStatus::Off);
-        msg::Send(msg::SetWiFiStatus{State_});
-    }
-
-    static void OnWiFiConnected(WiFiEventStationModeConnected const & e) {
-        LOG("WiFi: connected to %s, channel %u", e.ssid.c_str(), e.channel);
-    }
-
-    static void OnWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
-        LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
-        State_.setWiFiStatus(WiFiStatus::Connected);
-        msg::Send(msg::SetWiFiStatus{State_});
-    }
-
-    /** TODO what to do when the wifi disconnects, but we did not initiate it? 
-     */
-    static void OnWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
-        LOG("WiFi: disconnected, reason: %u", e.reason);
-    }
-
-    static void InitializeServer() {
-        Server_.onNotFound(Http404);
-        Server_.serveStatic("/", LittleFS, "/index.html");
-        Server_.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
-        Server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
-        Server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
-        Server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
-        Server_.serveStatic("/lame.min.js", LittleFS, "/lame.min.js");
-        Server_.on("/status", HttpStatus);
-        Server_.on("/cmd", HttpCommand);
-        Server_.on("/sd", HttpSDCardDownload);
-        Server_.on("/sdls", HttpSDCardLs);
-        IPAddress ip{10,0,0,1};
-        DNSServer_.start(
-            53,
-            "*",
-            ip
-        );
-        Server_.begin();
-        MDNS.begin("mp3-player");
-    }
-
-    static void Authenticate() {
-
-    }
-
-    static void Http404() {
-        Server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + Server_.uri() + "\" }");
-    }
-
-    /** Returns the status of the player. 
-     */
-    static void HttpStatus() {
-        // reset the wifi timeout
-        Status_.wifiCountdown = Settings_.wifiTimeout;
-        Server_.send(200, "text/json", STR(PSTR("{") +
-            PSTR("\"millis\":") + millis() + 
-            PSTR(",\"rssi\":") + WiFi.RSSI() +
-            PSTR(",\"headphones\":") + State_.headphones() +
-            PSTR(",\"charging\":") + State_.charging() +
-            PSTR(",\"voltage\":") + State_.voltage() +
-            PSTR(",\"temp\":") + State_.temp() + 
-            PSTR(",\"control\":") + State_.control() +
-            PSTR(",\"maxControl\":") + State_.maxControl() +
-            PSTR(",\"volume\":") + State_.volume() +
-            PSTR(",\"maxVolume\":") + State_.maxVolume() +
-            PSTR(",\"mode\":") + static_cast<uint8_t>(State_.mode()) +
-            PSTR(",\"audioLights\":") + State_.audioLights() +
-            PSTR(",\"wifiStatus\":") + static_cast<uint8_t>(State_.wifiStatus()) +
-            PSTR(",\"mp3PlaylistId\":") + State_.mp3PlaylistId() +
-            PSTR(",\"mp3TrackId\":") + State_.mp3TrackId() +
-            PSTR(",\"radioFrequency\":") + State_.radioFrequency() + 
-            PSTR(",\"radioStation\":") + State_.radioStation() +
-            PSTR(",\"espLoopCount\":") + LoopCount_ +
-            PSTR(",\"espMaxLoopTime\":") + MaxLoopTime_ +
-            PSTR(",\"freeMem\":") + ESP.getFreeHeap() +
-        PSTR("}")));
-    }
-
-    static void HttpCommand() {
-        String const & cmd = Server_.arg("cmd");
-        if (cmd == "wifi_off") {
-            Server_.send(200, "text/json","{\"response\":200}");
-            WiFiDisconnect();
-            return;
-        } else {
-            Server_.send(404, "text/json","{ \"response\": 404, \"unknownCommand\": \"" + cmd + "\" }");
-        }
-        LOG("Cmd: %s", cmd.c_str());
-        Server_.send(200, "text/json","{\"response\":200}");
-    }
-
-    /** Returns any given file on the SD card. 
-     */
-    static void HttpSDCardDownload() {
-        String const & path = Server_.arg("path");
-        File f = SD.open(path.c_str(), FILE_READ);
-        if (!f || !f.isFile())
-            return Http404();
-        String ctype = "text/plain";
-        if (path.endsWith("mp3"))
-            ctype = "audio/mp3";
-        LOG("WebServer: Serving file %s", path.c_str());
-        Server_.streamFile(f, ctype);
-        f.close();
-    }
-
-    /** Lists a directory on the SD card and returns its contents in a JSON format. 
-     */
-    static void HttpSDCardLs() {
-        String const & path = Server_.arg("path");
-        File d = SD.open(path.c_str());
-        if (!d || !d.isDirectory())
-            return Http404();
-        LOG("WebServer: Listing directory %s", path.c_str());
-        String r{"["};
-        int n = 0;
-        while(true) {
-            File f = d.openNextFile();
-            if (!f)
-                break;
-            if (n++ > 0)
-                r += ",";
-            r = r + "{\"name\":\"" + f.name() + "\", \"size\":";
-            if (f.isDirectory())
-                r += "\"dir\"}";
-            else 
-                r = r + f.size() + "}";
-        } 
-        r += "]";
-        Server_.send(200, "text/json", r);
-    }
-
-    static inline WiFiEventHandler WiFiConnectedHandler_;
-    static inline WiFiEventHandler WiFiIPAssignedHandler_;
-    static inline WiFiEventHandler WiFiDisconnectedHandler_;
-
-    static inline ESP8266WebServer Server_{80};
-    static inline DNSServer DNSServer_;
-
-    static inline String AuthHash_;
-    static inline uint32_t AuthTime_;
-    static inline uint32_t AuthIP_;
 
 
 //@}
 
 }; // Player
 
-/** Disable wifi at startup. 
- 
-    From: https://github.com/esp8266/Arduino/issues/6642#issuecomment-578462867
-    and:  https://github.com/esp8266/Arduino/tree/master/libraries/esp8266/examples/LowPowerDemo
-
-    TL;DR; DO as much as possible as soon as possible and start setup() with a delay as the delay is really the thing that makes esp enter the sleep mode. 
- */
-
-RF_PRE_INIT() {
-    system_phy_set_powerup_option(2);  // shut the RFCAL at boot
-    wifi_set_opmode_current(NULL_MODE);  // set Wi-Fi working mode to unconfigured, don't save to flash
-    wifi_fpm_set_sleep_type(MODEM_SLEEP_T);  // set the sleep type to modem sleep
-}
-
-void preinit() {
-    wifi_fpm_open();
-    wifi_fpm_do_sleep(0xffffffff);
-}
-
-void setup() {
-    delay(1); // necessary to enter the modem sleep mode
-    Player::Initialize();
-}
-
-void loop() {
-    Player::Loop();
-}
 
 #endif
 

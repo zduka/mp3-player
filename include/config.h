@@ -3,6 +3,12 @@
 #define DEFAULT_AP_SSID "mp3-player"
 #define DEFAULT_AP_PASSWORD "mp3-player"
 
+/** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 
+ */
+#define DEFAULT_IDLE_TIMEOUT 30
+#define DEFAULT_PLAY_TIMEOUT 60
+
+
 #define AVR_I2C_ADDRESS 67
 #define IRQ_RESPONSE_TIMEOUT 64
 
@@ -38,10 +44,6 @@
 
 #define SPECIAL_LIGHTS_TIMEOUT 128
 
-/** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 
- */
-#define DEFAULT_IDLE_TIMEOUT 2
-#define DEFAULT_PLAY_TIMEOUT 10
 
 
 
