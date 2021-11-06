@@ -82,7 +82,7 @@ public:
         send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         initializeRadioStations();
         send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
-        //initializeWalkieTalkie()
+        initializeWalkieTalkie();
         send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         //initializeSettings();
         // if this is the initial state, write basic settings from the mode configuration to cached state
@@ -356,7 +356,7 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
                 if (state_.musicMode() == MusicMode::MP3) {
-                    send(msg::LightsPoint{state_.controlValue(), ex_.mp3.playlistId, MODE_COLOR_MP3});
+                    send(msg::LightsPoint{state_.controlValue(), playlists_[ex_.mp3.playlistId].numTracks, MODE_COLOR_MP3});
                     setTrack(state_.controlValue());
                 } else {
                     send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO});
@@ -648,14 +648,9 @@ private:
         setPlaylist(ex_.mp3.playlistId);
     }
 
+    /** There is actually no need to do anything for mp3 pause - when set to idle, no new audio data will be fed to I2S in the main loop, effectively being a pause. 
+     */
     static void mp3Pause() {
-        /*
-        if (mp3_.isRunning()) {
-            mp3_.stop();
-            i2s_.stop();
-            mp3File_.close();
-        }
-        */
     }
 
     static void mp3Stop() {
@@ -794,7 +789,7 @@ private:
 
     static void radioPlay() {
         radio_.init();
-        radio_.setMono(ex_.settings.radioForceMono() || ! state_.headphonesConnected());
+        radio_.setMono(settings_.radio.forceMono || ! state_.headphonesConnected());
         radio_.setVolume(state_.volumeValue());
         setRadioFrequency(ex_.radio.frequency);
         setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
@@ -847,6 +842,33 @@ private:
      */
     //@{
 
+    static void initializeWalkieTalkie() {
+        File f = SD.open("player/bot.json", FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                int64_t id = json["id"].as<int64_t>();
+                String token = json["token"];
+                settings_.walkieTalkie.adminId = json["adminId"].as<int64_t>();
+                settings_.walkieTalkie.chatId = json["chatId"].as<int64_t>();
+                LOG("Walkie-Talkie:\n  Bot %lli\n  Chat %lli\n  Token: %s\n  AdminId: %lli", id, settings_.walkieTalkie.chatId, token.c_str(), settings_.walkieTalkie.adminId);
+                File cf = SD.open("/player/cert.txt", FILE_READ);
+                if (cf && cf.size() < 2048) {
+                    String cert = cf.readString();
+                    // TODO security is hard, the certificate only works if time is proper...
+                    bot_.initialize(id, std::move(token), nullptr /*, cert.c_str() */);
+                } else {
+                    bot_.initialize(std::move(id), std::move(token), nullptr);
+                    LOG("No certificate found, telegram bot will be INSECURE!!!");
+                }
+                cf.close();
+            } else {
+                LOG("Deserialization error");
+            }
+            f.close();
+        } 
+    }
+
     static void startRecording() {
         if (!recordingReady_ || !recording_.begin("/rec.wav")) {
             LOG("Unable to open recording target file or recording not ready");
@@ -871,7 +893,9 @@ private:
                 recordingReady_ = true;
             } else {
                 LOG("Recording done");
-                // TODO
+                File f = SD.open("/rec.wav", FILE_READ);
+                bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav");
+                f.close();
             }
         }
     }
@@ -906,6 +930,10 @@ private:
     /** The WAV 8kHz recorder to an SD card file
      */
     static inline WavWriter recording_;
+
+    /** The telegram bot that handles the communication. 
+     */
+    static inline TelegramBot bot_;
 
     //@}
 
@@ -1170,6 +1198,7 @@ private:
 
     static inline State state_;
     static inline ExtendedState ex_;
+    static inline ESPSettings settings_;
 
     static inline uint8_t timeoutIdle_ = DEFAULT_IDLE_TIMEOUT;
     static inline uint8_t timeoutPlay_ = DEFAULT_PLAY_TIMEOUT;

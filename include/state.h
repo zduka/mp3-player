@@ -358,9 +358,8 @@ class Settings {
 public:
 
     Settings() {
-        raw_ =  ENABLE_RADIO | ENABLE_WALKIE_TALKIE | ENABLE_LIGHTS | RADIO_ENABLE_MANUAL_TUNING;
+        raw_ =  ENABLE_RADIO | ENABLE_WALKIE_TALKIE | ENABLE_LIGHTS;
     }
-
 
     bool radioEnabled() volatile {
         return raw_ & ENABLE_RADIO;
@@ -372,14 +371,6 @@ public:
 
     bool NightLightEnabled() volatile {
         return raw_ & ENABLE_LIGHTS;
-    }
-
-    bool radioManualTuningEnabled() volatile {
-        return raw_ & RADIO_ENABLE_MANUAL_TUNING;
-    }
-
-    bool radioForceMono() volatile {
-        return raw_ & RADIO_FORCE_MONO;
     }
 
     void setRadioEnabled(bool value) {
@@ -394,14 +385,6 @@ public:
         raw_ = value ? (raw_ | ENABLE_LIGHTS) : (raw_ & ~ENABLE_LIGHTS);
     }
 
-    void setRadioManualTuningEnabled(bool value) {
-        raw_ = value ? (raw_ | RADIO_ENABLE_MANUAL_TUNING) : (raw_ & ~RADIO_ENABLE_MANUAL_TUNING);
-    }
-
-    void setRadioForceMono(bool value) {
-        raw_ = value ? (raw_ | RADIO_FORCE_MONO) : (raw_ & ~RADIO_FORCE_MONO);
-    }
-
     void log() const {
         LOG("Settings:");
         LOG("    maxBrightness: %u", maxBrightness);
@@ -414,8 +397,6 @@ private:
     static constexpr uint16_t ENABLE_RADIO = 1 << 0;
     static constexpr uint16_t ENABLE_WALKIE_TALKIE = 1 << 1;
     static constexpr uint16_t ENABLE_LIGHTS = 1 << 2;
-    static constexpr uint16_t RADIO_ENABLE_MANUAL_TUNING = 1 << 3;
-    static constexpr uint16_t RADIO_FORCE_MONO = 1 << 4;
 
     uint16_t raw_;
 
@@ -604,3 +585,35 @@ public:
 } __attribute__((packed)); // ExtendedState
 
 static_assert(sizeof(ExtendedState) == 28);
+
+
+/** Settings stored on the SD card and used by the ESP alone. 
+ 
+ */  
+class ESPSettings {
+public:
+    class Radio {
+    public:
+        bool manualTuning = true;
+        bool forceMono = false;
+    };
+
+    class WalkieTalkie {
+    public:
+
+        /** The chat id audio files are sent to and received from. 
+         */
+        int64_t chatId;
+
+        int64_t adminId;
+    };
+
+    bool speakerEnabled = true;
+    uint8_t maxSpeakerVolume;
+    uint8_t maxHeadphonesVolume;
+    Radio radio;
+    WalkieTalkie walkieTalkie;
+
+
+
+}; // ESPSettings
