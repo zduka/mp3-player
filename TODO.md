@@ -2,9 +2,6 @@
 
 - buy the extra things needed
 
-- V_USB should be pulled low otherwise the switch for battery won't work due to the diode leaking... This was done by the v divider in previous version and so was not a problem, but now is. Maybe this won't be an issue if there is pull-down on the charger's IC, check that
-
-
 # SW
 
 - notifications could perhaps be part of state as opposed to extended state? 
@@ -27,27 +24,20 @@
 
 - what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
-- where to store if walkie-talkie is set (maybe message sth like PeriodicWTSync(on/off))
-
 # ESP
 
-- control values seem to be off
-- audiolights in recording are wrong
+- check time and update it
+- second tick & utilisation, etc.
 - progress bar for sending audio messages, ignore small messages, etc.
+- actually implement downloading telegram file
 
 - check heap and health and reset when necessary
 
-- only one channel for the Walkie-Talkie bot 
-- actually implement downloading telegram file
-- check time and update it
-- add authentication
 
  # Missing Features
 
  - alarm clock
  - birthday reminder
-
- - a way to record a message to be played directly from the player? Or updateable via telegram?
 
 # Walkie Talkie
 

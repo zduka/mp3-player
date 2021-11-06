@@ -622,18 +622,26 @@ private:
      */
     static void lightsTick() {
         uint8_t step = 1;
-        if ((state_.state.controlButtonDown() || state_.state.volumeButtonDown()) && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
+        // deal with recording first as it is the highest priority visualization
+        if (status_.recording) {
+            audioLightsTick(step);
+        } else if ((state_.state.controlButtonDown() || state_.state.volumeButtonDown()) && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
             if (longPressCounter_ != 0) { // if the long press is not active, show progress bar in the color of the current mode
                 Color color = getModeColor(state_.state.mode(), state_.state.musicMode());
                 color = color.withBrightness(state_.ex.settings.maxBrightness);
                 strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
                 step = 255;
             } else {
-                Color color = MODE_COLOR_WALKIE_TALKIE; // both buttons are pressed down
+                Color color;
+                // only control button long press - music mode change
                 if (! state_.state.volumeButtonDown())
                     color = getModeColor(Mode::Music, state_.ex.getNextMusicMode(state_.state.mode(), state_.state.musicMode()));
+                // only volume button pressed (and not recording, which is handled above), toggle the lights settings mode on/off
                 else if (! state_.state.controlButtonDown()) // TODO what to with walkie-talkie long press
-                    color = MODE_COLOR_LIGHTS;
+                    color = state_.state.mode() == Mode::Music ? MODE_COLOR_LIGHTS : getModeColor(Mode::Music, state_.state.musicMode());
+                // both buttons pressed, in music mode -> toggle music / walkie-talkie
+                else
+                    color = state_.state.mode() == Mode::Music ? MODE_COLOR_WALKIE_TALKIE : getModeColor(Mode::Music, state_.state.musicMode());
                 color = color.withBrightness(state_.ex.settings.maxBrightness);
                 strip_.fill(color);
             }
@@ -648,8 +656,6 @@ private:
                     effect_.audio.minDelta = 255;
                 }
             }
-        } else if (status_.recording) {
-            audioLightsTick(step);
         } else {
             //digitalWrite(DEBUG_PIN, HIGH);            
             lightsTick(step);
@@ -737,39 +743,34 @@ private:
     }
 
     static void audioLightsTick(uint8_t & step) {
-        if (state_.state.idle()) {
-            // TODO do we want this, or do we want some breathing effect, i.e. a fallthrough? 
-            strip_.fill(Color::Black());
-        } else {
-            uint8_t ri = recordingWrite_;
-            uint8_t min = 255;
-            uint8_t max = 0;
-            for (uint8_t i = 0; i < 125; ++i) {
-                uint8_t x = recordingBuffer_[--ri];
-                min = (x < min) ? x : min;
-                max = (x > max) ? x : max;
-            }
-            uint8_t d = max - min;
-            effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
-            effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
-            strip_.showBarCentered(
-                d - effect_.audio.minDelta,
-                max(effect_.audio.maxDelta - effect_.audio.minDelta, 8),
-                effectColor_
-            );
-            // fade the delta range at 1/32 the speed
-            if (tickCountdown_ % 32 == 0) {
-                if (effect_.audio.maxDelta > d)
-                    --effect_.audio.maxDelta;
-                if (effect_.audio.minDelta < d)
-                    ++effect_.audio.minDelta;
-            }
-            if (effect_.audio.lastDelta < d)
-                step = 255;
-            else 
-                step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
-            effect_.audio.lastDelta = d;
+        uint8_t ri = recordingWrite_;
+        uint8_t min = 255;
+        uint8_t max = 0;
+        for (uint8_t i = 0; i < 125; ++i) {
+            uint8_t x = recordingBuffer_[--ri];
+            min = (x < min) ? x : min;
+            max = (x > max) ? x : max;
         }
+        uint8_t d = max - min;
+        effect_.audio.maxDelta = (d > effect_.audio.maxDelta) ? d : effect_.audio.maxDelta;
+        effect_.audio.minDelta = (d < effect_.audio.minDelta) ? d : effect_.audio.minDelta;
+        strip_.showBarCentered(
+            d - effect_.audio.minDelta,
+            max(effect_.audio.maxDelta - effect_.audio.minDelta, 8),
+            effectColor_
+        );
+        // fade the delta range at 1/32 the speed
+        if (tickCountdown_ % 32 == 0) {
+            if (effect_.audio.maxDelta > d)
+                --effect_.audio.maxDelta;
+            if (effect_.audio.minDelta < d)
+                ++effect_.audio.minDelta;
+        }
+        if (effect_.audio.lastDelta < d)
+            step = 255;
+        else 
+            step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
+        effect_.audio.lastDelta = d;
     }
 
     static void showByte(uint8_t value, Color const & color) {
