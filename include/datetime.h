@@ -126,6 +126,23 @@ public:
         }
     }
 
+    void set(time_t const & epoch) {
+        tm t;
+        gmtime_r(&epoch, & t);
+        setSecond(t.tm_sec);
+        setMinute(t.tm_min);
+        setHour(t.tm_hour);
+        setDay(t.tm_mday);
+        setMonth(t.tm_mon);
+        setYear(t.tm_year);
+    }
+
+#ifdef LOG
+    void log() {
+        LOG("%u:%u:%u %u/%u/%u", hour(), minute(), second(), day(), month(), year());
+    }
+#endif
+
 private:
 
     static constexpr uint32_t YEAR_MASK = UINT32_C(63) << 26;

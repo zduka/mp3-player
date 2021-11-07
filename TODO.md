@@ -26,8 +26,9 @@
 
 # ESP
 
-- check time and update it
-- second tick & utilisation, etc.
+- check that time update works
+- better integrate time update to the workflow
+- busy flag for ESP
 - progress bar for sending audio messages, ignore small messages, etc.
 - actually implement downloading telegram file
 

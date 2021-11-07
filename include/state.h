@@ -611,6 +611,9 @@ public:
     bool speakerEnabled = true;
     uint8_t maxSpeakerVolume;
     uint8_t maxHeadphonesVolume;
+    /** Timezone offset in seconds. 
+     */
+    int32_t timezone;
     Radio radio;
     WalkieTalkie walkieTalkie;
 

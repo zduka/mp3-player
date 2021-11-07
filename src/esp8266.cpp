@@ -3,6 +3,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 #include <LittleFS.h>
 #include <SPI.h>
 #include <SD.h>
@@ -103,6 +105,7 @@ public:
     }
 
     static void loop() {
+        tick();
         if (status_.irq) 
             status_.recording ? record() : updateState();
         if ( mp3_.isRunning() && !state_.idle()) {
@@ -178,6 +181,52 @@ private:
     static void initializeSettings() {
 
     }
+    //@}
+
+    /** \name ESP Core 
+     */
+    //@{
+    static void tick() {
+        // update the running usage statistics
+        uint32_t t = millis();
+        ++runningLoopCount_;
+        uint16_t delay = t - lastMillis_;
+        if (runningMaxLoopTime_ < delay)
+            runningMaxLoopTime_ = delay;
+        lastMillis_ = t;
+        // see if we have a second tick, in which case update the time and utilization counters, then do a second tick
+        while (t - previousSecondMillis_ >= 1000) {
+            previousSecondMillis_ += 1000;
+            loopCount_ = runningLoopCount_;
+            maxLoopTime_ = runningMaxLoopTime_;
+            runningLoopCount_ = 0;
+            runningMaxLoopTime_ = 0;
+            secondTick();
+        }
+    }
+
+    static void secondTick() {
+        ex_.time.secondTick();
+        // TODO do more stuff
+    }
+
+
+    /** Number of times the loop function gets called in the past second. 
+
+        Very roughly measured like this:
+
+        55k when completely idle
+        16k when playing mp3 with hiccups
+        38k when playing low quality mono mp3 
+        20k when playing stereo mp3 
+     */
+    static inline uint16_t loopCount_ = 0;
+    static inline uint16_t maxLoopTime_ = 0;
+    static inline uint32_t lastMillis_ = 0;
+    static inline uint16_t runningLoopCount_ = 0;
+    static inline uint16_t runningMaxLoopTime_ = 0;
+    static inline uint32_t previousSecondMillis_ = 0;
+
     //@}
     
     /** \name Communication with ATTiny
@@ -1066,6 +1115,8 @@ private:
 
     static void onWiFiConnected(WiFiEventStationModeConnected const & e) {
         LOG("WiFi: connected to %s, channel %u", e.ssid.c_str(), e.channel);
+        // TODO this should really not happen here...
+        updateNTPTime();
     }
 
     static void onWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
@@ -1111,6 +1162,26 @@ private:
         MDNS.begin("mp3-player");
     }
 
+    /** Updates the time from NTP server. 
+     
+        The time is synchronized with AVR upon a successful update. 
+     */
+    static void updateNTPTime() {
+        WiFiUDP ntpUDP;
+        NTPClient timeClient{ntpUDP, "europe.pool.ntp.org", settings_.timezone};
+        timeClient.begin();
+        if (timeClient.forceUpdate()) {
+            ex_.time.set(timeClient.getEpochTime());
+            LOG("NTP time update:");
+            ex_.time.log();
+            // now that we have obtained the time, send it
+            setExtendedState(ex_.time);
+        } else {
+            LOG("NTP time updated failed");
+            // TODO handle the NTP error
+        }
+    }
+
     static void http404() {
         server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + server_.uri() + "\" }");
     }
@@ -1125,14 +1196,18 @@ private:
         "mem:%u,"
         "charging:%u,"
         "batt:%u,"
-        "headphones:%u"
+        "headphones:%u,"
+        "loops:%u,"
+        "maxLoopTime:%u"
         "}"),
         ex_.measurements.vcc,
         ex_.measurements.temp,
         ESP.getFreeHeap(),
         state_.charging() ? 1 : 0,
         state_.batteryMode() ? 1 : 0,
-        state_.headphonesConnected() ? 1 : 0
+        state_.headphonesConnected() ? 1 : 0,
+        loopCount_,
+        maxLoopTime_
         );
         server_.send(200, "text/json", buf, len);
     }
@@ -1381,46 +1456,6 @@ private:
         State_.resetVolume(State_.volume() > maxVolume ? maxVolume : State_.volume(), 16);
     }
 
-    /** Called every time a second passes.
-     */
-    static void SecondTick() {
-        static uint8_t seconds = 0;
-        LoopCount_ = RunningLoopCount_;
-        MaxLoopTime_ = RunningMaxLoopTime_;
-        RunningLoopCount_ = 0;
-        RunningMaxLoopTime_ = 0;
-        //LOG("loops: " + LoopCount_ + ", max diff: " + MaxLoopTime_);
-        // disconnect wifi if the wifi inactivity countdown has reached 0
-        if (State_.wifiStatus() != WiFiStatus::Off && Status_.wifiCountdown != 0 && --Status_.wifiCountdown == 0)
-            WiFiDisconnect();
-        if (Status_.idle && State_.wifiStatus() == WiFiStatus::Off && --Status_.powerOffCountdown == 0)
-            PowerOff();
-        seconds = (seconds + 1) % 60;
-        if (State_.mode() == Mode::WalkieTalkie && seconds == 0)
-            WalkieTalkieCheckUpdates();
-    }
-    /** Calculates usage statistics for the ESP chip. 
-     
-        Namely two metrics - the average and maximum distance between two calls to the loop function in milliseconds. 
-     */
-    static inline uint16_t LoopCount_ = 0;
-    static inline uint16_t MaxLoopTime_ = 0;
-
-    static inline uint32_t LastMillis_ = 0;
-    static inline uint16_t RunningLoopCount_ = 0;
-    static inline uint16_t RunningMaxLoopTime_ = 0;
-    static inline uint32_t PreviousSecondMillis_ = 0;
-
-    /** Number of times the loop function gets called in the past second. 
-
-        This number can 
-     * 
-     * 
-     * 55k when completely idle
-     * 16k when playing mp3 with hiccups
-     * 38k when playing low quality mono mp3 
-     * 20k when playing stereo mp3 
-     */
 
 
     
