@@ -1,5 +1,7 @@
 #pragma once
 
+#include <time.h>
+
 /** Date & time down to a second in 4 bytes. 
  */
 class DateTime {
@@ -37,31 +39,31 @@ public:
     void setYear(uint16_t year) {
         //assert(year >= 2021 && year <= 2084);
         raw_ &= ~YEAR_MASK;
-        raw_ += (year - 2021) << 26;
+        raw_ |= static_cast<uint32_t>(year - 2021) << 26;
     }
 
     void setMonth(uint8_t month) {
         //assert(month >= 1 && month <= 12);
         raw_ &= ~MONTH_MASK;
-        raw_ += month << 22;
+        raw_ |= static_cast<uint32_t>(month) << 22;
     }
 
     void setDay(uint8_t day) {
         //assert(day >= 1 && day <= 31);
         raw_ &= ~DAY_MASK;
-        raw_ += day << 17;
+        raw_ |= static_cast<uint32_t>(day) << 17;
     }
 
     void setHour(uint8_t hour) {
         //assert(hour >= 0 && hour <= 23);
         raw_ &= ~HOUR_MASK;
-        raw_ += hour << 12;
+        raw_ |= static_cast<uint32_t>(hour) << 12;
     }
 
     void setMinute(uint8_t m) {
         //assert(m >= 0 && m <= 59);
         raw_ &= ~MINUTE_MASK;
-        raw_ += m << 6;
+        raw_ |= static_cast<uint32_t>(m) << 6;
     }
 
     void setSecond(uint8_t s) {
@@ -126,15 +128,16 @@ public:
         }
     }
 
-    void set(time_t const & epoch) {
+    void setFromNTP(time_t const & epoch) {
         tm t;
         gmtime_r(&epoch, & t);
         setSecond(t.tm_sec);
         setMinute(t.tm_min);
         setHour(t.tm_hour);
         setDay(t.tm_mday);
-        setMonth(t.tm_mon);
-        setYear(t.tm_year);
+        LOG("D %i M %i Y %li", t.tm_mday, t.tm_mon, t.tm_year);
+        setMonth(t.tm_mon + 1);
+        setYear(t.tm_year + 1900);
     }
 
 #ifdef LOG
@@ -146,7 +149,7 @@ public:
 private:
 
     static constexpr uint32_t YEAR_MASK = UINT32_C(63) << 26;
-    static constexpr uint32_t MONTH_MASK = UINT32_C(16) << 22;
+    static constexpr uint32_t MONTH_MASK = UINT32_C(15) << 22;
     static constexpr uint32_t DAY_MASK = UINT32_C(31) << 17;
     static constexpr uint32_t HOUR_MASK = UINT32_C(31) << 12;
     static constexpr uint32_t MINUTE_MASK = UINT32_C(63) << 6;

@@ -911,7 +911,7 @@ private:
             }
             case msg::SetMode::Id: {
                 auto m = pointer_cast<msg::SetMode*>(& i2cRxBuffer_);
-                LOG("cmd SetMode m: %u, %u", (uint8_t)m->mode, (uint8_t)m->musicMode);
+                LOG("cmd SetMode m: %u, %u", static_cast<uint8_t>(m->mode), static_cast<uint8_t>(m->musicMode));
                 state_.state.setMode(m->mode);
                 state_.state.setMusicMode(m->musicMode);
                 if (m->mode == Mode::WalkieTalkie || m->musicMode == MusicMode::MP3)
@@ -982,18 +982,32 @@ private:
                 effectTimeout_ = m->timeout;
                 break;
             }
-            case msg::StartRecording::Id:
+            case msg::StartRecording::Id: {
                 LOG("cmd StartRecording");
                 status_.recording = true;
                 startAudioCapture(AudioADCSource::Mic);
                 // set the effect color to mode color for the lights bar from microphone
                 effectColor_ = MODE_COLOR_WALKIE_TALKIE.withBrightness(state_.ex.settings.maxBrightness);
                 break;            
-            case msg::StopRecording::Id:
+            }
+            case msg::StopRecording::Id: {
                 LOG("cmd StopRecording");
                 status_.recording = false;
                 stopAudioCapture();
                 break;
+            }
+            case msg::SetWiFiStatus::Id: {
+                auto m = pointer_cast<msg::SetWiFiStatus*>(& i2cRxBuffer_);
+                LOG("cmd SetWiFiStatus %u", static_cast<uint8_t>(m->status));
+                state_.state.setWiFiStatus(m->status);
+                break;
+            }
+            case msg::SetESPBusy::Id: {
+                auto m = pointer_cast<msg::SetESPBusy*>(& i2cRxBuffer_);
+                LOG("cmd SetBusy %u", static_cast<uint8_t>(m->busy));
+                status_.espBusy = m->busy;
+                break;
+            }
             default:
                 // TODO what to do in such an error? 
                 LOG("cmd unrecognized id %u", i2cRxBuffer_[0]);
@@ -1137,11 +1151,16 @@ private:
          */
         bool wakeup : 1;
 
+        /** Indicates that ESP is currently busy. 
+         */
+        bool espBusy : 1;
+
+
 
     } status_;
 
     static inline uint8_t undervoltageCountdown_ = UNDERVOLTAGE_TIMEOUT;
-    static inline uint8_t irqCountdown_ = 0;
+    static inline uint16_t irqCountdown_ = 0;
     static inline uint8_t tickCountdown_ = 0; 
     static inline uint16_t powerCountdown_ = 60;
     static inline uint8_t longPressCounter_ = 0; // [isr]
@@ -1286,447 +1305,5 @@ void loop() {
     Player::loop();
 }
 
-#endif
-
-#ifdef HAHA
-
-
-
-/** ATTiny part of the player.     
-    
- */
-class Player {
-public:
-    Player() = delete;
-
-    /** Initializes the chip. 
-     */
-    static void Initialize() {
-        // disable the peripheral clock divider
-        //CPU_CCP = CCP_IOREG_gc;
-        //CLKCTRL.MCLKCTRLB &= ~ CLKCTRL_PEN_bm; 
-        // configure the timer we use for 8kHz audio sampling
-        TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
-        TCB0.CTRLB = TCB_CNTMODE_INT_gc;
-        TCB0.CCMP = 1000; // for 8kHz
-        // setup the ADC pins (microphone input & audio out)
-        static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
-        PORTC.PIN2CTRL &= ~PORT_ISC_gm;
-        PORTC.PIN2CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTC.PIN2CTRL &= ~PORT_PULLUPEN_bm;
-        static_assert(MIC == 10, "Must be PC0"); // ADC1 input 6
-        PORTC.PIN0CTRL &= ~PORT_ISC_gm;
-        PORTC.PIN0CTRL |= PORT_ISC_INPUT_DISABLE_gc;
-        PORTC.PIN0CTRL &= ~PORT_PULLUPEN_bm;
-        // setup ADC voltage references to 1.1V (internal)
-        VREF.CTRLA &= ~ VREF_ADC0REFSEL_gm;
-        VREF.CTRLA |= VREF_ADC0REFSEL_1V1_gc;
-        VREF.CTRLC &= ~ VREF_ADC1REFSEL_gm;
-        VREF.CTRLC |= VREF_ADC1REFSEL_1V1_gc;
-        // configure the event system - ADC1 to sample when triggered by TCB0
-        EVSYS.SYNCCH0 = EVSYS_SYNCCH0_TCB0_gc;
-        EVSYS.ASYNCUSER12 = EVSYS_ASYNCUSER12_SYNCCH0_gc;
-        // set ADC1 settings (mic & audio) - clkdiv by 2, internal voltage reference
-        ADC1.CTRLB = ADC_SAMPNUM_ACC8_gc;
-        ADC1.CTRLC = ADC_PRESC_DIV2_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 2mhz
-        ADC1.EVCTRL = ADC_STARTEI_bm;
-        // set ADC0 settings (vcc, temperature)
-        // delay 32us and sampctrl of 32 us for the temperature sensor, do averaging over 64 values
-        ADC0.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc;
-        ADC0.CTRLB = ADC_SAMPNUM_ACC64_gc;
-        ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-        ADC0.CTRLD = ADC_INITDLY_DLY32_gc;
-        ADC0.SAMPCTRL = 31;
-        // initialize I2C slave. 
-        InitializeI2C();
-        // set transmit buffer to state and transmit length to state size
-        I2C_TX_Buffer_ = pointer_cast<uint8_t*>(& State_);
-        I2C_TX_Length_ = sizeof(State);     
-        // enable control interrupts for buttons
-        ControlBtn_.setInterrupt(ControlButtonChanged);
-        VolumeBtn_.setInterrupt(VolumeButtonChanged);
-        // allow voltages to stabilize when powered up
-        delay(200);
-        // from now on proceed identically to a wakeup
-        Wakeup();
-    }
-
-    static void Loop() {
-        // if there is I2C message from ESP, process it
-        if (Irq_.i2cRx)
-            I2CReceive();
-        if (ADC0.INTFLAGS & ADC_RESRDY_bm)
-            VoltageAndTemperature();
-        if (Status_.sleep)
-            Sleep();
-            
-        if (Status_.tick) {
-            Status_.tick = false;
-            LightsTick();
-        }
-        if (Status_.secondTick) {
-            Status_.secondTick = false;
-            if (state_.state.voltage() <= BATTERY_CRITICAL) {
-                CriticalBattery();
-                return;
-            }
-        }
-    }
-
-private:
-
-    static void Tick() {
-        // if sleeping & button(s) are pressed, we have 1/32th of a second tick and must determine if wake up
-        // if not sleeping, the long press counters must be increased and second tick determined
-        if (! Status_.sleep || state_.state.controlDown() || state_.state.volumeDown()) {
-            bool wakeup = false;
-            if (state_.state.controlDown() && ControlBtnCounter_ > 0 && --ControlBtnCounter_ == 0) 
-                wakeup = true;
-            if (state_.state.volumeDown() && VolumeBtnCounter_ > 0 && --VolumeBtnCounter_ ==0) 
-                wakeup = true;
-            // if sleeping, check if we should wake up, otherwise initiate the tick in main loop
-            if (Status_.sleep) {
-                if (wakeup) {
-                    // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
-                    state_.state.setControlDown(false);
-                    state_.state.setVolumeDown(false);
-                    Status_.sleep = false;
-                }
-            } else {
-                Status_.tick = true;
-            }
-            // if this is the 32th tick, continue to second tick, otherwise return now            
-            if (Player::Status_.ticksCounter-- != 0)
-                return;
-        }
-        // we are left with 1 second tick either because sleeping, or because fast tick overflow
-        Status_.secondTick = true;
-        Time_.secondTick();
-        // TODO alarm & stuff
-    }
-
-    /** Initialized when the chip wakes up into normal operation. 
-     */
-    static void Wakeup() {
-        // enable the RTC interrupt to 1/64th of a second while awake
-        while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-        RTC.PITCTRLA = RTC_PERIOD_CYC512_gc + RTC_PITEN_bm;
-        // start ADC0 to measure the VCC and wait for the first measurement to be done
-        ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
-        ADC0.COMMAND = ADC_STCONV_bm;
-        // wait for the voltage measurement to finish
-        while (! ADC0.INTFLAGS & ADC_RESRDY_bm) {
-        }
-        VoltageAndTemperature();
-        // if the voltage is below low battery threshold
-        if (state_.state.voltage() <= BATTERY_CRITICAL) {
-            CriticalBattery();
-            return;
-        }
-        // enable interrupts for rotary encoders
-        Control_.setInterrupt(ControlValueChanged);
-        Volume_.setInterrupt(VolumeValueChanged);
-        // turn on ESP and neopixels
-        // TODO have this in a method so that it can be called from reset function as well? 
-        pinMode(DCDC_PWR, OUTPUT);
-        digitalWrite(DCDC_PWR, LOW);
-        delay(50);
-        // start the wakeup progress bar
-        SpecialLights_.showBar(1, 5, Color::White().withBrightness(MaxBrightness_));
-        LightsCounter_ = 64;
-    }
-
-    static void Sleep() {
-        do {
-            // enable RTC interrupt every second so that the time can be kept
-            while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
-            RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc + RTC_PITEN_bm;
-            // disable rotary encoder interrupts so that they do not wake us from sleep
-            Control_.clearInterrupt();
-            Volume_.clearInterrupt();
-            // turn off neopixels and esp
-            pinMode(DCDC_PWR, INPUT);
-            // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
-            Status_.sleep = true;
-            while (Status_.sleep) {
-                sleep_cpu();
-            }
-            // clear the button events that led to the wakeup
-            // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
-            state_.state.clearButtonEvents();
-            // if we are not longer sleeping, wakeup
-            Wakeup();
-        } while (Status_.sleep == true);
-    }
-
-    static void VoltageAndTemperature() {
-        uint16_t value = ADC0.RES / 64;
-        switch (ADC0.MUXPOS) {
-            case ADC_MUXPOS_INTREF_gc: { // VCC Sense
-                cli();
-                state_.state.setVoltage(value);
-                sei();
-                // switch the ADC to be ready to measure the temperature
-                ADC0.MUXPOS = ADC_MUXPOS_TEMPSENSE_gc;
-                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-                break;
-            }
-            case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
-                cli();
-                state_.state.setTemp(value);
-                sei();
-                // fallthrough to the default where we set the next measurement to be that of input voltage
-            }
-            default:
-                // switch the ADC to be ready to measure the VCC
-                ADC0.MUXPOS = ADC_MUXPOS_INTREF_gc;
-                ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_VDDREF_gc | ADC_SAMPCAP_bm; // 0.5mhz
-                break;
-        }
-        // start new conversion
-        ADC0.COMMAND = ADC_STCONV_bm;
-    }
-
-
-    inline volatile static struct {
-        bool sleep : 1;
-        bool tick : 1;
-        bool secondTick : 1;
-        uint8_t ticksCounter : 6; // 0..63
-        /** Indicates that the latest long press of either volume or control button happened when the other one was down and therefore can lead to a double long press. 
-         */
-        bool doubleLongPress : 1; 
-        bool recording : 1; // indicates that we are recording 
-    } Status_;
-
-    inline static State State_;
-
-    inline static DateTime Time_;
-
-/** \name Comms
- */
-//@{
-private:
-
-
-
-    static_assert(IRQ_MAX_DELAY < 128);
-    inline volatile static struct {
-        bool enabled : 1;
-        uint8_t timer : 7; // 0..127
-        bool i2cRx : 1; // indicates that I2C message has been received
-    } Irq_;
-
-//@}
-
-
-
-/** \name Knobs & Buttons
- 
-    
- */
-//@{
-
-/** \name Lights
- */
-//@{
-
-    /** Determines what to show with the lights. 
-     
-        The following things are displayed on the strip:
-
-     */ 
-    static void LightsTick() {
-        // always start fresh
-        uint8_t step = max(MaxBrightness_ / 32, 1);
-        // when a button is down then the strip shows the long press progress first and foremost, unless we are recoding in which case display the audiolights of the recorded message
-        if (state_.state.volumeDown() || state_.state.controlDown()) {
-            if (Status_.recording) {
-                AudioLights(step);
-            } else {
-                uint8_t v = BUTTON_LONG_PRESS_TICKS - max(VolumeBtnCounter_, ControlBtnCounter_);
-                if (v == BUTTON_LONG_PRESS_TICKS)
-                    Lights_.fill(BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
-                else if (v >= BUTTON_LONG_PRESS_DELAY)
-                    Lights_.showBar(v - BUTTON_LONG_PRESS_DELAY, BUTTON_LONG_PRESS_TICKS - BUTTON_LONG_PRESS_DELAY, BUTTONS_LONG_PRESS_COLOR.withBrightness(MaxBrightness_));
-            }
-        // otherwise, if LightsCounter_ is non-zero, it means that the special lights are to be shown, in which case we simply perform the tick against the special lights buffer instead.   
-        } else if (LightsCounter_ > 0) {
-            Lights_.moveTowards(SpecialLights_, step);
-            --LightsCounter_ == 0;
-        // otherwise, show network connecting bar, if currently connecting to a network
-        } else if (state_.state.wifiStatus() == WiFiStatus::Connecting) {
-            Lights_.showCenteredBar(Status_.ticksCounter, 63, Color::Blue().withBrightness(MaxBrightness_));
-        // if in night light mode, show the selected effect
-        } else if (state_.state.mode() == Mode::NightLight) {
-            NightLight(step);
-        // display audio lights now
-        // TODO remove the true flag and actually work this based on mode & audio lights state
-        } else if (state_.state.audioLights()) {
-            AudioLights(step);
-        // otherwise the lights are off
-        } else {
-            Lights_.fill(Color::Black());
-        }
-        // update the actual neopixels buffer
-        Neopixels_.moveTowardsReversed(Lights_, step);
-        // draw over the bar notification lights - since we do this every tick, calculate the blinking brightness transition first
-        AddNotifications();
-        // and finally, update the neopixels
-        Neopixels_.update();
-    }
-
-    static void AddNotifications() {
-        uint16_t notificationBrightness = DEFAULT_NOTIFICATION_BRIGHTNESS;
-        if (Status_.ticksCounter < 16)
-            notificationBrightness = notificationBrightness * Status_.ticksCounter / 16;
-        else if (Status_.ticksCounter > 48)
-            notificationBrightness = notificationBrightness * (63 - Status_.ticksCounter) / 16;
-        // after done, the bar as such, graft on it any notification LEDs with have
-        if (Time_.second() % 2) {
-            if (state_.state.wifiStatus() == WiFiStatus::Connected || state_.state.wifiStatus() == WiFiStatus::SoftAP)
-                Neopixels_[0].add(Color::Blue().withBrightness(notificationBrightness));
-        // the low battery warning blinks out of sync with the other notifications
-        } else {
-            if (state_.state.voltage() <= BATTERY_LOW)
-                Neopixels_[7].add(Color::Red().withBrightness(notificationBrightness));
-        }
-    }
-
-    static void NightLight(uint8_t & step) {
-        step = 255; // pixels will be synced, not moved towards
-        switch (state_.state.LightsEffect()) {
-            case LightsEffect::Color:
-                Lights_.fill(EffectColor_);
-                break;
-            case LightsEffect::Breathe:
-                Lights_.fill(EffectColor_.withBrightness(EffectCounter_ >> 8));
-                break;
-            case LightsEffect::BreatheBar:
-                Lights_.showCenteredBar(EffectCounter_, 0xffff, EffectColor_);
-                break;
-            case LightsEffect::KnightRider:
-                Lights_.showPoint(EffectCounter_, 0xffff, EffectColor_);
-                break;
-            case LightsEffect::Running:
-                break;
-        }
-        uint16_t speed = 16 * 32;
-        if (EffectHelper_ & 0x8000) {
-            EffectCounter_ += speed;
-            if (EffectCounter_ < speed) {
-                EffectCounter_ = 0xffff;
-                EffectHelper_ &= ~0x8000;
-            }
-        } else {
-            EffectCounter_ -= speed;
-            if (EffectCounter_ > 0xffff - speed) {
-                EffectCounter_ = 0;
-                EffectHelper_ |= 0x8000;
-            }
-        }
-        // if we are in rainbow mode, update the effect color hue
-        if (state_.state.nightLightHue() == State::NIGHTLIGHT_RAINBOW_HUE) {
-            uint16_t hue = EffectHelper_ & 0xfff;
-            hue += 16;
-            if (hue > 0xfff)
-                hue = 0;
-            EffectHelper_ = (EffectHelper_ & 0xf000) | hue;
-            EffectColor_ = Color::HSV(hue << 4, 255, MaxBrightness_);
-        }
-    }
-
-    static void AudioLights(uint8_t & step) {
-        uint8_t ri = RecordingWrite_;
-        uint8_t audioMin = 255;
-        uint8_t audioMax = 0;
-        for (uint8_t i = 0; i < 125; ++i) {
-            uint8_t x = RecordingBuffer_[--ri];
-            audioMin = (x < audioMin) ? x : audioMin;
-            audioMax = (x > audioMax) ? x : audioMax;
-        }
-        uint8_t v = audioMax - audioMin;
-        if (v > AudioLightsMax_)
-            AudioLightsMax_ = v;
-        if (v < AudioLightsMin_)
-            AudioLightsMin_ = v;
-        Lights_.showCenteredBar(v - AudioLightsMin_, AudioLightsMax_ - AudioLightsMin_, AccentColor_.withBrightness(MaxBrightness_));
-        if (Status_.ticksCounter % 4 == 0) {
-            if (AudioLightsMax_ > v)
-                --AudioLightsMax_;
-            if (AudioLightsMin_ < v)
-                ++AudioLightsMin_;
-        }
-    }
-
-    inline static NeopixelStrip<NEOPIXEL, 8> Neopixels_;
-    inline static ColorStrip<8> Lights_;
-    inline static ColorStrip<8> SpecialLights_;
-    inline static volatile uint8_t MaxBrightness_ = DEFAULT_BRIGHTNESS;
-    inline static volatile uint16_t EffectCounter_ = 0;
-    inline static volatile uint16_t EffectHelper_ = 0;
-    inline static Color AccentColor_ = DEFAULT_ACCENT_COLOR;
-    inline static Color EffectColor_;
-    inline static volatile uint8_t LightsCounter_ = 0;
-    inline static volatile uint8_t AudioLightsMax_;
-    inline static volatile uint8_t AudioLightsMin_;
-
-//@}
-
-
-/** \name Audio & Microphone Listening
- */
-//@{
-private:
-
-    enum class AudioADCSource : uint8_t {
-        Audio = ADC_MUXPOS_AIN8_gc,
-        Mic = ADC_MUXPOS_AIN6_gc
-    }; // AudioADCSource
-
-
-    static void StartAudioADC(AudioADCSource channel) {
-        AudioLightsMin_ = 255;
-        AudioLightsMax_ = 0;
-        RecordingRead_ = 0;
-        RecordingWrite_ = 0;
-        // select ADC channel to either MIC or audio ADC
-        ADC1.MUXPOS  = static_cast<uint8_t>(channel);
-        // enable and use 8bit resolution, freerun mode
-        ADC1.CTRLA = ADC_ENABLE_bm | ADC_RESSEL_8BIT_gc /*| ADC_FREERUN_bm */;
-        // enable the interrupt
-        ADC1.INTCTRL |= ADC_RESRDY_bm;
-        // start the timer
-        TCB0.CTRLA |= TCB_ENABLE_bm;
-    }
-
-    static bool AudioADCRunning() {
-        return ADC1.CTRLA & ADC_ENABLE_bm;
-    }
-
-    friend void ::ADC1_RESRDY_vect();
-    
-    inline static volatile uint8_t RecordingWrite_ = 0;
-    inline static volatile uint8_t RecordingRead_ = 0;
-    inline static volatile uint8_t RecordingBuffer_[256];
-
-//@}
-
-}; // Player
-
-
-
-ISR(ADC1_RESRDY_vect) {
-    //digitalWrite(AUDIO_SRC, HIGH);
-    Player::RecordingBuffer_[Player::RecordingWrite_++] = (ADC1.RES / 8) & 0xff;
-    if (Player::RecordingWrite_ % 32 == 0 && Player::Status_.recording)
-        Player::SetIrq();
-    //digitalWrite(AUDIO_SRC, LOW);
-}
-
-
-
-
-#endif // HAHA
-
+#endif // actual code 
 #endif // ARCH_ATTINY

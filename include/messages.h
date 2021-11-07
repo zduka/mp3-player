@@ -155,9 +155,20 @@ namespace msg {
     //@}
 
     MESSAGE(SetWiFiStatus, 
-        WiFiStatus mode;
-        SetWiFiStatus(WiFiStatus mode):
-            mode{mode} {
+        WiFiStatus status;
+        SetWiFiStatus(WiFiStatus status):
+            status{status} {
+        }
+    );
+
+    /** Sets the busy state of the ESP chip. 
+     
+        When ESP is busy, avr will ignore any user inputs and will not fire the AVR_IRQ flag giving ESP more time to process its stuff.  
+     */
+    MESSAGE(SetESPBusy,
+        bool busy;
+        SetESPBusy(bool busy):
+            busy{busy} {
         }
     );
 

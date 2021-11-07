@@ -20,16 +20,17 @@
 
 # ATTiny
 
+- busy can be set, byt does niothing, also add the IRQ counter & and the busy counter
+
 - temp is wildly off up to being useless
 
 - what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
 # ESP
 
-- check that time update works
 - better integrate time update to the workflow
-- busy flag for ESP
-- progress bar for sending audio messages, ignore small messages, etc.
+- busy flag for ESP, message is there, ESP is not sending this properly
+- progress bar for sending audio messages, etc.
 - actually implement downloading telegram file
 
 - check heap and health and reset when necessary

@@ -28,8 +28,7 @@
  */
 #define UNDERVOLTAGE_TIMEOUT 20
 
-
-
+#define ESP_BUSY_TIMEOUT 64 * 60 * 2 // 2 minutes timeout for busy
 
 #define DEFAULT_VOLUME 5
 

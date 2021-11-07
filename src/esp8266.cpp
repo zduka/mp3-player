@@ -98,10 +98,10 @@ public:
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-        state_.setMode(Mode::WalkieTalkie);
-        setMode(Mode::Music);
-        //state_.setMode(Mode::Music);
-        //setMode(Mode::WalkieTalkie);
+        //state_.setMode(Mode::WalkieTalkie);
+        //setMode(Mode::Music);
+        state_.setMode(Mode::Music);
+        setMode(Mode::WalkieTalkie);
     }
 
     static void loop() {
@@ -370,6 +370,7 @@ private:
                 break;
             }
             case Mode::WalkieTalkie: {
+                updateNTPTime();
                 break;
             }
             case Mode::Lights: {
@@ -943,7 +944,9 @@ private:
             } else {
                 LOG("Recording done");
                 File f = SD.open("/rec.wav", FILE_READ);
-                bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav");
+                if (f.size() >= minRecordingLength_)
+                    bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav");
+                // TODO else do stuff
                 f.close();
             }
         }
@@ -983,6 +986,8 @@ private:
     /** The telegram bot that handles the communication. 
      */
     static inline TelegramBot bot_;
+
+    static inline uint16_t minRecordingLength_ = 8000;
 
     //@}
 
@@ -1115,14 +1120,14 @@ private:
 
     static void onWiFiConnected(WiFiEventStationModeConnected const & e) {
         LOG("WiFi: connected to %s, channel %u", e.ssid.c_str(), e.channel);
-        // TODO this should really not happen here...
-        updateNTPTime();
     }
 
     static void onWiFiIPAssigned(WiFiEventStationModeGotIP const & e) {
         LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
         state_.setWiFiStatus(WiFiStatus::Connected);
         send(msg::SetWiFiStatus{WiFiStatus::Connected});
+        // TODO this should really not happen here...
+        updateNTPTime();
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
@@ -1168,10 +1173,10 @@ private:
      */
     static void updateNTPTime() {
         WiFiUDP ntpUDP;
-        NTPClient timeClient{ntpUDP, "europe.pool.ntp.org", settings_.timezone};
+        NTPClient timeClient{ntpUDP, "pool.ntp.org", settings_.timezone};
         timeClient.begin();
         if (timeClient.forceUpdate()) {
-            ex_.time.set(timeClient.getEpochTime());
+            ex_.time.setFromNTP(timeClient.getEpochTime());
             LOG("NTP time update:");
             ex_.time.log();
             // now that we have obtained the time, send it

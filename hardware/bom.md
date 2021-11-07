@@ -18,7 +18,7 @@ Radio(RDA5807)          1   2/3?
 uSD Holder              1   2
 Adafruit 3V3 Buck-Boost 1   2       3    
 Inductor 470uH          2   4
-Speaker                 1   2       
+Speaker                 1   2               https://www.gme.cz/reproduktor-ls50n-12-r8-50mm-8ohm-2w
 Headphones Conn         1   2       1       https://cz.mouser.com/ProductDetail/490-SJ-43514-SMT-TR
 USB-C Li-Ion Charger    1   2
 18650 Battery Holder    1   2
