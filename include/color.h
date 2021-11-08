@@ -212,6 +212,16 @@ public:
         }
     }
 
+    void withBrightness(uint8_t brightness) {
+        for (uint8_t i = 0; i < SIZE; ++i) {
+            Color c = colors_[i].withBrightness(brightness);
+            if (c != colors_[i]) {
+                colors_[i] = c;
+                changed_ = true; 
+            }
+        }
+    }
+
     void moveTowards(ColorStrip<SIZE> const & other, uint8_t step) {
         for (uint8_t i = 0; i < SIZE; ++i) {
             changed_ = colors_[i].moveTowards(other.colors_[i], step) | changed_;

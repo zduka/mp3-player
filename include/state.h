@@ -94,6 +94,17 @@ public:
             peripherals_ &= ~BATTERY_MASK;
     }
 
+    bool messageReady() const volatile {
+        return peripherals_ & MESSAGE_READY_MASK;
+    }
+
+    void setMessageReady(bool value) volatile {
+        if (value)
+            peripherals_ |= MESSAGE_READY_MASK;
+        else
+            peripherals_ &= ~MESSAGE_READY_MASK;
+    }
+
 private:
     static constexpr uint8_t CONTROL_DOWN_MASK = 1 << 0;
     static constexpr uint8_t VOLUME_DOWN_MASK = 1 << 1;
@@ -101,6 +112,7 @@ private:
     static constexpr uint8_t CHARGING_MASK = 1 << 3;
     static constexpr uint8_t BATTERY_MASK = 1 << 4;
     static constexpr uint8_t LOW_BATTERY_MASK = 1 << 5;
+    static constexpr uint8_t MESSAGE_READY_MASK = 1 << 6;
     volatile uint8_t peripherals_; 
 //@}
 /** \name Events register. 
@@ -489,64 +501,6 @@ public:
 
 static_assert(sizeof(LightsState) == 2);
 
-/** Active notifications. 
- */
-class Notifications {
-public:
-    /** Returns true if there is at least one notification to be displayed. 
-     */
-    bool active() const {
-        return raw_ != 0;
-    }
-
-    bool lowBattery() const {
-        return raw_ & LOW_BATTERY;
-    }
-
-    bool messageReady() const {
-        return raw_ & MESSAGE_READY;
-    }
-
-    bool apActive() const {
-        return raw_ & AP_ACTIVE;
-    }
-
-    bool noWiFi() const {
-        return raw_ & NO_WIFI;
-    }
-
-    bool airplaneMode() const {
-        return raw_ & AIRPLANE_MODE;
-    }
-
-    void log() const {
-        LOG("Notifications:");
-        if (lowBattery())
-            LOG("    low battery");
-        if (messageReady())
-            LOG("    message ready");
-        if (apActive())
-            LOG("    AP active");
-        if (noWiFi())
-            LOG("    no WiFi");
-        if (airplaneMode())
-            LOG("    airplane mode");
-    }
-private:
-    static constexpr uint8_t LOW_BATTERY = 1;
-    static constexpr uint8_t MESSAGE_READY = 2;
-    static constexpr uint8_t AP_ACTIVE = 4;
-    static constexpr uint8_t NO_WIFI = 8;
-    static constexpr uint8_t AIRPLANE_MODE = 16;
-
-    uint8_t raw_;
-} __attribute__((packed)); // Notifications
-
-static_assert(sizeof(Notifications) == 1);
-
-
-
-
 class ExtendedState {
 public:
     Measurements measurements; 
@@ -555,7 +509,6 @@ public:
     RadioState radio;
     WalkieTalkieState walkieTalkie;
     LightsState lights;
-    Notifications notifications;
     DateTime time;
     DateTime alarm;
 
@@ -579,12 +532,11 @@ public:
         radio.log();
         walkieTalkie.log();
         lights.log();
-        notifications.log();
     }
 
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 28);
+static_assert(sizeof(ExtendedState) == 27);
 
 
 /** Settings stored on the SD card and used by the ESP alone. 

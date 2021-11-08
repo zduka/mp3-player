@@ -1,11 +1,9 @@
 # HW
 
-- buy the extra things needed
-
 # SW
 
-- remove notifications from extended state
-
+- refactor settings so that they make more sense and are easier to access, check the ex_.settings whether this is sth that needs to be synced...
+- do not poweroff if busy, generally, inform the ESP that it should power off. It then sends the power off message to which we react
 - radio frequency right after start still does not work well, maybe bigger interval
 
 - headphones can be set to output and LOW to disable speaker any time
@@ -20,22 +18,25 @@
 
 - temp is wildly off up to being useless
 
-- what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
-
 # ESP
 
 - better integrate time update to the workflow, timezone support
-- actually implement downloading telegram file
 
 - check heap and health and reset when necessary
 
-
- # Missing Features
-
- - alarm clock
- - birthday reminder
- - disco mode
-
 # Walkie Talkie
 
-Maybe add a silence reduction as well (i.e values close to center are center). 
+- actually implement downloading telegram file
+- maybe add a silence reduction as well (i.e values close to center are center). 
+
+# Birthday reminder
+
+First turn on when a date is set, a message is played. Maybe support more dates? 
+
+# Alarm Clock
+
+Enters alarm clock mode, plays the alarm. Short press snoozes, Long press turns off. Can select radio/mp3 from the SD card as the wakeup call. 
+
+# Sync Mode
+
+Run silently, check notifications & update time. When to run? Every N hours, if active, delay until poweroff.

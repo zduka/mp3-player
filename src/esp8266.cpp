@@ -97,11 +97,12 @@ public:
         setExtendedState(ex_);
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
+        ex_.time.log();
         // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-        //state_.setMode(Mode::WalkieTalkie);
-        //setMode(Mode::Music);
-        state_.setMode(Mode::Music);
-        setMode(Mode::WalkieTalkie);
+        state_.setMode(Mode::WalkieTalkie);
+        setMode(Mode::Music);
+        //state_.setMode(Mode::Music);
+        //setMode(Mode::WalkieTalkie);
     }
 
     static void loop() {

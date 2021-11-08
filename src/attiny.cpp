@@ -676,6 +676,8 @@ private:
         neopixels_.moveTowardsReversed(strip_, step);
         if (displayNotifications)
             lightsNotifications();
+        if (powerCountdown_ < 64)
+            neopixels_.withBrightness(powerCountdown_ * 4);
         neopixels_.update();
     }
 
@@ -821,7 +823,8 @@ private:
                 case 32:
                 case 33:
                 case 34:
-                    // TODO waiting message
+                    if (state_.state.messageReady())
+                        neopixels_[0] = Color::Yellow().withBrightness(state_.ex.settings.maxBrightness);
                     break;
                 default:
                     break;
@@ -1227,6 +1230,8 @@ private:
     static inline uint8_t undervoltageCountdown_ = UNDERVOLTAGE_TIMEOUT;
     static inline uint16_t irqCountdown_ = 0;
     static inline uint8_t tickCountdown_ = 0; 
+    /** Countdown to poweroff in seconds. 
+     */
     static inline uint16_t powerCountdown_ = 60;
     static inline uint8_t longPressCounter_ = 0; // [isr]
 
