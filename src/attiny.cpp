@@ -257,8 +257,8 @@ private:
     static void tick() {
         //digitalWrite(DEBUG_PIN, HIGH);            
         // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
-        if (status_.irq && irqCountdown_ == 0)
-            resetESP();
+        if ((status_.irq || status_.espBusy) && (--irqCountdown_ == 0))
+             resetESP();
         // make sure we have a light show
         lightsTick();
         cli();
@@ -488,6 +488,8 @@ private:
      */
     //@{
     static void controlButtonChanged() {
+        if (status_.espBusy)
+            return;
         controlBtn_.poll();
         if (status_.sleep) {
             checkButtonWakeup(controlBtn_.pressed());
@@ -513,6 +515,8 @@ private:
     }
 
     static void volumeButtonChanged() {
+        if (status_.espBusy)
+            return;
         volumeBtn_.poll();
         // if we are sleeping check if we should wake up 
         if (status_.sleep) {
@@ -561,6 +565,8 @@ private:
      */
     //@{
     static void controlKnobChanged() {
+        if (status_.espBusy)
+            return;
         control_.poll();
         state_.state.setControlValue(control_.value());
         state_.state.setControlTurn();
@@ -568,6 +574,8 @@ private:
     }
 
     static void volumeKnobChanged() {
+        if (status_.espBusy)
+            return;
         volume_.poll();
         state_.state.setVolumeValue(volume_.value());
         state_.state.setVolumeTurn();
@@ -621,10 +629,12 @@ private:
         Called by the main thread every 1/64th of a second. Updates the LED strip according to the current state. Note that if 
      */
     static void lightsTick() {
+        bool displayNotifications = false;
         uint8_t step = 1;
         // deal with recording first as it is the highest priority visualization
         if (status_.recording) {
             audioLightsTick(step);
+        // then with buttons being pressed
         } else if ((state_.state.controlButtonDown() || state_.state.volumeButtonDown()) && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
             if (longPressCounter_ != 0) { // if the long press is not active, show progress bar in the color of the current mode
                 Color color = getModeColor(state_.state.mode(), state_.state.musicMode());
@@ -646,6 +656,7 @@ private:
                 strip_.fill(color);
             }
             effectTimeout_ = 1;
+        // then with special effects being currently in process
         } else if (effectTimeout_ > 0) {
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
@@ -656,17 +667,19 @@ private:
                     effect_.audio.minDelta = 255;
                 }
             }
+        // and finally do the lights tick
         } else {
-            //digitalWrite(DEBUG_PIN, HIGH);            
             lightsTick(step);
-            //digitalWrite(DEBUG_PIN, LOW);            
+            displayNotifications = true;
         }
         // once we have the tick, update the actual neopixels with the calculated strip value & step
         neopixels_.moveTowardsReversed(strip_, step);
+        if (displayNotifications)
+            lightsNotifications();
         neopixels_.update();
     }
 
-    /** Updates the neopoixels to show the selected night light effect. 
+    /** Updates the neopoixels to show the selected night light effect.
      
         
      */
@@ -687,25 +700,22 @@ private:
             case LightsEffect::AudioLights: {
                 if (! state_.state.idle()) {
                     audioLightsTick(step);
-                    return;
+                } else {
+                    strip_.fill(Color::Black());
                 }
-                // fallthrough to BinaryClock
+                return;
             }
             case LightsEffect::BinaryClock: {
-                if (state_.state.charging()) {
-                    strip_.showBar((state_.ex.time.second() % 2 * 64) + tickCountdown_ % 64, 128, BINARY_CLOCK_CHARGING.withBrightness(state_.ex.settings.maxBrightness));
-                } else {
-                    switch (state_.ex.time.second() % (state_.state.batteryMode() ? 3 : 2)) {
-                        case 0:
-                            showByte(state_.ex.time.hour(), BINARY_CLOCK_HOURS.withBrightness(state_.ex.settings.maxBrightness));
-                            break;
-                        case 1:
-                            showByte(state_.ex.time.minute(), BINARY_CLOCK_MINUTES.withBrightness(state_.ex.settings.maxBrightness));
-                            break;
-                        case 2:
-                            strip_.showBar(min(state_.ex.measurements.vcc, 420) - 340,80, BINARY_CLOCK_BATTERY.withBrightness(state_.ex.settings.maxBrightness));
-                            break;
-                    }
+                switch (state_.ex.time.second() % (state_.state.batteryMode() ? 3 : 2)) {
+                    case 0:
+                        showByte(state_.ex.time.hour(), BINARY_CLOCK_HOURS.withBrightness(state_.ex.settings.maxBrightness));
+                        break;
+                    case 1:
+                        showByte(state_.ex.time.minute(), BINARY_CLOCK_MINUTES.withBrightness(state_.ex.settings.maxBrightness));
+                        break;
+                    case 2:
+                        strip_.showBar(min(state_.ex.measurements.vcc, 420) - 340,80, BINARY_CLOCK_BATTERY.withBrightness(state_.ex.settings.maxBrightness));
+                        break;
                 }
                 return;
             }
@@ -771,6 +781,52 @@ private:
         else 
             step = max(1, (effect_.audio.maxDelta - effect_.audio.minDelta) / 4);
         effect_.audio.lastDelta = d;
+    }
+
+    /** Determines if there are any notifications and displays them over the strip values. 
+     
+        
+     */
+    static void lightsNotifications() {
+        if (state_.state.wifiStatus() == WiFiStatus::Connecting) {
+            neopixels_.showBarCentered(tickCountdown_ % 128, 128, Color::Blue().withBrightness(state_.ex.settings.maxBrightness));
+        } else if (tickCountdown_ % 16 < 3) {
+            bool draw = state_.state.charging() 
+                       || (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
+                       || (state_.state.wifiStatus() != WiFiStatus::Off);
+            if (! draw)
+                return;
+            neopixels_[0] = Color::Black();
+            neopixels_[7] = Color::Black();
+            switch (tickCountdown_ % 64) {
+                case 0:
+                case 1:
+                case 2:
+                    if (state_.state.wifiStatus() == WiFiStatus::Connected)
+                        neopixels_[0] = Color::Blue().withBrightness(state_.ex.settings.maxBrightness);
+                    else if (state_.state.wifiStatus() == WiFiStatus::AP)
+                        neopixels_[0] = Color::Cyan().withBrightness(state_.ex.settings.maxBrightness);
+                    break;
+                case 16:
+                case 17:
+                case 18:
+                case 48:
+                case 49:
+                case 50:
+                    if (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
+                        neopixels_[7] = Color::Red().withBrightness(state_.ex.settings.maxBrightness);
+                    else if (state_.state.charging())
+                        neopixels_[7] = Color::Green().withBrightness(state_.ex.settings.maxBrightness);
+                    break;
+                case 32:
+                case 33:
+                case 34:
+                    // TODO waiting message
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 
     static void showByte(uint8_t value, Color const & color) {
@@ -867,9 +923,11 @@ private:
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
             if (! status_.irq && digitalRead(DCDC_PWR) == DCDC_PWR_ON) {
                 status_.irq = true;
-                irqCountdown_ = IRQ_RESPONSE_TIMEOUT;
                 pinMode(AVR_IRQ, OUTPUT);
                 digitalWrite(AVR_IRQ, LOW);
+                // if the ESP is not busy, set the IRQ timeout
+                if (!status_.espBusy)
+                    irqCountdown_ = IRQ_RESPONSE_TIMEOUT;
             }
         }
     }
@@ -965,6 +1023,9 @@ private:
                 //LOG("cmd LightsBar v: %u, m: %u, rgb: %x%x%x, t: %u", m->value, m->max, m->color.r, m->color.g, m->color.b, m->timeout);
                 strip_.showBar(m->value, m->max, m->color);
                 effectTimeout_ = m->timeout;
+                // as this serves as a progressbar, reset the ESP busy counter, if in esp busy mode
+                if (status_.espBusy)
+                    irqCountdown_ = ESP_BUSY_TIMEOUT;
                 break;
             }
             case msg::LightsBarCentered::Id: {
@@ -1006,6 +1067,10 @@ private:
                 auto m = pointer_cast<msg::SetESPBusy*>(& i2cRxBuffer_);
                 LOG("cmd SetBusy %u", static_cast<uint8_t>(m->busy));
                 status_.espBusy = m->busy;
+                if (status_.espBusy)
+                    irqCountdown_ = ESP_BUSY_TIMEOUT;
+                else if (status_.irq)
+                    irqCountdown_ = IRQ_RESPONSE_TIMEOUT;
                 break;
             }
             default:

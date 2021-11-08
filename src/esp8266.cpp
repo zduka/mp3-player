@@ -944,8 +944,14 @@ private:
             } else {
                 LOG("Recording done");
                 File f = SD.open("/rec.wav", FILE_READ);
-                if (f.size() >= minRecordingLength_)
-                    bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav");
+                if (f.size() >= minRecordingLength_) {
+                    send(msg::SetESPBusy{true});
+                    bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
+                        send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(ex_.settings.maxBrightness), 255));    
+                    });
+                    send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(ex_.settings.maxBrightness), 32));
+                    send(msg::SetESPBusy{false});
+                }
                 // TODO else do stuff
                 f.close();
             }

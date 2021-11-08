@@ -38,11 +38,14 @@ public:
         return responseOk();
     }
 
+    using UploadCallback = std::function<void(uint16_t, uint16_t)>;
+
     /** Sends given audio file to the specified chat. 
      */
-    bool sendAudio(int64_t chatId, File & f, char const * filename, char const * mime) {
+    bool sendAudio(int64_t chatId, File & f, char const * filename, char const * mime, UploadCallback callback) {
         if (!connect())
             return false;
+        size_t fileSize = f.size();
         size_t len = 0;
         char buffer[512];
         len += snprintf_P(buffer + len, sizeof(buffer) - len, PSTR("--%s\r\n"), BOUNDARY);
@@ -56,15 +59,20 @@ public:
         HTTPS_SEND(PSTR("POST /bot%lli:%s/sendAudio"), id_, token_.c_str());
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("Content-Type: multipart/form-data; boundary=%s\r\n"), BOUNDARY);
-        HTTPS_SEND(PSTR("Content-Length: %u\r\n"), len + len2 + f.size());
+        HTTPS_SEND(PSTR("Content-Length: %u\r\n"), len + len2 + fileSize);
         HTTPS_SEND(PSTR("\r\n"));
         https_.write(pointer_cast<uint8_t *>(buffer), len);
+        uint16_t chunks = fileSize / sizeof(buffer) + 2;
+        uint16_t i = 1;
         while (f.available()) {
+            if (callback)
+                callback(i++, chunks);
             size_t n = f.readBytes(buffer, sizeof(buffer));
             https_.write(pointer_cast<uint8_t *>(buffer), n);
-            Serial.print(".");
         }
         https_.write(pointer_cast<uint8_t *>(buffer2), len2);
+        if (callback)
+            callback(i++, chunks);
         return responseOk();
     }
 

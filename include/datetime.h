@@ -135,7 +135,6 @@ public:
         setMinute(t.tm_min);
         setHour(t.tm_hour);
         setDay(t.tm_mday);
-        LOG("D %i M %i Y %li", t.tm_mday, t.tm_mon, t.tm_year);
         setMonth(t.tm_mon + 1);
         setYear(t.tm_year + 1900);
     }

@@ -4,11 +4,9 @@
 
 # SW
 
-- notifications could perhaps be part of state as opposed to extended state? 
+- remove notifications from extended state
 
 - radio frequency right after start still does not work well, maybe bigger interval
-
-- should idle lights always show status? 
 
 - headphones can be set to output and LOW to disable speaker any time
 
@@ -20,17 +18,13 @@
 
 # ATTiny
 
-- busy can be set, byt does niothing, also add the IRQ counter & and the busy counter
-
 - temp is wildly off up to being useless
 
 - what to do with connected to wifi notification? I do not want it on all the time, but there should be a way how to determine if connected or not
 
 # ESP
 
-- better integrate time update to the workflow
-- busy flag for ESP, message is there, ESP is not sending this properly
-- progress bar for sending audio messages, etc.
+- better integrate time update to the workflow, timezone support
 - actually implement downloading telegram file
 
 - check heap and health and reset when necessary
@@ -40,6 +34,7 @@
 
  - alarm clock
  - birthday reminder
+ - disco mode
 
 # Walkie Talkie
 

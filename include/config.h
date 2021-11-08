@@ -14,6 +14,10 @@
 
 #define USB_VOLTAGE_THRESHOLD 440
 
+/** When the battery level drops below this threshold, the low battery flag is raised.
+ */
+#define BATTERY_LOW_VCC 350
+
 /** When battery reaches this voltage, the critical alert (three red flashes) will be displayed and the player will go to sleep immediately. 
  */
 #define BATTERY_CRITICAL_VCC 340
