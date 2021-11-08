@@ -208,6 +208,8 @@ private:
 
     static void secondTick() {
         ex_.time.secondTick();
+        if (! status_.recording)
+            updateState();
         // TODO do more stuff
     }
 

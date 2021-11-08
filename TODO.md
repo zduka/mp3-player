@@ -5,6 +5,7 @@
 - should notification light do stuff if we are in non music mode? 
 
 - refactor settings so that they make more sense and are easier to access, check the ex_.settings whether this is sth that needs to be synced...
+- add settings for keeping wifi connection even if not in wifi mode
 - do not poweroff if busy, generally, inform the ESP that it should power off. It then sends the power off message to which we react
 - radio frequency right after start still does not work well, maybe bigger interval
 
@@ -23,6 +24,7 @@
 # ESP
 
 - better integrate time update to the workflow, timezone support
+- add telegram commands, such as checking which wifi & ip we have, etc.
 
 - check heap and health and reset when necessary
 
