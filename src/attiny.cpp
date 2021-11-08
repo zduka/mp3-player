@@ -792,10 +792,11 @@ private:
     static void lightsNotifications() {
         if (state_.state.wifiStatus() == WiFiStatus::Connecting) {
             neopixels_.showBarCentered(tickCountdown_ % 128, 128, Color::Blue().withBrightness(state_.ex.settings.maxBrightness));
-        } else if (tickCountdown_ % 16 < 3) {
+        } else {
             bool draw = state_.state.charging() 
                        || (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
-                       || (state_.state.wifiStatus() != WiFiStatus::Off);
+                       || (state_.state.wifiStatus() != WiFiStatus::Off)
+                       || (state_.state.messageReady());
             if (! draw)
                 return;
             neopixels_[0] = Color::Black();
