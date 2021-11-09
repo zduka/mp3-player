@@ -4,7 +4,6 @@
 
 - should notification light do stuff if we are in non music mode? 
 
-- add settings for keeping wifi connection even if not in wifi mode
 - do not poweroff if busy, generally, inform the ESP that it should power off. It then sends the power off message to which we react
 - radio frequency right after start still does not work well, maybe bigger interval
 

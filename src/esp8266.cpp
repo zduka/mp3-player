@@ -554,7 +554,8 @@ private:
                 bool resume = false;
                 // if we are coming from walkie talkie, disconnect WiFi too
                 if (state_.mode() == Mode::WalkieTalkie) {
-                    disconnectWiFi();
+                    if (! settings_.keepWiFiAlive)
+                        disconnectWiFi();
                     resume = true;
                 }
                 state_.setMode(mode);

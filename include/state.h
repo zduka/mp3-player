@@ -514,6 +514,10 @@ public:
 
     uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
 
+    /** If true, WiFi is not disconnected when leaving the walkie-talkie mode. 
+     */
+    bool keepWiFiAlive = false;
+
     bool radioEnabled = true;
     bool lightsEnabled = true;
     bool walkieTalkieEnabled = true;
