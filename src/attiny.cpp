@@ -456,7 +456,7 @@ private:
                 break;
             }
             case ADC_MUXPOS_AIN9_gc: { // charging voltage 
-                bool charging = value > 512;
+                bool charging = (!state_.state.batteryMode()) && value < 512;
                 if (state_.state.charging() != charging) {
                     cli();
                     state_.state.setCharging(charging);

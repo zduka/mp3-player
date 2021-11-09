@@ -76,6 +76,67 @@ public:
         return responseOk();
     }
 
+    bool getUpdate(JsonDocument & into, uint32_t offset = 0) {
+        into.clear();
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("GET /bot%lli:%s/getUpdates?limit=1&offset=%u"), id_, token_.c_str(), offset);
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        if (skipResponseHeaders() != HTTP_OK) {
+            https_.stop();
+            return false;
+        }
+        deserializeJson(into, https_);
+        https_.stop();
+        return true;
+    }
+
+    /** Getting a file is a two-step process.
+     */
+    bool getFile(char const * fileId, JsonDocument &fileInfo, File & into) {
+        fileInfo.clear();
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("GET /bot%lli:%s/getFile?file_id=%u"), id_, token_.c_str(), fileId);
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        if (skipResponseHeaders() != HTTP_OK) {
+            https_.stop();
+            return false;
+        }
+        deserializeJson(fileInfo, https_);
+        https_.stop();
+        // actually request the file
+        if (!connect())
+            return false;
+        HTTPS_SEND(PSTR("GET /file/bot%lli:%s/%s"), id_, token_.c_str(), fileInfo["result"]["file_path"].as<char const *>());
+        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nCache-Control: no-cache\r\n"));
+        HTTPS_SEND(PSTR("\r\n"));
+        if (skipResponseHeaders() != HTTP_OK) {
+            https_.stop();
+            return false;
+        }
+        // TODO actually store the file
+        uint32_t count = 0;
+        do {
+            if (https_.available()) {
+                while (https_.available()) {
+                    char c = https_.read();
+                    into.write(c);
+                    ++count;
+                    // TODO callback
+                }
+            } else {
+                delay(1);
+            }
+        } while (https_.connected());
+        https_.stop(); // just to be sure
+        return true;
+    }
+
+
+
     /** All is good.
      */
     static inline constexpr uint16_t HTTP_OK = 200;
@@ -164,75 +225,5 @@ private:
     int64_t id_;
     String token_;
 }; 
-
-/*
-class TelegramBotOld {
-public:
-
-
-    bool getUpdate(JsonDocument & into, uint32_t offset = 0) {
-        into.clear();
-        if (!connect())
-            return false;
-        HTTPS_SEND(PSTR("GET /bot%s:%s/getUpdates?limit=1&offset=%u"), id_.c_str(), token_.c_str(), offset);
-        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
-        HTTPS_SEND(PSTR("\r\n"));
-        if (skipResponseHeaders() != HTTP_OK) {
-            https_.stop();
-            return false;
-        }
-        deserializeJson(into, https_);
-        https_.stop();
-        return true;
-    }
-
-    / ** Getting a file is a two-step process.
-     * /
-    bool getFile(char const * fileId, JsonDocument &fileInfo, File & into) {
-        fileInfo.clear();
-        if (!connect())
-            return false;
-        HTTPS_SEND(PSTR("GET /bot%s:%s/getFile?file_id=%u"), id_.c_str(), token_.c_str(), fileId);
-        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
-        HTTPS_SEND(PSTR("\r\n"));
-        if (skipResponseHeaders() != HTTP_OK) {
-            https_.stop();
-            return false;
-        }
-        deserializeJson(fileInfo, https_);
-        https_.stop();
-        // actually request the file
-        if (!connect())
-            return false;
-        HTTPS_SEND(PSTR("GET /file/bot%s:%s/%s"), id_.c_str(), token_.c_str(), fileInfo["result"]["file_path"].as<char const *>());
-        HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nCache-Control: no-cache\r\n"));
-        HTTPS_SEND(PSTR("\r\n"));
-        if (skipResponseHeaders() != HTTP_OK) {
-            https_.stop();
-            return false;
-        }
-        // TODO actually store the file
-        uint32_t count = 0;
-        do {
-            if (https_.available()) {
-                while (https_.available()) {
-                    char c = https_.read();
-                    into.write(c);
-                    ++count;
-                    // TODO callback
-                }
-            } else {
-                delay(1);
-            }
-        } while (https_.connected());
-        https_.stop(); // just to be sure
-        return true;
-    }
-
-
-private:
-
-};
-*/
 
 #undef HTTPS_SEND

@@ -4,6 +4,16 @@ A simple and pretty low quality mp3 player, fm radio and a walkie-talkie with so
 
 The player can be controlled via two push-button knobs and more advanced settings can be specified via either the player's webpage, or the telegram bot used for the walkie-talkie mode. 
 
+# Hardware
+
+### USB-C Li-Ion charger
+
+Desolder both LEDs and then put a 10k resistor (1206 is fine) instead of the charging LED (red, closer to the USB connector). Connect the charging pin to the connector closer to the connector. Desolder R3 and replace it with ??? resistor (through hole) directly from GND to terminal 2 of TP4056 to set charging current to ???.
+
+### Assembly Order
+
+
+
 # Controls & Modes
 
 ## MP3 Player & FM Radio

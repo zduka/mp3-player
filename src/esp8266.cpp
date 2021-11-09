@@ -1446,15 +1446,6 @@ public:
         }
     }
 
-    /** Prepares the ESP to power off and informs AVR to cut power & go to sleep. 
-     */
-    static void PowerOff() {
-        LOG("Powering off");
-        msg::Send(msg::PowerOff{});
-        // do nothing as AVR is supposed to power off the chip immediately
-        while (true) { }
-    }
-
 private:
 
     
