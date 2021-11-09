@@ -342,7 +342,7 @@ private:
             peripheralPowerOn();
             // TODO show the wakeup progressbar *if* not in silent mode
             neopixels_.fill(Color::Black());
-            strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(state_.ex.settings.maxBrightness));
+            strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(maxBrightness_));
             effectTimeout_ = SPECIAL_LIGHTS_TIMEOUT;
             // TODO silent mode
         }
@@ -638,21 +638,21 @@ private:
         } else if ((state_.state.controlButtonDown() || state_.state.volumeButtonDown()) && longPressCounter_ < BUTTON_LONG_PRESS_THRESHOLD) {
             if (longPressCounter_ != 0) { // if the long press is not active, show progress bar in the color of the current mode
                 Color color = getModeColor(state_.state.mode(), state_.state.musicMode());
-                color = color.withBrightness(state_.ex.settings.maxBrightness);
+                color = color.withBrightness(maxBrightness_);
                 strip_.showBar(BUTTON_LONG_PRESS_TICKS - longPressCounter_, BUTTON_LONG_PRESS_TICKS, color);
                 step = 255;
             } else {
                 Color color;
                 // only control button long press - music mode change
                 if (! state_.state.volumeButtonDown())
-                    color = getModeColor(Mode::Music, state_.ex.getNextMusicMode(state_.state.mode(), state_.state.musicMode()));
+                    color = getModeColor(Mode::Music, getNextMusicMode(state_.state.mode(), state_.state.musicMode(), status_.radioEnabled));
                 // only volume button pressed (and not recording, which is handled above), toggle the lights settings mode on/off
                 else if (! state_.state.controlButtonDown()) // TODO what to with walkie-talkie long press
                     color = state_.state.mode() == Mode::Music ? MODE_COLOR_LIGHTS : getModeColor(Mode::Music, state_.state.musicMode());
                 // both buttons pressed, in music mode -> toggle music / walkie-talkie
                 else
                     color = state_.state.mode() == Mode::Music ? MODE_COLOR_WALKIE_TALKIE : getModeColor(Mode::Music, state_.state.musicMode());
-                color = color.withBrightness(state_.ex.settings.maxBrightness);
+                color = color.withBrightness(maxBrightness_);
                 strip_.fill(color);
             }
             effectTimeout_ = 1;
@@ -661,7 +661,7 @@ private:
             // we don't really have to do anything here when special effect is playing as the strip contains already the required values. Just count down to return back to the night lights mode
             if (--effectTimeout_ == 0) {
                 effectHue_ = state_.ex.lights.colorHue();
-                effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
+                effectColor_ = Color::HSV(effectHue_, 255, maxBrightness_);
                 if (state_.ex.lights.effect == LightsEffect::AudioLights) {
                     effect_.audio.maxDelta = 0;
                     effect_.audio.minDelta = 255;
@@ -689,7 +689,7 @@ private:
         // update the hue of the effect color, if in rainbow mode
         if (/*tickCountdown_ % 16 == 0 && */ state_.ex.lights.hue == LightsState::HUE_RAINBOW) {
             effectHue_ += 1;
-            effectColor_ = Color::HSV(effectHue_, 255, state_.ex.settings.maxBrightness);
+            effectColor_ = Color::HSV(effectHue_, 255, maxBrightness_);
         }
         //state_.ex.nightLight.effect = LightsEffect::AudioLights;
         switch (state_.ex.lights.effect) {
@@ -710,13 +710,13 @@ private:
             case LightsEffect::BinaryClock: {
                 switch (state_.ex.time.second() % (state_.state.batteryMode() ? 3 : 2)) {
                     case 0:
-                        showByte(state_.ex.time.hour(), BINARY_CLOCK_HOURS.withBrightness(state_.ex.settings.maxBrightness));
+                        showByte(state_.ex.time.hour(), BINARY_CLOCK_HOURS.withBrightness(maxBrightness_));
                         break;
                     case 1:
-                        showByte(state_.ex.time.minute(), BINARY_CLOCK_MINUTES.withBrightness(state_.ex.settings.maxBrightness));
+                        showByte(state_.ex.time.minute(), BINARY_CLOCK_MINUTES.withBrightness(maxBrightness_));
                         break;
                     case 2:
-                        strip_.showBar(min(state_.ex.measurements.vcc, 420) - 340,80, BINARY_CLOCK_BATTERY.withBrightness(state_.ex.settings.maxBrightness));
+                        strip_.showBar(min(state_.ex.measurements.vcc, 420) - 340,80, BINARY_CLOCK_BATTERY.withBrightness(maxBrightness_));
                         break;
                 }
                 return;
@@ -791,7 +791,7 @@ private:
      */
     static void lightsNotifications() {
         if (state_.state.wifiStatus() == WiFiStatus::Connecting) {
-            neopixels_.showBarCentered(tickCountdown_ % 128, 128, Color::Blue().withBrightness(state_.ex.settings.maxBrightness));
+            neopixels_.showBarCentered(tickCountdown_ % 128, 128, Color::Blue().withBrightness(maxBrightness_));
         } else {
             bool draw = state_.state.charging() 
                        || (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
@@ -806,9 +806,9 @@ private:
                 case 1:
                 case 2:
                     if (state_.state.wifiStatus() == WiFiStatus::Connected)
-                        neopixels_[0] = Color::Blue().withBrightness(state_.ex.settings.maxBrightness);
+                        neopixels_[0] = Color::Blue().withBrightness(maxBrightness_);
                     else if (state_.state.wifiStatus() == WiFiStatus::AP)
-                        neopixels_[0] = Color::Cyan().withBrightness(state_.ex.settings.maxBrightness);
+                        neopixels_[0] = Color::Cyan().withBrightness(maxBrightness_);
                     break;
                 case 16:
                 case 17:
@@ -817,15 +817,15 @@ private:
                 case 49:
                 case 50:
                     if (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
-                        neopixels_[7] = Color::Red().withBrightness(state_.ex.settings.maxBrightness);
+                        neopixels_[7] = Color::Red().withBrightness(maxBrightness_);
                     else if (state_.state.charging())
-                        neopixels_[7] = Color::Green().withBrightness(state_.ex.settings.maxBrightness);
+                        neopixels_[7] = Color::Green().withBrightness(maxBrightness_);
                     break;
                 case 32:
                 case 33:
                 case 34:
                     if (state_.state.messageReady())
-                        neopixels_[0] = Color::Yellow().withBrightness(state_.ex.settings.maxBrightness);
+                        neopixels_[0] = Color::Yellow().withBrightness(maxBrightness_);
                     break;
                 default:
                     break;
@@ -966,6 +966,15 @@ private:
                 memcpy(target, i2cRxBuffer_ + sizeof(msg::SetExtendedState), m->size);
                 break;
             }
+            case msg::SetSettings::Id: {
+                auto m = pointer_cast<msg::SetSettings*>(& i2cRxBuffer_);
+                LOG("cmd SetSettings");
+                maxBrightness_ = m->maxBrightness;
+                status_.radioEnabled = m->radioEnabled;
+                status_.walkieTalkieEnabled = m->walkieTalkieEnabled;
+                status_.lightsEnabled = m->lightsEnabled;
+                break;
+            }
             case msg::PowerOff::Id: {
                 LOG("cmd PowerOff");
                 // TODO
@@ -1052,7 +1061,7 @@ private:
                 status_.recording = true;
                 startAudioCapture(AudioADCSource::Mic);
                 // set the effect color to mode color for the lights bar from microphone
-                effectColor_ = MODE_COLOR_WALKIE_TALKIE.withBrightness(state_.ex.settings.maxBrightness);
+                effectColor_ = MODE_COLOR_WALKIE_TALKIE.withBrightness(maxBrightness_);
                 break;            
             }
             case msg::StopRecording::Id: {
@@ -1100,14 +1109,11 @@ private:
     inline static uint8_t i2cRxBuffer_[32];
     inline static uint8_t i2cRxOffset_ = 0;
 
-//@}
-
-/** \name I2C Transmissible data
- 
-    */
-//@{
-
+    /** I2C transmissible data.
+     */
     inline static AVRState state_;
+
+//@}
 
 //@}
 
@@ -1195,6 +1201,7 @@ private:
 //@}
 
     inline static volatile struct {
+
         /** If true, AVR should sleep, or is currently sleeping.
          */
         bool sleep : 1;
@@ -1224,9 +1231,18 @@ private:
          */
         bool espBusy : 1;
 
+        bool radioEnabled : 1;
+        bool walkieTalkieEnabled : 1;
+        bool lightsEnabled : 1;
+
 
 
     } status_;
+
+    /** Max brightness of the LED strip. 
+     */
+    static inline uint8_t maxBrightness_ = DEFAULT_BRIGHTNESS;
+
 
     static inline uint8_t undervoltageCountdown_ = UNDERVOLTAGE_TIMEOUT;
     static inline uint16_t irqCountdown_ = 0;

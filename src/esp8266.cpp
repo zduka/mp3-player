@@ -70,22 +70,22 @@ public:
         updateState();
         getExtendedState(ex_);
         ex_.log();
-        send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         // initialize the chip and core peripherals
         initializeESP();
         initializeLittleFS();
         initializeWiFi();
         initializeServer();
-        send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         initializeSDCard();
-        send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
         initializePlaylists();
-        send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         initializeRadioStations();
-        send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         initializeWalkieTalkie();
-        send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         //initializeSettings();
         // if this is the initial state, write basic settings from the mode configuration to cached state
         if (state_.initialPowerOn()) {
@@ -95,7 +95,8 @@ public:
         }
         // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
-        send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(ex_.settings.maxBrightness)});
+        send(msg::SetSettings{settings_});
+        send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
         // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
@@ -394,7 +395,7 @@ private:
     static void controlLongPress() {
         LOG("Control long press");
         if (state_.mode() == Mode::Music) {
-            setMusicMode(ex_.getNextMusicMode(state_.mode(), state_.musicMode()));
+            setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled));
         } else {
             setMode(Mode::Music);
         }
@@ -422,17 +423,17 @@ private:
                 setNightLightHue(state_.controlValue());
                 if (ex_.lights.hue == LightsState::HUE_RAINBOW)
                     send(msg::LightsColors{
-                        Color::HSV(0 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(1 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(2 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(3 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(4 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(5 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(6 << 13, 255, ex_.settings.maxBrightness),
-                        Color::HSV(7 << 13, 255, ex_.settings.maxBrightness)
+                        Color::HSV(0 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(1 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(2 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(3 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(4 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(5 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(6 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(7 << 13, 255, settings_.maxBrightness)
                     });
                 else
-                    send(msg::LightsBar{8, 8, Color::HSV(ex_.lights.colorHue(), 255, ex_.settings.maxBrightness)});
+                    send(msg::LightsBar{8, 8, Color::HSV(ex_.lights.colorHue(), 255, settings_.maxBrightness)});
                 break;
             }
             default:
@@ -925,7 +926,7 @@ private:
     static void startRecording() {
         if (!recordingReady_ || !recording_.begin("/rec.wav")) {
             LOG("Unable to open recording target file or recording not ready");
-            send(msg::LightsFill{Color::Red().withBrightness(ex_.settings.maxBrightness)});
+            send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
         } else {
             LOG("Recording...");
             status_.recording = true;
@@ -942,7 +943,7 @@ private:
             status_.recording = false;
             if (cancel) {
                 LOG("Recording cancelled");
-                send(msg::LightsFill{Color::Red().withBrightness(ex_.settings.maxBrightness)});
+                send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
                 recordingReady_ = true;
             } else {
                 LOG("Recording done");
@@ -950,9 +951,9 @@ private:
                 if (f.size() >= minRecordingLength_) {
                     send(msg::SetESPBusy{true});
                     bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
-                        send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(ex_.settings.maxBrightness), 255));    
+                        send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
                     });
-                    send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(ex_.settings.maxBrightness), 32));
+                    send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 32));
                     send(msg::SetESPBusy{false});
                 }
                 // TODO else do stuff
@@ -1282,6 +1283,8 @@ private:
     static inline volatile struct {
         bool irq : 1;
         bool recording : 1;
+
+
 
     } status_;
 

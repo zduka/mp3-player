@@ -34,6 +34,19 @@ namespace msg {
         }
     );
 
+    MESSAGE(SetSettings,
+        uint8_t maxBrightness;
+        bool radioEnabled;
+        bool walkieTalkieEnabled;
+        bool lightsEnabled;
+        SetSettings(ESPSettings const & from):
+            maxBrightness{from.maxBrightness},
+            radioEnabled{from.radioEnabled},
+            walkieTalkieEnabled{from.walkieTalkieEnabled},
+            lightsEnabled{from.lightsEnabled} {
+        }
+    );
+
     MESSAGE(PowerOff);
 
     MESSAGE(SetMode,

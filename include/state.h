@@ -364,59 +364,6 @@ public:
 
 static_assert(sizeof(Measurements) == 4);
 
-/** Player settings. 
- */
-class Settings {
-public:
-
-    Settings() {
-        raw_ =  ENABLE_RADIO | ENABLE_WALKIE_TALKIE | ENABLE_LIGHTS;
-    }
-
-    bool radioEnabled() volatile {
-        return raw_ & ENABLE_RADIO;
-    }
-
-    bool walkieTalkieEnabled() volatile {
-        return raw_ & ENABLE_WALKIE_TALKIE;
-    }
-
-    bool NightLightEnabled() volatile {
-        return raw_ & ENABLE_LIGHTS;
-    }
-
-    void setRadioEnabled(bool value) {
-        raw_ = value ? (raw_ | ENABLE_RADIO) : (raw_ & ~ENABLE_RADIO);
-    }
-
-    void setWalkieTalkieEnabled(bool value) {
-        raw_ = value ? (raw_ | ENABLE_WALKIE_TALKIE) : (raw_ & ~ENABLE_WALKIE_TALKIE);
-    }
-
-    void setNightLightEnabled(bool value) {
-        raw_ = value ? (raw_ | ENABLE_LIGHTS) : (raw_ & ~ENABLE_LIGHTS);
-    }
-
-    void log() const {
-        LOG("Settings:");
-        LOG("    maxBrightness: %u", maxBrightness);
-    }
-
-
-    uint8_t maxBrightness = DEFAULT_BRIGHTNESS; 
-
-private:
-    static constexpr uint16_t ENABLE_RADIO = 1 << 0;
-    static constexpr uint16_t ENABLE_WALKIE_TALKIE = 1 << 1;
-    static constexpr uint16_t ENABLE_LIGHTS = 1 << 2;
-
-    uint16_t raw_;
-
-} __attribute__((packed)); // Settings
-
-static_assert(sizeof(Settings) == 3);
-
-
 /** State for the MP3 mode. 
  */
 class MP3State {
@@ -504,7 +451,7 @@ static_assert(sizeof(LightsState) == 2);
 class ExtendedState {
 public:
     Measurements measurements; 
-    Settings settings;
+    //Settings settings;
     MP3State mp3;
     RadioState radio;
     WalkieTalkieState walkieTalkie;
@@ -512,22 +459,9 @@ public:
     DateTime time;
     DateTime alarm;
 
-
-    /** Returns the next music mode. 
-     
-        This is the current music mode if the mode is not music, or the other music mode (if available) and current mode is music. 
-     */
-    MusicMode getNextMusicMode(Mode mode, MusicMode current) volatile {
-        if (mode != Mode::Music)
-            return current;
-        if (current == MusicMode::MP3 && settings.radioEnabled())
-            return MusicMode::Radio;
-        return MusicMode::MP3;
-    }
-
     void log() const {
         measurements.log();
-        settings.log();
+        //settings.log();
         mp3.log();
         radio.log();
         walkieTalkie.log();
@@ -536,8 +470,19 @@ public:
 
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 27);
+static_assert(sizeof(ExtendedState) == 24);
 
+/** Returns the next music mode. 
+ 
+    This is the current music mode if the mode is not music, or the other music mode (if available) and current mode is music. 
+ */
+inline MusicMode getNextMusicMode(Mode mode, MusicMode current, bool radioEnabled) {
+    if (mode != Mode::Music)
+        return current;
+    if (current == MusicMode::MP3 && radioEnabled)
+        return MusicMode::Radio;
+    return MusicMode::MP3;
+}
 
 /** Settings stored on the SD card and used by the ESP alone. 
  
@@ -566,8 +511,17 @@ public:
     /** Timezone offset in seconds. 
      */
     int32_t timezone;
+
+    uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
+
+    bool radioEnabled = true;
+    bool lightsEnabled = true;
+    bool walkieTalkieEnabled = true;
+
     Radio radio;
     WalkieTalkie walkieTalkie;
+
+
 
 
 
