@@ -216,7 +216,7 @@ private:
         if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) {
             LOG("  power-on reset");
             // set state to initial power on and proceed with a wakeup
-            state_.state.setInitialPowerOn(true);
+            state_.state.setMode(Mode::InitialPowerOn);
         }
         if (RSTCTRL.RSTFR & RSTCTRL_BORF_bm)
             LOG("  brown-out reset");
@@ -255,7 +255,11 @@ private:
     }
     
     static void tick() {
-        //digitalWrite(DEBUG_PIN, HIGH);            
+        //digitalWrite(DEBUG_PIN, HIGH); 
+        if (state_.state.mode() == Mode::Sleep) {
+            state_.state.setMode(Mode::Music);
+            sleep();           
+        }
         // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
         if ((status_.irq || status_.espBusy) && (--irqCountdown_ == 0))
              resetESP();
@@ -270,8 +274,9 @@ private:
             state_.ex.time.secondTick();
             // TODO actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
             if (--powerCountdown_ == 0) {
-                LOG("power countdown timeout");
-                sleep();   
+                LOG("ESP power off countdown");
+                state_.state.setMode(Mode::ESPOff);
+                setIrq();
             }
         }
         //digitalWrite(DEBUG_PIN, LOW);
@@ -281,8 +286,6 @@ private:
      */
     static void sleep() {
         LOG("entering sleep");
-        // when we wake up, it will be user wake up, not initial power on
-        state_.state.setInitialPowerOn(false);
         do { // wrapped in a loop to account to allow wakeup to re-enter sleep immediately (such as when low volatge, etc.)
             // disable rotary encoder interrupts so that they do not wake us from sleep
             control_.clearInterrupt();
@@ -975,9 +978,9 @@ private:
                 status_.lightsEnabled = m->lightsEnabled;
                 break;
             }
-            case msg::PowerOff::Id: {
-                LOG("cmd PowerOff");
-                // TODO
+            case msg::Sleep::Id: {
+                LOG("cmd Sleep");
+                state_.state.setMode(Mode::Sleep);
                 break;
             }
             case msg::SetMode::Id: {

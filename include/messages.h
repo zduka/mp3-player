@@ -47,7 +47,7 @@ namespace msg {
         }
     );
 
-    MESSAGE(PowerOff);
+    MESSAGE(Sleep);
 
     MESSAGE(SetMode,
         Mode mode;

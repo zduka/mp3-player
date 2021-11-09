@@ -88,7 +88,7 @@ public:
         send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         //initializeSettings();
         // if this is the initial state, write basic settings from the mode configuration to cached state
-        if (state_.initialPowerOn()) {
+        if (state_.mode() == Mode::InitialPowerOn) {
             LOG("Initial power on");
             ex_.radio.stationId = 0;
             ex_.radio.frequency = radioStations_[0];
@@ -301,6 +301,8 @@ private:
             State old = state_;
             Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
             // check available events and react accordingly
+            if (state_.mode() == Mode::ESPOff && old.mode() != Mode::ESPOff)
+                powerOff();
             if (state_.controlTurn()) 
                 controlTurn();
             if (state_.controlButtonDown() != old.controlButtonDown())
@@ -327,7 +329,17 @@ private:
             while (n-- > 0) 
                 Wire.read();
         }
+    }
 
+    /** Power off the ESP. 
+     */
+    static void powerOff() {
+        LOG("PowerOff");
+        stop();
+        send(msg::Sleep{});
+        LOG("All done");
+        while(true)
+            delay(1);
     }
 
     //@}

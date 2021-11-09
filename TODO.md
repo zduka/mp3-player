@@ -42,3 +42,27 @@ Enters alarm clock mode, plays the alarm. Short press snoozes, Long press turns 
 # Sync Mode
 
 Run silently, check notifications & update time. When to run? Every N hours, if active, delay until poweroff.
+
+
+
+    power-on reset
+    Wakeup
+    Measurements:
+        vcc: 0
+        temp: 0
+    MP3 State:
+        playlist: 0
+        track: 0
+    Radio State:
+        stationId: 0
+        frequency: 0
+    Walkie-Talkie State:
+        updateId: 
+    Lights State:
+        effect: 16129
+        hue: 32
+    3V3 PowerOn
+    cmd SetExtendedState s: 24, o: 0
+    cmd SetSettings
+    cmd SetMode m: 0, 0
+    cmd SetControlRange v: 0, m: 2

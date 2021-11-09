@@ -11,15 +11,28 @@ enum class MusicMode : uint8_t {
     Radio
 };
 
+/** Main mode. 
+ */
 enum class Mode : uint8_t {
-    Music,
-    Lights,
-    WalkieTalkie,
+    Music = 0,
+    Disco = 1,
+    Lights = 2,
+    WalkieTalkie = 3,
     // the alarm clock and birthday greeting modes are not directly accessible via controls, but are automatically selected by the system when appropriate
-    AlarmClock,
-    BirthdayGreeting,
+    Alarm = 4,
+    BirthdayGreeting = 5,
     // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
-    Sync,
+    Sync = 6,
+
+    /** Initial mode after power on of the AVR as opposed to wakeup. 
+     */
+    InitialPowerOn = 13,
+    /** Signals the AVR to sleep.
+     */
+    Sleep = 14,
+    /** Signals the ESP to poweroff so that AVR can go to sleep.
+     */
+    ESPOff = 15
 }; // Mode
 
 enum class WiFiStatus : uint8_t {
@@ -238,7 +251,7 @@ public:
         This is either mp3, or radio. 
      */
     MusicMode musicMode() const volatile {
-        return static_cast<MusicMode>((mode_ & MUSIC_MODE_MASK) >> 3);
+        return static_cast<MusicMode>((mode_ & MUSIC_MODE_MASK) >> 4);
     }
 
     void setMusicMode(MusicMode mode) volatile {
@@ -263,18 +276,6 @@ public:
             mode_ &= ~IDLE_MASK;
     }
 
-    /** Returns true if the current power on state is the initial state, i.e. if the AVR chip has also been power on as well (such as when batteries were inserted, or recharged from BOD) as opposed to wake up from sleep. 
-     */
-    bool initialPowerOn() const volatile {
-        return mode_ & INITIAL_POWER_ON_MASK;
-    }
-
-    void setInitialPowerOn(bool value) volatile {
-        if (value)
-            mode_ |= INITIAL_POWER_ON_MASK;
-        else
-            mode_ &= ~INITIAL_POWER_ON_MASK;
-    }
 
     /** WiFi mode. 
      */
@@ -289,13 +290,11 @@ public:
 
 
 private:
-    static constexpr uint8_t MODE_MASK = 7;
-    static constexpr uint8_t MUSIC_MODE_MASK = 1 << 3;
-    static constexpr uint8_t IDLE_MASK = 1 << 4;
-    static constexpr uint8_t INITIAL_POWER_ON_MASK = 1 << 5;
+    static constexpr uint8_t MODE_MASK = 15;
+    static constexpr uint8_t MUSIC_MODE_MASK = 1 << 4;
+    static constexpr uint8_t IDLE_MASK = 1 << 5;
     static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
     uint8_t mode_;
-
 
 //@}
 
