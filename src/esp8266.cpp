@@ -49,6 +49,13 @@
 class Player {
 public:
 
+    static inline char const * SETTINGS_FILE = "player/settings.json";
+    static inline char const * MP3_SETTINGS_FILE = "player/playlists.json";
+    static inline char const * RADIO_SETTINGS_FILE = "player/radio.json";
+    static inline char const * WALKIE_TALKIE_SETTINGS_FILE = "player/bot.json";
+    static inline char const * WALKIE_TALKIE_CERT_FILE = "player/cert.txt";
+    static inline char const * WIFI_SETTINGS_FILE = "player/wifi.json";
+
     /** Initializes the player
      */
     static void initialize() {
@@ -82,11 +89,11 @@ public:
         // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
         initializePlaylists();
         send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
-        initializeRadioStations();
+        initializeRadio();
         send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         initializeWalkieTalkie();
         send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
-        //initializeSettings();
+        initializeSettings();
         // if this is the initial state, write basic settings from the mode configuration to cached state
         if (state_.mode() == Mode::InitialPowerOn) {
             LOG("Initial power on");
@@ -100,10 +107,10 @@ public:
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
         // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-        state_.setMode(Mode::WalkieTalkie);
-        setMode(Mode::Music);
-        //state_.setMode(Mode::Music);
-        //setMode(Mode::WalkieTalkie);
+        //state_.setMode(Mode::WalkieTalkie);
+        //setMode(Mode::Music);
+        state_.setMode(Mode::Music);
+        setMode(Mode::WalkieTalkie);
     }
 
     static void loop() {
@@ -177,12 +184,57 @@ private:
     }
 
     /** Initializes the global settings from the SD card.
+     
+        The settings are split into multiple files so that we can be sure we fit in static JSON buffers. 
 
          
      */
     static void initializeSettings() {
-
+        StaticJsonDocument<1024> json;
+        File f = SD.open(SETTINGS_FILE, FILE_READ);
+        if (f && deserializeJson(json, f) == DeserializationError::Ok) {
+            setSettings(json);
+            f.close();
+        }
     }
+
+    static void setSettings(JsonDocument const & json) {
+        LOG("Setting general settings");
+        settings_.speakerEnabled = json["speakerEnabled"].as<bool>();
+        settings_.maxSpeakerVolume = json["maxSpeakerVolume"].as<uint8_t>();
+        settings_.maxHeadphonesVolume = json["maxHeadphonesVolume"].as<uint8_t>();
+        settings_.timezone = json["timezone"].as<int32_t>();
+        settings_.maxBrightness = json["maxBrightness"].as<uint8_t>();
+        settings_.keepWiFiAlive = json["keepWiFiAlive"].as<bool>();
+        settings_.radioEnabled = json["radioEnabled"].as<bool>();
+        settings_.lightsEnabled = json["lightsEnabled"].as<bool>();
+        settings_.walkieTalkieEnabled = json["walkieTalkieEnabled"].as<bool>();
+    }
+
+    static int settingsToJson(char * buffer, int bufLen) {
+        return snprintf_P(buffer, bufLen, PSTR("{"
+        "speakerEnabled:%u,"
+        "maxSpeakerVolume:%u,"
+        "maxHeadphonesVolume:%u,"
+        "timezone:%lli,"
+        "maxBrightness:%u,"
+        "keepWiFiAlive:%u,"
+        "radioEnabled:%u,"
+        "lightsEnabled:%u,"
+        "walkieTalkieEnabled:%u"
+        "}"), 
+        settings_.speakerEnabled,
+        settings_.maxSpeakerVolume,
+        settings_.maxHeadphonesVolume,
+        settings_.timezone,
+        settings_.maxBrightness,
+        settings_.keepWiFiAlive,
+        settings_.radioEnabled,
+        settings_.lightsEnabled,
+        settings_.walkieTalkieEnabled
+        );
+    }
+
     //@}
 
     /** \name ESP Core 
@@ -648,9 +700,6 @@ private:
         }
     }
 
-    static void setVolume() {
-    }
-
     //@}
 
     /** \name MP3 Mode 
@@ -658,7 +707,7 @@ private:
     //@{
     static void initializePlaylists() {
         LOG("Initializing MP3 Playlists...");
-        File f = SD.open("player/playlists.json", FILE_READ);
+        File f = SD.open(MP3_SETTINGS_FILE, FILE_READ);
         if (f) {
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
@@ -674,11 +723,11 @@ private:
                     }
                 }
             } else {
-                ERROR("player/playlists.json is not valid JSON file");
+                ERROR("%s is not valid JSON file", MP3_SETTINGS_FILE);
             }
             f.close();
         } else {
-            LOG("player/playlists.json not found");
+            LOG("%s not found", MP3_SETTINGS_FILE);
         }
         // TODO add the feed me with music playlist if there are no playlists provided
         //if (numPlaylists_ == 0)
@@ -831,23 +880,25 @@ private:
     /** Initializes the predefined radio stations from the SD card. 
 
      */
-    static void initializeRadioStations() {
+    static void initializeRadio() {
         LOG("Initializing radio stations...");
         numRadioStations_ = 0;
-        File f = SD.open("player/stations.json", FILE_READ);
+        File f = SD.open(RADIO_SETTINGS_FILE, FILE_READ);
         if (f) {
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
-                for (JsonVariant station : json.as<JsonArray>()) {
+                for (JsonVariant station : json["stations"].as<JsonArray>()) {
                     radioStations_[numRadioStations_++] = station["freq"];
                     LOG("  %s: %u", station["name"].as<char const *>(), station["freq"].as<unsigned>());
                 }
+                forceMono_ = json["forceMono"].as<bool>();
+                manualTuning_ = json["manualTuning"].as<bool>();
             } else {
                 //LOG("  radio/stations.json file not found");
             }
             f.close();
         } else {
-            LOG("  radio/stations.json file not found");
+            LOG("  %s file not found", RADIO_SETTINGS_FILE);
         }
         // if the current frequency is out of bounds, set it to the frequency of the first station, which just means that when invalid state, default to the first station
         if (ex_.radio.frequency < RADIO_FREQUENCY_MIN || ex_.radio.frequency > RADIO_FREQUENCY_MAX)
@@ -856,7 +907,7 @@ private:
 
     static void radioPlay() {
         radio_.init();
-        radio_.setMono(settings_.radio.forceMono || ! state_.headphonesConnected());
+        radio_.setMono(forceMono_ || ! state_.headphonesConnected());
         radio_.setVolume(state_.volumeValue());
         setRadioFrequency(ex_.radio.frequency);
         setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
@@ -900,6 +951,8 @@ private:
     static inline RDA5807M radio_;
     static inline uint8_t numRadioStations_ = 0;
     static inline uint16_t radioStations_[8];
+    static inline bool forceMono_ = false;
+    static inline bool manualTuning_ = true;
 
     //@}
 
@@ -910,16 +963,16 @@ private:
     //@{
 
     static void initializeWalkieTalkie() {
-        File f = SD.open("player/bot.json", FILE_READ);
+        File f = SD.open(WALKIE_TALKIE_SETTINGS_FILE, FILE_READ);
         if (f) {
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
                 int64_t id = json["id"].as<int64_t>();
                 String token = json["token"];
-                settings_.walkieTalkie.adminId = json["adminId"].as<int64_t>();
-                settings_.walkieTalkie.chatId = json["chatId"].as<int64_t>();
-                LOG("Walkie-Talkie:\n  Bot %lli\n  Chat %lli\n  Token: %s\n  AdminId: %lli", id, settings_.walkieTalkie.chatId, token.c_str(), settings_.walkieTalkie.adminId);
-                File cf = SD.open("/player/cert.txt", FILE_READ);
+                telegramAdminId_ = json["adminId"].as<int64_t>();
+                telegramChatId_ = json["chatId"].as<int64_t>();
+                LOG("Walkie-Talkie:\n  Bot %lli\n  Chat %lli\n  Token: %s\n  AdminId: %lli", id, telegramChatId_, token.c_str(), telegramAdminId_);
+                File cf = SD.open(WALKIE_TALKIE_CERT_FILE, FILE_READ);
                 if (cf && cf.size() < 2048) {
                     String cert = cf.readString();
                     // TODO security is hard, the certificate only works if time is proper...
@@ -963,7 +1016,7 @@ private:
                 File f = SD.open("/rec.wav", FILE_READ);
                 if (f.size() >= minRecordingLength_) {
                     send(msg::SetESPBusy{true});
-                    bot_.sendAudio(settings_.walkieTalkie.chatId, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
+                    bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
                         send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
                     });
                     send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 32));
@@ -1009,6 +1062,9 @@ private:
     /** The telegram bot that handles the communication. 
      */
     static inline TelegramBot bot_;
+
+    static inline int64_t telegramChatId_;
+    static inline int64_t telegramAdminId_;
 
     static inline uint16_t minRecordingLength_ = 8000;
 
@@ -1073,7 +1129,7 @@ private:
         WiFi.disconnect();
         WiFi.scanNetworksAsync([](int n) {
             LOG("WiFi: Networks found: %i", n);
-            File f = SD.open("player/wifi.json", FILE_READ);
+            File f = SD.open(WIFI_SETTINGS_FILE, FILE_READ);
             if (f) {
                 StaticJsonDocument<1024> json;
                 if (deserializeJson(json, f) == DeserializationError::Ok) {
@@ -1096,7 +1152,7 @@ private:
                 }
                 f.close();
             } else {
-                LOG("WiFi: No player/wifi.json found");
+                LOG("WiFi: No %s found", WIFI_SETTINGS_FILE);
             }
             WiFi.scanDelete();
             // if no networks were recognized, start AP
@@ -1105,7 +1161,7 @@ private:
     }
 
     static void startWiFiAP() {
-        File f = SD.open("player/wifi.json", FILE_READ);
+        File f = SD.open(WIFI_SETTINGS_FILE, FILE_READ);
         if (f) {
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
@@ -1129,6 +1185,7 @@ private:
                     send(msg::SetWiFiStatus{WiFiStatus::AP});
                 }
             }
+            f.close();
         }
     }
 
@@ -1184,8 +1241,10 @@ private:
         server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
         server_.on("/status", httpStatus);
+        server_.on("/generalSettings", httpSettings);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
+        server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
         server_.begin();
         MDNS.begin("mp3-player");
     }
@@ -1217,6 +1276,7 @@ private:
     /** Returns the status of the player.
      */ 
     static void httpStatus() {
+        LOG("http status");
         char buf[300];
         int len = snprintf_P(buf, sizeof(buf), PSTR("{"
         "vcc:%u,"
@@ -1237,7 +1297,14 @@ private:
         loopCount_,
         maxLoopTime_
         );
-        server_.send(200, "text/json", buf, len);
+        server_.send(200, JSON_MIME, buf, len);
+    }
+
+    static void httpSettings() {
+        LOG("http settings");
+        char buffer[1024];
+        int len = settingsToJson(buffer, sizeof(buffer));
+        server_.send(200, JSON_MIME, buffer, len);
     }
 
     /** Lists a directory on the SD card and returns its contents in a JSON format. 
@@ -1249,7 +1316,7 @@ private:
         if (!d || !d.isDirectory())
             return http404();
         server_.setContentLength(CONTENT_LENGTH_UNKNOWN);            
-        server_.send(200, "text/json", "");
+        server_.send(200, JSON_MIME, "");
         server_.sendContent("[");
         int n = 0;
         char buf[100];
@@ -1271,20 +1338,54 @@ private:
      */
     static void httpSD() {
         String const & path = server_.arg("path");
-        LOG("WebServer: Serving file %s", path.c_str());
+        LOG("http sd: %s", path.c_str());
         File f = SD.open(path.c_str(), FILE_READ);
         if (!f || !f.isFile())
             return http404();
+        char const * mime = GENERIC_MIME;
         if (path.endsWith("mp3"))
-            server_.streamFile(f, mp3Mime_);
-        else
-            server_.streamFile(f, genericMime_);
+            mime = MP3_MIME;
+        else if (path.endsWith("json"))
+            mime = JSON_MIME;
+        server_.streamFile(f, mime);
         f.close();
     }
 
+    static void httpSDUpload() {
+        server_.send(200);
+    }
+
+    static void httpSDUploadHandler() {
+        HTTPUpload& upload = server_.upload();
+        switch (upload.status) {
+            case UPLOAD_FILE_START: {
+                LOG("http file upload start: %s", server_.arg("path").c_str());
+                uploadFile_ = SD.open(server_.arg("path").c_str(), "w");
+                break;
+            }
+            case UPLOAD_FILE_WRITE: {
+                if (uploadFile_)
+                    uploadFile_.write(upload.buf, upload.currentSize);
+                break;
+            }
+            case UPLOAD_FILE_END: {
+                LOG("http upload done.");
+                if (uploadFile_) {
+                    uploadFile_.close();
+                    server_.send(200, JSON_MIME, "{ response: 200 }");
+                } else {
+                    server_.send(500, JSON_MIME, "{ response: 500 }");
+                }
+                break;
+            }
+        }
+    }
+
     static inline ESP8266WebServer server_{80};
-    static inline String const genericMime_{"text/plain"};
-    static inline String const mp3Mime_{"audio/mp3"};
+    static inline File uploadFile_;
+    static inline char const * GENERIC_MIME = "text/plain";
+    static inline char const * MP3_MIME = "audio/mp3";
+    static inline char const * JSON_MIME = "text/json";
 
     //@}
 

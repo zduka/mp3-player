@@ -70,7 +70,11 @@
             </div>
             <div class="panel-body">
                 Select an MP3 file to upload to the server:
-                <input class="btn btn-default" type="file" id="mp3-uploader" name="filename">
+                <form method="post" enctype="multipart/form-data" action="/sdUpload">
+                    <input id="path" name="path">
+                    <input class="btn btn-default" type="file" id="mp3-uploader" name="filename">
+                    <input class="button" type="submit" value="Upload">
+                </form>
             </div>
         </div>
 

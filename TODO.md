@@ -2,17 +2,13 @@
 
 # SW
 
+- pressing control when idle? 
+
 - should notification light do stuff if we are in non music mode? 
 
 - radio frequency right after start still does not work well, maybe bigger interval
 
 - headphones can be set to output and LOW to disable speaker any time
-
-- add the following to the settings:
-    - power off timeout
-    - max speaker volume (4bits)
-    - max headphones volume (4bits)
-- read from SD card (some JSON)
 
 # ATTiny
 
@@ -41,3 +37,7 @@ Enters alarm clock mode, plays the alarm. Short press snoozes, Long press turns 
 # Sync Mode
 
 Run silently, check notifications & update time. When to run? Every N hours, if active, delay until poweroff.
+
+# Battery Times
+
+9:05 - 11:50 (4.2 - 4.08)

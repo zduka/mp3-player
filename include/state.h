@@ -485,47 +485,26 @@ inline MusicMode getNextMusicMode(Mode mode, MusicMode current, bool radioEnable
 
 /** Settings stored on the SD card and used by the ESP alone. 
  
+    TODO move to esp only
  */  
 class ESPSettings {
 public:
-    class Radio {
-    public:
-        bool manualTuning = true;
-        bool forceMono = false;
-    };
-
-    class WalkieTalkie {
-    public:
-
-        /** The chat id audio files are sent to and received from. 
-         */
-        int64_t chatId;
-
-        int64_t adminId;
-    };
 
     bool speakerEnabled = true;
-    uint8_t maxSpeakerVolume;
-    uint8_t maxHeadphonesVolume;
+    uint8_t maxSpeakerVolume = 15;
+    uint8_t maxHeadphonesVolume = 15;
     /** Timezone offset in seconds. 
      */
-    int32_t timezone;
+    int32_t timezone = 0;
 
     uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
 
     /** If true, WiFi is not disconnected when leaving the walkie-talkie mode. 
      */
-    bool keepWiFiAlive = false;
+    bool keepWiFiAlive = true;
 
     bool radioEnabled = true;
     bool lightsEnabled = true;
     bool walkieTalkieEnabled = true;
-
-    Radio radio;
-    WalkieTalkie walkieTalkie;
-
-
-
-
 
 }; // ESPSettings
