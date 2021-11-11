@@ -983,6 +983,13 @@ private:
                 state_.state.setMode(Mode::Sleep);
                 break;
             }
+            /** Resets the AVR (software reset).
+             */
+            case msg::Reset::Id: {
+                LOG("cmd reset");
+                _PROTECTED_WRITE(RSTCTRL.SWRR,1);
+                break;
+            }
             case msg::SetMode::Id: {
                 auto m = pointer_cast<msg::SetMode*>(& i2cRxBuffer_);
                 LOG("cmd SetMode m: %u, %u", static_cast<uint8_t>(m->mode), static_cast<uint8_t>(m->musicMode));

@@ -95,6 +95,10 @@ Contains up to 8 predefined radio stations, one station per line. The line alway
 
 ### Walkie-Talkie
 
+    \setprivacy
+    bot name
+    disable
+
 The walkie-talkie uses an unique telegram bot that must be assigned to each player. Its configuration files cover the bot identification and a list of telegram chat ids the player will react & send voice to:
 
 `bot/token.txt`

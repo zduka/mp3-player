@@ -76,11 +76,11 @@ public:
         return responseOk();
     }
 
-    bool getUpdate(JsonDocument & into, uint32_t offset = 0) {
+    bool getUpdate(JsonDocument & into, int64_t offset = 0) {
         into.clear();
         if (!connect())
             return false;
-        HTTPS_SEND(PSTR("GET /bot%lli:%s/getUpdates?limit=1&offset=%u"), id_, token_.c_str(), offset);
+        HTTPS_SEND(PSTR("GET /bot%lli:%s/getUpdates?limit=1&offset=%lli"), id_, token_.c_str(), offset);
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("\r\n"));
         if (skipResponseHeaders() != HTTP_OK) {
@@ -184,7 +184,6 @@ private:
             if (https_.available()) {
                 while (https_.available()) {
                     char c = https_.read();
-                    Serial.print(c);
                     last = (last << 8) | c;
                     if (last == 0x0d0a0d0a)
                         return result;

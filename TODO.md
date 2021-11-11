@@ -16,8 +16,12 @@
 
 # ESP
 
+- walkie talkie state does not have to deal with the update
+- be busy when uploading file & maybe even show progressbar
+
+
 - better integrate time update to the workflow, timezone support
-- add telegram commands, such as checking which wifi & ip we have, etc.
+- add more telegram commands
 
 - check heap and health and reset when necessary
 
@@ -41,3 +45,4 @@ Run silently, check notifications & update time. When to run? Every N hours, if 
 # Battery Times
 
 9:05 - 11:50 (4.2 - 4.08)
+8:30 - 10:45 (4.08 - 4.02)

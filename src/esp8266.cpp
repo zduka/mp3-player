@@ -263,6 +263,8 @@ private:
         ex_.time.secondTick();
         if (! status_.recording)
             updateState();
+        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie)
+            checkBotMessages();
         // TODO do more stuff
     }
 
@@ -959,6 +961,10 @@ private:
     /** \name Walkie-Talkie Mode
      
         The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
+
+        https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
+        https://core.telegram.org/bots/api#sending-files
+
      */
     //@{
 
@@ -1048,6 +1054,69 @@ private:
             // clear the incomplete transaction from the wire buffer
             while (n-- > 0) 
                 Wire.read();
+        }
+    }
+
+    /** Checks the telegram bot messages. 
+     
+        Start always with update id 0 and then get message by message so that we always fit in the static json document moving the update id accordingly so that the received messages are confirmed and will not repeat next time. 
+     */
+    static void checkBotMessages() {
+        LOG("Checking telegram bot updates...");
+        send(msg::SetESPBusy{true});
+        int64_t updateId = 0;
+        StaticJsonDocument<1024> json;
+        while (bot_.getUpdate(json, updateId)) {
+            if (json["ok"] != true || ! json["result"].is<JsonArray>()) {
+                LOG("Bot update failure");
+                break;
+            }
+            JsonArray const & result = json["result"];
+            if (result.size() == 0) {
+                LOG("Bot update done.");
+                break;
+            }
+            JsonObject const & update = result[0];
+            updateId = update["update_id"].as<int64_t>() + 1;
+            LOG("bot update id: %lli", updateId);
+            if (update.containsKey("message"))
+                processBotMessage(update["message"]);
+            else if (update.containsKey("channel_post"))
+                processBotMessage(update["channel_post"]);
+            else
+                LOG("Skipping unsuppoerted mesage type");
+        }
+        send(msg::SetESPBusy{false});
+    }
+
+    /** Deal with parsed telegram bot message. 
+     
+        This can either be text command from the admin, in which case we do as instructed, it can be a text message in the assigned chat, which is printed for debug purposes, or it can be an audio message in general chat which is downloadeded and queued for playing. 
+
+        All other messagfe types are ignored.
+     */
+    static void processBotMessage(JsonObject const & msg) {
+        int64_t chatId = msg["chat"]["id"];
+        if (chatId == telegramAdminId_ && msg.containsKey("text")) {
+            if (msg["text"] == "ip") {
+                bot_.sendMessage(chatId, WiFi.localIP().toString().c_str());
+            } else {
+                LOG("unknown command: %s", msg["text"].as<char const *>());
+            }
+        } else if (chatId == telegramChatId_) {
+            if (msg.containsKey("audio")) {
+                JsonObject const & audio = msg["audio"];
+                if (audio["mime_type"] == MP3_MIME || audio["mime_type"] == WAV_MIME) {
+                    LOG("Downloading audio message...");
+                    // TODO TODO TODO TODO TODO 
+                } else {
+                    LOG("Unsupported audio mime-type: %s", audio["mime_type"].as<char const *>());
+                }
+            } else if (msg.containsKey("text")) {
+                LOG("text: %s", msg["text"].as<char const *>());
+            }
+        } else {
+            LOG("Ignoring message from chat %llu", chatId);
         }
     }
 
@@ -1232,6 +1301,8 @@ private:
 
     static void initializeServer() {
         LOG("Initializing WebServer...");
+        if (!MDNS.begin("mp3-player"))
+            LOG("  mDNS failed to initialize");
         server_.onNotFound(http404);
         server_.serveStatic("/", LittleFS, "/index.html");
         server_.serveStatic("/app.js", LittleFS, "/app.js");
@@ -1241,12 +1312,12 @@ private:
         server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
         server_.on("/status", httpStatus);
+        server_.on("/reset", httpReset);
         server_.on("/generalSettings", httpSettings);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
         server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
         server_.begin();
-        MDNS.begin("mp3-player");
     }
 
     /** Updates the time from NTP server. 
@@ -1298,6 +1369,12 @@ private:
         maxLoopTime_
         );
         server_.send(200, JSON_MIME, buf, len);
+    }
+
+    static void httpReset() {
+        LOG("http reset");
+        send(msg::Reset{});
+        server_.send(200, GENERIC_MIME, "{response: 200}");
     }
 
     static void httpSettings() {
@@ -1383,9 +1460,11 @@ private:
 
     static inline ESP8266WebServer server_{80};
     static inline File uploadFile_;
+
     static inline char const * GENERIC_MIME = "text/plain";
     static inline char const * MP3_MIME = "audio/mp3";
     static inline char const * JSON_MIME = "text/json";
+    static inline char const * WAV_MIME = "audio/wav";
 
     //@}
 
@@ -1437,270 +1516,5 @@ void setup() {
 void loop() {
     Player::loop();
 }
-
-
-
-
-
-
-
-#ifdef HAHA
-
-class Player {
-public:
-    /** Initializes the player. 
-
-        Goes to deep sleep immediately if SCL and SDL are both pulled low at startup, which attiny uses when it detects there is not enough battery to run properly. 
-
-        1 = input voltage ok
-        2 = esp started (after update state)
-        3 = SD card found and ok
-        4 = settings ok, radio stations ok, playlists ok
-        5 = wifi & servers ok
-     */
-    static void Initialize() {
-        // before we do anything, check if we should go to deep sleep immediately conserving power
-        pinMode(I2C_SCL, INPUT);
-        pinMode(I2C_SDA, INPUT);
-        if (!digitalRead(I2C_SCL) && !digitalRead(I2C_SDA))
-            ESP.deepSleep(0);
-        // continue with normal initialization
-        Serial.begin(74880);
-        LOG("Free heap: %u", ESP.getFreeHeap());
-        LOG("Initializing ESP8266...");
-        LOG("  chip id:      %u", ESP.getChipId());
-        LOG("  cpu_freq:     %u", ESP.getCpuFreqMHz());
-        LOG("  core version: ", ESP.getCoreVersion().c_str());
-        LOG("  SDK version:  %s", ESP.getSdkVersion());
-        LOG("  mac address:  %s", WiFi.macAddress().c_str());
-        LOG("  wifi mode:    %u", WiFi.getMode());
-        // set the IRQ pin as input so that we can tell when AVR has an interrupt
-        pinMode(AVR_IRQ, INPUT_PULLUP);
-        attachInterrupt(digitalPinToInterrupt(AVR_IRQ), AVRIrq, FALLING);
-        // start the I2C comms
-        Wire.begin(I2C_SDA, I2C_SCL);
-        Wire.setClock(400000);
-        LOG("Free heap: %u", ESP.getFreeHeap());
-        // initialize the on-chip filesystem
-        InitializeLittleFS();
-        LOG("Free heap: %u", ESP.getFreeHeap());
-        // tell AVR that we are awake by requesting initial state
-        UpdateState();
-        msg::Send(msg::LightsBar{2, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-
-        // initialize the SD card
-        InitializeSDCard();
-        LOG("Free heap: %u", ESP.getFreeHeap());
-        msg::Send(msg::LightsBar{3, 5, Color::White(),DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-
-        InitializeSettings();
-        InitializeMP3Playlists();
-        InitializeRadioStations();
-        InitializeTelegramBot();
-        LOG("Free heap: %u", ESP.getFreeHeap());
-        msg::Send(msg::SetAccentColor{Settings_.accentColor});
-        msg::Send(msg::SetMode{State_});
-        msg::Send(msg::LightsBar{4, 5, Settings_.accentColor, DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-
-        InitializeWiFi();
-        InitializeServer();
-        PreviousSecondMillis_ = millis();
-        msg::Send(msg::LightsBar{5, 5, Settings_.accentColor,DEFAULT_SPECIAL_LIGHTS_TIMEOUT});
-        LOG("Initialization done.");
-        LOG("Free heap: %u", ESP.getFreeHeap());
-        
-        SetMode(State_.mode());
-        // if wifi was turned on last time, turn it on as well
-        if (State_.wifiStatus() != WiFiStatus::Off)
-            WiFiConnect();
-        LOG("End of setup");
-    }
-
-    static void Loop() {
-        // update the running usage statistics
-        uint32_t t = millis();
-        ++RunningLoopCount_;
-        uint16_t delay = t - LastMillis_;
-        if (RunningMaxLoopTime_ < delay)
-            RunningMaxLoopTime_ = delay;
-        LastMillis_ = t;
-        // see if we have a second tick, in which case update the time and utilization counters
-        while (t - PreviousSecondMillis_ >= 1000) {
-            PreviousSecondMillis_ += 1000;
-            SecondTick();
-        }
-
-        // see if we need to update the state
-        if (Status_.irq) 
-            UpdateState();
-        // do what we have to - handle DNS, server, mp3 player, etc. 
-        DNSServer_.processNextRequest();
-        Server_.handleClient();
-
-        // based on the mode, do the bookkeeping
-        if (MP3_.isRunning()) {
-            if (!MP3_.loop()) {
-                MP3_.stop();
-                LOG("MP3 playback done");
-                PlayNextTrack();
-            }
-        }
-    }
-
-private:
-
-    
-    /** Loads the application settings from the SD card. 
-     
-        The settings are stored in the `settings.txt` file. If the file does not exist, uses the default settings. 
-     */
-    static void InitializeSettings() {
-        // actually set the settings to their defaults first in case of corrupted settings file
-        Settings_.accentColor = DEFAULT_ACCENT_COLOR;
-        Settings_.maxBrightness = DEFAULT_BRIGHTNESS;
-        Settings_.powerOffTimeout = DEFAULT_POWEROFF_TIMEOUT;
-        Settings_.wifiTimeout = DEFAULT_WIFI_TIMEOUT;
-        Settings_.allowRadioManualTuning = DEFAULT_ALLOW_RADIO_MANUAL_TUNING;
-        Settings_.maxSpeakerVolume = DEFAULT_MAX_SPEAKER_VOLUME;
-        Settings_.maxHeadphonesVolume = DEFAULT_MAX_HEADPHONES_VOLUME;
-        State_.resetVolume(DEFAULT_VOLUME, 16); // volume is from 0 to 15 by HW requirements 
-        // TODO actually read this from the SD card & stuff, only upon first round
-
-
-
-
-
-
-        Status_.powerOffCountdown = Settings_.powerOffTimeout;
-        Status_.wifiCountdown = Settings_.wifiTimeout;
-        // check if current volume is too high and if so, adjust accordingly
-        uint8_t maxVolume = State_.headphones() ? Settings_.maxHeadphonesVolume : Settings_.maxSpeakerVolume;
-        State_.resetVolume(State_.volume() > maxVolume ? maxVolume : State_.volume(), 16);
-    }
-
-
-
-    
-
-
-
-/** \name Walkie-Talkie
- 
-    So actually it seems that walkie talkie can interact with telegram bots. Even looks like wavs can be sent and played back.
-
-    https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
-    https://core.telegram.org/bots/api#sending-files
- */
-//@{
-
-
-    /** Returns true if the walkie talkie mode is enabled, i.e. the telegram bot has been configured and WiFi is connected. 
-     */
-    static bool WalkieTalkieModeEnabled() {
-        return (State_.wifiStatus() == WiFiStatus::Connected) && TelegramBot_.isValid();
-    }
-
-    static void WalkieTalkieStartRecording() {
-        if (!Recording_.begin("/test.wav")) {
-            LOG("Unable to open recording target file");
-        } else {
-            LOG("Recording...");
-            Status_.recording = true;
-            msg::Send(msg::StartRecording());
-        }
-    }
-
-    static void WalkieTalkieStopRecording(bool cancel = false) {
-        if (Status_.recording) {
-            msg::Send(msg::StopRecording{});
-            Status_.recording = false;
-            Recording_.end();
-            LOG("Recording done.");
-            //TelegramBot_.sendMessage(BotAdminId_.c_str(), "I am on!");
-            File f = SD.open("/test.wav", FILE_READ);
-            TelegramBot_.sendAudio(BotAdminId_, f, "test.wav", "audio/wav");
-            f.close();
-        }
-    }
-
-    static void WalkieTalkieCheckUpdates() {
-        uint32_t offset = 0;
-        StaticJsonDocument<1024> json;
-        while (TelegramBot_.getUpdate(json, offset)) {
-            if (json["ok"] != true) {
-                LOG("Telegram update error (ok: false)");
-                return;
-            }
-            if (! json["result"].is<JsonArray>()) {
-                LOG("Telegram update result is not an array");
-                return;
-            }
-            JsonArray const & result = json["result"];
-            if (result.size() == 0) {
-                LOG("No more updates");
-                break;
-            }
-            JsonObject const & update = result[0];
-            offset = update["update_id"].as<uint32_t>() + 1;
-            LOG("Update: %u", update);
-            if (! update.containsKey("message")) {
-                LOG("Update is not a message");
-                continue;
-            }
-            JsonObject const & msg = update["message"];
-            // check that it belongs to a valid chat
-            uint64_t chatId = msg["chat"]["id"];
-            if (msg.containsKey("text")) {
-                LOG("text: %s", msg["text"].as<char const *>());
-            } else if (msg.containsKey("audio")) {
-                JsonObject const & audio = msg["audio"];
-                if (audio["mime_type"] != "audio/wav") {
-                    LOG("audio of unsupported mimetype %s", audio["mime_type"].as<char const *>());
-                } else {
-                    LOG("audio message!");
-                }
-            } else {
-                LOG("Unsupported message type");
-            }
-        }
-    }
-
-    struct BotChannel {
-        int64_t id;
-        Color color;
-
-        BotChannel():
-            id{std::numeric_limits<int64_t>::max()} {
-        }
-
-        BotChannel(int64_t id, Color const & color):
-            id{id},
-            color{color} {
-        }
-
-        BotChannel & operator = (BotChannel const &) = delete;
-        BotChannel & operator = (BotChannel &&) = default;
-
-        void clear() {
-            id = std::numeric_limits<int64_t>::max();
-        }
-    }; // Player::BotChannel
-
-    static inline TelegramBot TelegramBot_;
-    static inline int64_t BotAdminId_;
-    static inline BotChannel BotChannels_[8];
-
-    static inline WavWriter Recording_;
-
-//@}
-
-
-
-//@}
-
-}; // Player
-
-
-#endif
 
 #endif // ARCH_ESP8266

@@ -49,6 +49,8 @@ namespace msg {
 
     MESSAGE(Sleep);
 
+    MESSAGE(Reset);
+
     MESSAGE(SetMode,
         Mode mode;
         MusicMode musicMode;
