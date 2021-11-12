@@ -124,6 +124,11 @@ public:
                 LOG("MP3 playback done");
                 playNextTrack();
             }
+        } else if (wav_.isRunning()) {
+            if (!wav_.loop()) {
+                wav_.stop();
+                LOG("Message playback done");
+            }
         }
         server_.handleClient();
     }
@@ -442,7 +447,8 @@ private:
                 break;
             }
             case Mode::WalkieTalkie: {
-                updateNTPTime();
+                //updateNTPTime();
+                walkieTalkiePlay();
                 break;
             }
             case Mode::Lights: {
@@ -617,15 +623,16 @@ private:
 
     static void setMode(Mode mode) {
         LOG("Setting mode %u", mode);
+        bool resume = false;
+        // if we are coming from walkie talkie, disconnect WiFi too and make sure the playback of messages is stopped
+        if (state_.mode() == Mode::WalkieTalkie) {
+            walkieTalkieStop();
+            resume = true;
+            if (! settings_.keepWiFiAlive)
+                disconnectWiFi();
+        }
         switch (mode) {
             case Mode::Music: {
-                bool resume = false;
-                // if we are coming from walkie talkie, disconnect WiFi too
-                if (state_.mode() == Mode::WalkieTalkie) {
-                    if (! settings_.keepWiFiAlive)
-                        disconnectWiFi();
-                    resume = true;
-                }
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 if (resume)
@@ -1061,6 +1068,24 @@ private:
         }
     }
 
+    static void walkieTalkiePlay() {
+        if (!ex_.walkieTalkie.isEmpty()) {
+            char filename[32];
+            snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), ex_.walkieTalkie.readId);
+            mp3File_.open(filename);
+            i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
+            wav_.begin(& mp3File_, & i2s_);
+        }
+    }
+
+    static void walkieTalkieStop() {
+        if (wav_.isRunning()) {
+            wav_.stop();
+            i2s_.stop();
+            mp3File_.close();
+        }
+    }
+
     /** Checks the telegram bot messages. 
      
         Start always with update id 0 and then get message by message so that we always fit in the static json document moving the update id accordingly so that the received messages are confirmed and will not repeat next time. 
@@ -1162,6 +1187,8 @@ private:
     /** The telegram bot that handles the communication. 
      */
     static inline TelegramBot bot_;
+
+    static inline AudioGeneratorWAV wav_;
 
     static inline int64_t telegramChatId_;
     static inline int64_t telegramAdminId_;
