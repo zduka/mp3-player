@@ -39,6 +39,7 @@ public:
     }
 
     using UploadCallback = std::function<void(uint16_t, uint16_t)>;
+    using DownloadCallback = std::function<void(uint32_t, uint32_t)>;
 
     /** Sends given audio file to the specified chat. 
      */
@@ -94,18 +95,20 @@ public:
 
     /** Getting a file is a two-step process.
      */
-    bool getFile(char const * fileId, JsonDocument &fileInfo, File & into) {
+    bool getFile(char const * fileId, JsonDocument & fileInfo, File & into,  DownloadCallback callback) {
         fileInfo.clear();
         if (!connect())
             return false;
-        HTTPS_SEND(PSTR("GET /bot%lli:%s/getFile?file_id=%u"), id_, token_.c_str(), fileId);
+        HTTPS_SEND(PSTR("GET /bot%lli:%s/getFile?file_id=%s"), id_, token_.c_str(), fileId);
         HTTPS_SEND(PSTR(" HTTP/1.1\r\nHost: api.telegram.org\r\nAccept: application/json\r\nCache-Control: no-cache\r\n"));
         HTTPS_SEND(PSTR("\r\n"));
         if (skipResponseHeaders() != HTTP_OK) {
             https_.stop();
+            LOG("Getfile request failed");
             return false;
         }
         deserializeJson(fileInfo, https_);
+        uint32_t size = fileInfo["result"]["file_size"].as<uint32_t>();
         https_.stop();
         // actually request the file
         if (!connect())
@@ -115,9 +118,9 @@ public:
         HTTPS_SEND(PSTR("\r\n"));
         if (skipResponseHeaders() != HTTP_OK) {
             https_.stop();
+            LOG("file contents request failed");
             return false;
         }
-        // TODO actually store the file
         uint32_t count = 0;
         do {
             if (https_.available()) {
@@ -125,14 +128,15 @@ public:
                     char c = https_.read();
                     into.write(c);
                     ++count;
-                    // TODO callback
                 }
+                if (callback)
+                    callback(count, size);
             } else {
-                delay(1);
+                delay(10);
             }
-        } while (https_.connected());
+        } while (count < size && https_.connected());
         https_.stop(); // just to be sure
-        return true;
+        return count == size;
     }
 
 

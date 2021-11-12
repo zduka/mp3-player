@@ -16,7 +16,6 @@
 
 # ESP
 
-- walkie talkie state does not have to deal with the update
 - be busy when uploading file & maybe even show progressbar
 
 
@@ -25,10 +24,13 @@
 
 - check heap and health and reset when necessary
 
+- OTA Updates
+
 # Walkie Talkie
 
 - actually implement downloading telegram file
 - maybe add a silence reduction as well (i.e values close to center are center). 
+- on initialize load indices so that we know how much messages we have
 
 # Birthday reminder
 
@@ -46,3 +48,5 @@ Run silently, check notifications & update time. When to run? Every N hours, if 
 
 9:05 - 11:50 (4.2 - 4.08)
 8:30 - 10:45 (4.08 - 4.02)
+5h?           (4.02 - 3.86)
+8:15 -     (3.86

@@ -5,7 +5,7 @@
 
 /** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 
  */
-#define DEFAULT_IDLE_TIMEOUT 60
+#define DEFAULT_IDLE_TIMEOUT 30
 #define DEFAULT_PLAY_TIMEOUT 60
 
 
@@ -35,6 +35,8 @@
 #define ESP_BUSY_TIMEOUT 64 * 60 * 2 // 2 minutes timeout for busy
 
 #define DEFAULT_VOLUME 5
+
+#define MAX_WALKIE_TALKIE_MESSAGES 8
 
 
 /** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 

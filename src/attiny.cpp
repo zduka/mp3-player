@@ -799,7 +799,7 @@ private:
             bool draw = state_.state.charging() 
                        || (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
                        || (state_.state.wifiStatus() != WiFiStatus::Off)
-                       || (state_.state.messageReady());
+                       || (! state_.ex.walkieTalkie.isEmpty());
             if (! draw)
                 return;
             neopixels_[0] = Color::Black();
@@ -827,7 +827,7 @@ private:
                 case 32:
                 case 33:
                 case 34:
-                    if (state_.state.messageReady())
+                    if (! state_.ex.walkieTalkie.isEmpty())
                         neopixels_[0] = Color::Yellow().withBrightness(maxBrightness_);
                     break;
                 default:

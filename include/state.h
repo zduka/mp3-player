@@ -107,17 +107,6 @@ public:
             peripherals_ &= ~BATTERY_MASK;
     }
 
-    bool messageReady() const volatile {
-        return peripherals_ & MESSAGE_READY_MASK;
-    }
-
-    void setMessageReady(bool value) volatile {
-        if (value)
-            peripherals_ |= MESSAGE_READY_MASK;
-        else
-            peripherals_ &= ~MESSAGE_READY_MASK;
-    }
-
 private:
     static constexpr uint8_t CONTROL_DOWN_MASK = 1 << 0;
     static constexpr uint8_t VOLUME_DOWN_MASK = 1 << 1;
@@ -125,7 +114,6 @@ private:
     static constexpr uint8_t CHARGING_MASK = 1 << 3;
     static constexpr uint8_t BATTERY_MASK = 1 << 4;
     static constexpr uint8_t LOW_BATTERY_MASK = 1 << 5;
-    static constexpr uint8_t MESSAGE_READY_MASK = 1 << 6;
     volatile uint8_t peripherals_; 
 //@}
 /** \name Events register. 
@@ -400,16 +388,37 @@ static_assert(sizeof(RadioState) == 3);
  */
 class WalkieTalkieState {
 public:
-    uint32_t updateId;
+    uint8_t readId= 0;
+    uint8_t writeId = 0;
+
+    bool isEmpty() const {
+        return readId == writeId;
+    }
+
+    uint8_t size() const {
+        // TODO 
+        return 0;      
+    }
+
+    bool isFull() const {
+        return (readId + 1) % MAX_WALKIE_TALKIE_MESSAGES == writeId;
+    }
+
+    uint8_t nextWrite() {
+        uint8_t result = writeId;
+        writeId = (writeId + 1 ) % MAX_WALKIE_TALKIE_MESSAGES;
+        return result;
+    }
 
     void log() const {
         LOG("Walkie-Talkie State:");
-        LOG("    updateId: %lli", updateId);
+        LOG("    read: %u", readId);
+        LOG("    write: %u", writeId);
     }
 
 } __attribute__((packed)); // WalkieTalkieState
 
-static_assert(sizeof(WalkieTalkieState) == 4);
+static_assert(sizeof(WalkieTalkieState) == 2);
 
 /** The various night light effects the player supports. 
  */
@@ -469,7 +478,7 @@ public:
 
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 24);
+static_assert(sizeof(ExtendedState) == 22);
 
 /** Returns the next music mode. 
  

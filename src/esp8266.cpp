@@ -104,6 +104,7 @@ public:
         setExtendedState(ex_);
         send(msg::SetSettings{settings_});
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
         // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
@@ -176,6 +177,7 @@ private:
             }
             LOG("  volume type: FAT%u", SD.fatType());
             LOG("  volume size: %u [MB]",  (static_cast<uint32_t>(SD.totalClusters()) * SD.clusterSize() / 1000000));
+            SD.mkdir("wt");
             return true;
         } else {
             LOG("Error reading from SD card");
@@ -962,6 +964,8 @@ private:
      
         The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
 
+        
+
         https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
         https://core.telegram.org/bots/api#sending-files
 
@@ -1079,12 +1083,16 @@ private:
             JsonObject const & update = result[0];
             updateId = update["update_id"].as<int64_t>() + 1;
             LOG("bot update id: %lli", updateId);
-            if (update.containsKey("message"))
-                processBotMessage(update["message"]);
-            else if (update.containsKey("channel_post"))
-                processBotMessage(update["channel_post"]);
-            else
+            // if the message cannot be currently processed, stop the update so that we can try again            
+            if (update.containsKey("message")) {
+                if (! processBotMessage(update["message"], json))
+                    break; 
+            } else if (update.containsKey("channel_post")) {
+                if (! processBotMessage(update["channel_post"], json))
+                    break;
+            } else {
                 LOG("Skipping unsuppoerted mesage type");
+            }
         }
         send(msg::SetESPBusy{false});
     }
@@ -1095,7 +1103,7 @@ private:
 
         All other messagfe types are ignored.
      */
-    static void processBotMessage(JsonObject const & msg) {
+    static bool processBotMessage(JsonObject const & msg, JsonDocument & json) {
         int64_t chatId = msg["chat"]["id"];
         if (chatId == telegramAdminId_ && msg.containsKey("text")) {
             if (msg["text"] == "ip") {
@@ -1106,9 +1114,30 @@ private:
         } else if (chatId == telegramChatId_) {
             if (msg.containsKey("audio")) {
                 JsonObject const & audio = msg["audio"];
-                if (audio["mime_type"] == MP3_MIME || audio["mime_type"] == WAV_MIME) {
+                if (audio["mime_type"] == WAV_MIME) {
+                    // if we can't get new message, don't process the message
+                    if (ex_.walkieTalkie.isFull()) {
+                        LOG("Buffer full, cannot process");
+                        return false;
+                    }
                     LOG("Downloading audio message...");
-                    // TODO TODO TODO TODO TODO 
+                    char filename[32];
+                    snprintf_P(filename, sizeof(filename), PSTR("/wt/%u.wav"), ex_.walkieTalkie.writeId);
+                    SD.remove(filename);
+                    File f = SD.open(filename, FILE_WRITE);
+                    LOG("filename: %s", filename);
+                    if (bot_.getFile(audio["file_id"], json, f, [](uint32_t transferred, uint32_t size){
+                        // enough for ~60MB
+                        send(msg::LightsBar(static_cast<uint16_t>(transferred / 1024), static_cast<uint16_t>(size / 1024), MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
+                    })) {
+                        LOG("Done, %u bytes.", f.size());
+                        ex_.walkieTalkie.nextWrite();
+                        // update the extended state to flag the info
+                        setExtendedState(ex_.walkieTalkie);
+                    } else {
+                        LOG("Error");
+                    }
+                    f.close();
                 } else {
                     LOG("Unsupported audio mime-type: %s", audio["mime_type"].as<char const *>());
                 }
@@ -1118,6 +1147,8 @@ private:
         } else {
             LOG("Ignoring message from chat %llu", chatId);
         }
+        LOG("message processed");
+        return true;
     }
 
     /** If true when recording can be done, i.e. the prevcious recording buffer has been sent. False if the buffer is currently being sent. 
