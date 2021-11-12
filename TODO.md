@@ -2,7 +2,7 @@
 
 # SW
 
-- pressing control when idle? 
+- pressing control when idle? should start play?
 
 - should notification light do stuff if we are in non music mode? 
 
@@ -16,12 +16,7 @@
 
 # ESP
 
-- rename mp3File to audioFIle
-- be busy when uploading file & maybe even show progressbar
-
-
 - better integrate time update to the workflow, timezone support
-- add more telegram commands
 
 - check heap and health and reset when necessary
 
@@ -29,9 +24,9 @@
 
 # Walkie Talkie
 
-- actually implement downloading telegram file
 - maybe add a silence reduction as well (i.e values close to center are center). 
 - on initialize load indices so that we know how much messages we have
+- play already played messages & advance the id after played
 
 # Birthday reminder
 
@@ -47,7 +42,7 @@ Run silently, check notifications & update time. When to run? Every N hours, if 
 
 # Battery Times
 
-9:05 - 11:50 (4.2 - 4.08)
-8:30 - 10:45 (4.08 - 4.02)
-5h?           (4.02 - 3.86)
-8:15 -     (3.86
+9:05 - 11:50 (4.2 - 4.08) ~3h
+8:30 - 10:45 (4.08 - 4.02) ~2h 5h
+5h?          (4.02 - 3.86) ~5h 10h
+8:15 - 11:10 (3.86 - 3.7) ~3h  13h

@@ -118,16 +118,28 @@ public:
         tick();
         if (status_.irq) 
             status_.recording ? record() : updateState();
-        if ( mp3_.isRunning() && !state_.idle()) {
-            if (!mp3_.loop()) {
-                mp3_.stop();
-                LOG("MP3 playback done");
-                playNextTrack();
+        if (!state_.idle()) {
+            if (mp3_.isRunning()) {
+                if (!mp3_.loop()) {
+                    mp3_.stop();
+                    LOG("MP3 playback done");
+                    playNextTrack();
+                }
+            } else if (wav_.isRunning()) {
+                if (!wav_.loop()) {
+                    wav_.stop();
+                    LOG("Message playback done");
+                    playNextMessage();
+                }
             }
-        } else if (wav_.isRunning()) {
-            if (!wav_.loop()) {
-                wav_.stop();
-                LOG("Message playback done");
+        } else if (state_.wifiStatus() == WiFiStatus::Connected) {
+            if (status_.updateMessages) {
+                status_.updateMessages = false;
+                checkBotMessages();
+            }
+            if (status_.updateTime) {
+                status_.updateTime = false;
+                updateNTPTime();
             }
         }
         server_.handleClient();
@@ -271,7 +283,7 @@ private:
         if (! status_.recording)
             updateState();
         if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie)
-            checkBotMessages();
+            status_.updateMessages = true;
         // TODO do more stuff
     }
 
@@ -446,17 +458,18 @@ private:
                 }
                 break;
             }
-            case Mode::WalkieTalkie: {
-                //updateNTPTime();
-                walkieTalkiePlay();
-                break;
-            }
             case Mode::Lights: {
                 uint8_t i = static_cast<uint8_t>(ex_.lights.effect) + 1;
                 if (i == 8)
                     i = 0;
                 setLightsEffect(static_cast<LightsEffect>(i));
                 send(msg::LightsPoint{i, 7, MODE_COLOR_LIGHTS});
+                break;
+            }
+            case Mode::WalkieTalkie: {
+                // convert to volume press (play/pause)
+                volumePress();
+                //updateNTPTime();
                 break;
             }
             default:
@@ -544,6 +557,7 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
+            case Mode::WalkieTalkie:
                 if (state_.idle())
                     play();
                 else
@@ -572,11 +586,13 @@ private:
             case Mode::Music:
             case Mode::Lights:
                 if (state_.musicMode() == MusicMode::MP3)
-                    mp3UpdateVolume();
+                    i2sUpdateVolume();
                 else
                     radioUpdateVolume();
                 break;
             case Mode::WalkieTalkie:
+                i2sUpdateVolume();
+                break;
             default:
                 break;
         }
@@ -665,15 +681,21 @@ private:
         LOG("Play");
         state_.setIdle(false);
         send(msg::SetIdle{false, timeoutPlay_});
-        switch (state_.musicMode()) {
-            case MusicMode::MP3:
-                // if we are resuming from pause, just setting idle to false above did the trick
-                if (! mp3_.isRunning())
-                    mp3Play();
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                if (state_.musicMode() == MusicMode::MP3) {
+                    // if we are resuming from pause, just setting idle to false above did the trick
+                    if (! mp3_.isRunning())
+                        mp3Play();
+                } else {
+                    radioPlay();
+                }
                 break;
-            case MusicMode::Radio:
-                radioPlay();
-                break;
+            case Mode::WalkieTalkie: {
+                if (! wav_.isRunning())
+                    walkieTalkiePlay();
+            }
         }
     }
 
@@ -685,12 +707,11 @@ private:
         LOG("Pause");
         state_.setIdle(true);
         send(msg::SetIdle{true, timeoutIdle_});
-        switch (state_.musicMode()) {
-            case MusicMode::MP3:
-                mp3Pause();
-                break;
-            case MusicMode::Radio:
-                radioStop();
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                if (state_.musicMode() == MusicMode::Radio)
+                    radioStop();
                 break;
         }
     }
@@ -701,13 +722,16 @@ private:
         LOG("Stop");
         state_.setIdle(true);
         send(msg::SetIdle{true, timeoutIdle_});
-        switch (state_.musicMode()) {
-            case MusicMode::MP3:
-                mp3Stop();
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                if (state_.musicMode() == MusicMode::MP3)
+                    mp3Stop();
+                else
+                    radioStop();
                 break;
-            case MusicMode::Radio:
-                radioStop();
-                break;
+            case Mode::WalkieTalkie:
+                walkieTalkieStop();
         }
     }
 
@@ -775,21 +799,16 @@ private:
         setPlaylist(ex_.mp3.playlistId);
     }
 
-    /** There is actually no need to do anything for mp3 pause - when set to idle, no new audio data will be fed to I2S in the main loop, effectively being a pause. 
-     */
-    static void mp3Pause() {
-    }
-
     static void mp3Stop() {
         if (mp3_.isRunning()) {
             mp3_.stop();
             i2s_.stop();
-            mp3File_.close();
+            audioFile_.close();
         }
     }
 
-    static void mp3UpdateVolume() {
-        if (mp3_.isRunning()) {
+    static void i2sUpdateVolume() {
+        if (mp3_.isRunning() || wav_.isRunning()) {
             i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
         }
     }
@@ -832,9 +851,9 @@ private:
                     filename[1] = '/';
                     memcpy(filename + 2, f.name(), strlen(f.name()) + 1);
                     f.close();
-                    mp3File_.open(filename);
+                    audioFile_.open(filename);
                     i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
-                    mp3_.begin(& mp3File_, & i2s_);
+                    mp3_.begin(& audioFile_, & i2s_);
                     LOG("Track %u, file: %s", index, filename);
                     ex_.mp3.trackId = index;
                     setExtendedState(ex_.mp3);
@@ -875,7 +894,7 @@ private:
 
     static inline AudioGeneratorMP3 mp3_;
     static inline AudioOutputI2S i2s_;
-    static inline AudioFileSourceSD mp3File_;
+    static inline AudioFileSourceSD audioFile_;
     static inline PlaylistInfo playlists_[8];
     static inline uint8_t numPlaylists_ = 0;
 
@@ -1072,9 +1091,9 @@ private:
         if (!ex_.walkieTalkie.isEmpty()) {
             char filename[32];
             snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), ex_.walkieTalkie.readId);
-            mp3File_.open(filename);
+            audioFile_.open(filename);
             i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
-            wav_.begin(& mp3File_, & i2s_);
+            wav_.begin(& audioFile_, & i2s_);
         }
     }
 
@@ -1082,8 +1101,13 @@ private:
         if (wav_.isRunning()) {
             wav_.stop();
             i2s_.stop();
-            mp3File_.close();
+            audioFile_.close();
         }
+    }
+
+    static void playNextMessage() {
+        walkieTalkieStop();
+        pause();
     }
 
     /** Checks the telegram bot messages. 
@@ -1491,16 +1515,20 @@ private:
     }
 
     static void httpSDUploadHandler() {
+        
         HTTPUpload& upload = server_.upload();
         switch (upload.status) {
             case UPLOAD_FILE_START: {
+                send(msg::SetESPBusy{true});
                 LOG("http file upload start: %s", server_.arg("path").c_str());
                 uploadFile_ = SD.open(server_.arg("path").c_str(), "w");
                 break;
             }
             case UPLOAD_FILE_WRITE: {
+                send(msg::SetESPBusy{true});
                 if (uploadFile_)
                     uploadFile_.write(upload.buf, upload.currentSize);
+                send(msg::LightsBar(upload.totalSize / 1024, upload.contentLength / 1024, Color::Blue().withBrightness(settings_.maxBrightness)));
                 break;
             }
             case UPLOAD_FILE_END: {
@@ -1511,6 +1539,14 @@ private:
                 } else {
                     server_.send(500, JSON_MIME, "{ response: 500 }");
                 }
+                send(msg::SetESPBusy{false});
+                break;
+            }
+            case UPLOAD_FILE_ABORTED: {
+                LOG("http upload aborted");
+                uploadFile_.close();
+                SD.remove(server_.arg("path").c_str());
+                send(msg::SetESPBusy{false});
                 break;
             }
         }
@@ -1534,6 +1570,12 @@ private:
     static inline volatile struct {
         bool irq : 1;
         bool recording : 1;
+        /** When true, walkie talkie messages should be updated. 
+         */
+        bool updateMessages: 1;
+        /** When true, time should be updated from NTP servers.
+         */
+        bool updateTime : 1;
 
 
 
