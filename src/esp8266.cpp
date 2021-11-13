@@ -429,6 +429,8 @@ private:
             case Mode::WalkieTalkie:
                  if (status_.recording)
                      stopRecording(/*cancel*/ true);
+            default:
+                break;
         }
     }
 
@@ -448,13 +450,13 @@ private:
                     if (i >= numPlaylists_)
                         i = 0;
                     setPlaylist(i);
-                    send(msg::LightsPoint{i, numPlaylists_ - 1, MODE_COLOR_MP3});
+                    send(msg::LightsPoint{i, static_cast<uint16_t>(numPlaylists_ - 1), MODE_COLOR_MP3});
                 } else {
                     uint8_t i = ex_.radio.stationId + 1;
                     if (i >= numRadioStations_)
                         i = 0;
                     setRadioStation(i);
-                    send(msg::LightsPoint{i, numRadioStations_ - 1, MODE_COLOR_RADIO});
+                    send(msg::LightsPoint{i, static_cast<uint16_t>(numRadioStations_ - 1), MODE_COLOR_RADIO});
                 }
                 break;
             }
@@ -497,7 +499,7 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
                 if (state_.musicMode() == MusicMode::MP3) {
-                    send(msg::LightsPoint{state_.controlValue(), playlists_[ex_.mp3.playlistId].numTracks - 1, MODE_COLOR_MP3});
+                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3});
                     setTrack(state_.controlValue());
                 } else {
                     send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO});
@@ -536,6 +538,8 @@ private:
             case Mode::WalkieTalkie:
                 startRecording();
                 break;
+            default:
+                break;
         }
     }
 
@@ -544,6 +548,8 @@ private:
         switch (state_.mode()) {
             case Mode::WalkieTalkie:
                 stopRecording();
+                break;
+            default:
                 break;
         }
     }
@@ -596,7 +602,7 @@ private:
             default:
                 break;
         }
-        send(msg::LightsBar{state_.volumeValue() + 1, 16, DEFAULT_COLOR});
+        send(msg::LightsBar{static_cast<uint16_t>(state_.volumeValue() + 1), 16, DEFAULT_COLOR});
     }
 
     /** Turns wifi on/off, turns the player off. 
@@ -648,7 +654,7 @@ private:
                 disconnectWiFi();
         }
         switch (mode) {
-            case Mode::Music: {
+            case Mode::Music:
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 if (resume)
@@ -658,14 +664,12 @@ private:
                 else
                     setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
                 break;
-            }
-            case Mode::Lights: {
+            case Mode::Lights:
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 setControlRange(ex_.lights.hue, LightsState::HUE_RAINBOW + 1);
                 break;
-            }
-            case Mode::WalkieTalkie: {
+            case Mode::WalkieTalkie:
                 stop(); // stop music if any 
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
@@ -673,7 +677,8 @@ private:
                 // connect to WiFi
                 connectWiFi();
                 break;
-            }
+            default:
+                break;
         }
     }
 
@@ -692,10 +697,12 @@ private:
                     radioPlay();
                 }
                 break;
-            case Mode::WalkieTalkie: {
+            case Mode::WalkieTalkie: 
                 if (! wav_.isRunning())
                     walkieTalkiePlay();
-            }
+                break;
+            default:
+                break;
         }
     }
 
@@ -712,6 +719,8 @@ private:
             case Mode::Lights:
                 if (state_.musicMode() == MusicMode::Radio)
                     radioStop();
+                break;
+            default:
                 break;
         }
     }
@@ -732,6 +741,8 @@ private:
                 break;
             case Mode::WalkieTalkie:
                 walkieTalkieStop();
+            default:
+                break;
         }
     }
 
@@ -775,7 +786,8 @@ private:
      */
     static uint16_t initializePlaylistTracks(uint8_t playlistId) {
         uint16_t result = 0;
-        char playlistFolder[2] = {playlistId + '0', 0};
+        char playlistFolder[8];
+        snprintf_P(playlistFolder, sizeof(playlistFolder), PSTR("%u"), playlistId);
         File d = SD.open(pointer_cast<char const *>(& playlistFolder));
         while (true) {
             File f = d.openNextFile();
@@ -822,7 +834,8 @@ private:
     static void setPlaylist(uint8_t index) {
         LOG("Playlist %u (folder %u)", index, playlists_[index].id);
         currentPlaylist_.close();
-        char playlistDir[2] = { playlists_[index].id + '0', 0 };
+        char playlistDir[8];
+        snprintf_P(playlistDir, sizeof(playlistDir), PSTR("%u"), playlists_[index].id);
         currentPlaylist_ = SD.open(playlistDir);
         ex_.mp3.playlistId = index;
         ex_.mp3.trackId = 0;
@@ -846,10 +859,8 @@ private:
             LOG("Checking file %s, index %u, nexttrack %u", f.name(), index, nextTrack);
             if (EndsWith(f.name(), ".mp3")) {
                 if (index == nextTrack) {
-                    char  filename[16]; // this should be plenty for 8.3 filename
-                    filename[0] = playlists_[ex_.mp3.playlistId].id + '0';
-                    filename[1] = '/';
-                    memcpy(filename + 2, f.name(), strlen(f.name()) + 1);
+                    char filename[32]; // this should be plenty for 8.3 filename
+                    snprintf_P(filename, sizeof(filename), PSTR("%u/%s"), playlists_[ex_.mp3.playlistId].id, f.name());
                     f.close();
                     audioFile_.open(filename);
                     i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);

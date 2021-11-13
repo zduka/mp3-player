@@ -211,7 +211,7 @@ private:
         do {
             if (https_.available()) {
                 while (https_.available()) {
-                    char c = https_.read();
+                    https_.read(); // read single character & discard
                     ++count;
                 }
             } else {

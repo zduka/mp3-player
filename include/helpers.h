@@ -20,6 +20,10 @@ inline T pointer_cast(W * from) {
     return static_cast<T>(static_cast<void *>(from));
 }
 //@}
+// we use own asserts
+#ifdef assert
+#undef assert
+#endif
 
 #define assert(...)
 
