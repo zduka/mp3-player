@@ -18,6 +18,11 @@
             padding-top: 55px;
         }
 
+        .header_text {
+            font-size: small;
+            display:inline-block;
+        }
+
     </style>
   </head>
 
@@ -34,24 +39,17 @@
             <span class="icon-bar"></span>
           </button>
           <a class="navbar-brand">
-            <span class="glyphicon glyphicon-oil"></span><!-- battery level -->
-            <span class="glyphicon glyphicon-flash"></span><!-- charging -->
-            <span class="glyphicon glyphicon-headphones"></span><!-- headphones -->
-            <span class="glyphicon glyphicon-signal"></span> <!-- wifi signal strength -->
-            <span class="glyphicon glyphicon-play"></span><!-- currently playing -->
-            <span class="glyphicon glyphicon-pause"></span><!-- idle -->
-
-            <span class="glyphicon glyphicon-music"></span><!-- mp3 mode -->
-            <span class="glyphicon glyphicon-scale"></span><!-- radio mode -->
-            <span class="glyphicon glyphicon-lamp"></span><!-- night light mode -->
-            <span class="glyphicon glyphicon-earphone"></span><!-- walkie talkie mode -->
+            <span class="glyphicon glyphicon-flash"></span> 56%<!-- charging / battery level-->
+            <span class="glyphicon glyphicon-headphones"></span> 12/15<!-- headphones -->
           </a>
         </div>
         <div id="navbar" class="collapse navbar-collapse">
           <ul class="nav navbar-nav">
             <li class="active"><a href="#">Home</a></li>
-            <li><a href="#">About</a></li>
-            <li><a href="#">Contact</a></li>
+            <li><a href="#">Settings</a></li>
+            <li><a href="#">MP3</a></li>
+            <li><a href="#">Radio</a></li>
+            <li><a href="#">Walkie-Talkie</a></li>
           </ul>
         </div><!--/.nav-collapse -->
       </div>
@@ -66,18 +64,14 @@
 
         <div class="panel panel-default">
             <div class="panel-heading">
-              <h3 class="panel-title">Song Upload</h3>
+                <h3 class="panel-title">Status</h3>
             </div>
             <div class="panel-body">
-                Select an MP3 file to upload to the server:
-                <form method="post" enctype="multipart/form-data" action="/sdUpload">
-                    <input id="path" name="path">
-                    <input class="btn btn-default" type="file" id="mp3-uploader" name="filename">
-                    <input class="button" type="submit" value="Upload">
-                </form>
+                Battery level: 56% (3.56V) <br/>
+                WiFi: network name, rssi: 56 <span class="badge">AP</span><br/>
+                Play: 1/foobar.mp3 <span class="badge">mp3</span>
             </div>
         </div>
-
 
         <div class="panel panel-default">
             <div class="panel-heading">
@@ -102,6 +96,64 @@
 
             </div>
         </div>
+
+        <div class="panel panel-default">
+            <div class="panel-heading">
+                <h3 class="panel-title">Settings</h3>
+            </div>
+            <div class="panel-body">
+                Blablabla
+            </div>
+        </div>
+
+
+
+        <div class="panel panel-default">
+            <div class="panel-heading">
+              <h3 class="panel-title">Song Upload</h3>
+            </div>
+            <div class="panel-body">
+                Select an MP3 file to upload to the server:
+                <form method="post" enctype="multipart/form-data" action="/sdUpload">
+                    <input id="path" name="path">
+                    <input class="btn btn-default" type="file" id="mp3-uploader" name="filename">
+                    <input class="button" type="submit" value="Upload">
+                </form>
+            </div>
+        </div>
+
+        <div class="panel panel-default">
+            <div class="panel-heading">
+              <h3 class="panel-title">Radio</h3>
+            </div>
+            <div class="panel-body">
+                <div class="btn-toolbar" role="toolbar" aria-label="...">
+                    <div class="btn-group" role="group" aria-label="...">
+                        <button type="button" class="btn btn-success">Enabled</button>
+                        <button type="button" class="btn btn-default">Disabled</button>
+                    </div>
+                    <div class="btn-group" role="group" aria-label="...">
+                        <button type="button" class="btn btn-success">Manual Tuning</button>
+                        <button type="button" class="btn btn-default">Presets only</button>
+                    </div>
+                    <div class="btn-group" role="group" aria-label="...">
+                        <button type="button" class="btn btn-success">Force Mono</button>
+                        <button type="button" class="btn btn-default">Stereo Headphones</button>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <span class="input-group-addon" id="basic-addon3">Preset 1</span>
+                    <input type="text" class="form-control" id="basic-url" aria-describedby="basic-addon3">
+                  </div>                
+                  <div class="input-group">
+                    <span class="input-group-addon" id="basic-addon3">Preset 2</span>
+                    <input type="text" class="form-control" id="basic-url" aria-describedby="basic-addon3">
+                  </div>                
+                </div>
+        </div>
+
+
+
 
     </div><!-- /.container -->
 

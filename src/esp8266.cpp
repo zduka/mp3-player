@@ -10,7 +10,7 @@
 #include <SD.h>
 #include <Hash.h>
 #include <ArduinoJson.h>
-
+#include <ArduinoOTA.h>
 #include <radio.h>
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
@@ -132,17 +132,21 @@ public:
                     playNextMessage();
                 }
             }
-        } else if (state_.wifiStatus() == WiFiStatus::Connected) {
-            if (status_.updateMessages) {
-                status_.updateMessages = false;
-                checkBotMessages();
-            }
-            if (status_.updateTime) {
-                status_.updateTime = false;
-                updateNTPTime();
-            }
         }
-        server_.handleClient();
+        if (state_.wifiStatus() == WiFiStatus::Connected) {
+            if (state_.idle()) {
+                if (status_.updateMessages) {
+                    status_.updateMessages = false;
+                    checkBotMessages();
+                }
+                if (status_.updateTime) {
+                    status_.updateTime = false;
+                    updateNTPTime();
+                }
+            }
+            ArduinoOTA.handle();            
+            server_.handleClient();
+        }
     }
 
 private:
@@ -673,7 +677,7 @@ private:
                 stop(); // stop music if any 
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
-                // TODO set control range
+                setControlRange(0, numMessages_);
                 // connect to WiFi
                 connectWiFi();
                 break;
@@ -1033,7 +1037,15 @@ private:
                 LOG("Deserialization error");
             }
             f.close();
-        } 
+        }
+        // determine the number of messages in the buffer 
+        for (numMessages_ = 0; numMessages_ < MAX_WALKIE_TALKIE_MESSAGES; ++numMessages_) {
+            char filename[16];
+            snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), numMessages_);
+            if (! SD.exists(filename))
+                break;
+        }
+        LOG("WT messages found: %u", numMessages_);
     }
 
     static void startRecording() {
@@ -1194,6 +1206,12 @@ private:
                         ex_.walkieTalkie.nextWrite();
                         // update the extended state to flag the info
                         setExtendedState(ex_.walkieTalkie);
+                        // update the number of available messages and the control range, if applicable
+                        if (numMessages_ < MAX_WALKIE_TALKIE_MESSAGES) {
+                            ++numMessages_;
+                            if (state_.mode() == Mode::WalkieTalkie)
+                                setControlRange(0, numMessages_);
+                        }
                     } else {
                         LOG("Error");
                     }
@@ -1227,6 +1245,7 @@ private:
 
     static inline int64_t telegramChatId_;
     static inline int64_t telegramAdminId_;
+    static inline uint8_t numMessages_;
 
     static inline uint16_t minRecordingLength_ = 8000;
 
@@ -1411,6 +1430,12 @@ private:
         server_.on("/sd", httpSD);
         server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
         server_.begin();
+        ArduinoOTA.setPort(8266);        
+        ArduinoOTA.onStart(OTAStart);
+        ArduinoOTA.onEnd(OTAEnd);
+        ArduinoOTA.onProgress(OTAProgress);
+        ArduinoOTA.onError(OTAError);
+        ArduinoOTA.begin();        
     }
 
     /** Updates the time from NTP server. 
@@ -1562,6 +1587,45 @@ private:
             }
         }
     }
+
+    static void OTAStart() {
+        LOG("OTA update of %s started",  (ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "spiffs"));
+        send(msg::SetESPBusy{true});
+    }
+
+    static void OTAEnd() {
+        LOG("OTA update done");
+    }
+
+    static void OTAProgress(unsigned progress, unsigned total) {
+        LOG("OTA progress %u/%u",progress,total);  
+        send(msg::SetESPBusy{true});
+        send(msg::LightsBar(progress / 1024, total / 1024, Color::Red().withBrightness(settings_.maxBrightness)));
+    }
+
+    static void OTAError(ota_error_t error) {
+        LOG("OTA error: %u", error);
+        switch (error) {
+            case OTA_AUTH_ERROR:
+                LOG("Auth failed");
+                break;
+            case OTA_BEGIN_ERROR:
+                LOG("Begin Failed");
+                break;
+            case OTA_CONNECT_ERROR:
+                LOG("Connect Failed");
+                break;
+            case OTA_RECEIVE_ERROR:
+                LOG("Receive Failed");
+                break;
+            case OTA_END_ERROR:
+                LOG("End Failed");
+                break;
+            default:
+                break;
+        }
+        send(msg::SetESPBusy{false});
+    }    
 
     static inline ESP8266WebServer server_{80};
     static inline File uploadFile_;

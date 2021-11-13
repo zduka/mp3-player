@@ -16,11 +16,12 @@
 
 # ESP
 
+- simpler playlists management (just enable/disable/etc)
 - better integrate time update to the workflow, timezone support
 
 - check heap and health and reset when necessary
 
-- OTA Updates
+- OTA Updates should be checked on proper network and explicitly enabled in the remote
 
 # Walkie Talkie
 
@@ -46,3 +47,4 @@ Run silently, check notifications & update time. When to run? Every N hours, if 
 8:30 - 10:45 (4.08 - 4.02) ~2h 5h
 5h?          (4.02 - 3.86) ~5h 10h
 8:15 - 11:10 (3.86 - 3.7) ~3h  13h
+8:35
