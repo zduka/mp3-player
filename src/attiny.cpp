@@ -264,7 +264,8 @@ private:
         if ((status_.irq || status_.espBusy) && (--irqCountdown_ == 0))
              resetESP();
         // make sure we have a light show
-        lightsTick();
+        if (state_.state.mode() != Mode::Sync)
+            lightsTick();
         cli();
         status_.tick = false;
         sei();
@@ -292,6 +293,11 @@ private:
             volume_.clearInterrupt();
             // turn off neopixels and esp
             peripheralPowerOff();
+            // disable idle mode when sleeping, disable wifi, disable ESP busy, set mode to music, which is the default after waking up
+            state_.state.setIdle(false);
+            state_.state.setWiFiStatus(WiFiStatus::Off);
+            state_.state.setMode(Mode::Music); 
+            status_.espBusy = false;
             // enable RTC interrupt every second so that the time can be kept
             while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
             RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
@@ -338,9 +344,6 @@ private:
             // enable interrupts for rotary encoders
             control_.setInterrupt(controlKnobChanged);
             volume_.setInterrupt(volumeKnobChanged);
-            // disable idle mode when waking up
-            // TODO perhaps not do this for silent mode? 
-            state_.state.setIdle(false);
             // enable power to neopixels, esp8266 and other circuits
             peripheralPowerOn();
             // TODO show the wakeup progressbar *if* not in silent mode

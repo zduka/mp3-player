@@ -109,11 +109,15 @@ public:
         send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
-        // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-        //state_.setMode(Mode::WalkieTalkie);
-        //setMode(Mode::Music);
-        state_.setMode(Mode::Music);
-        setMode(Mode::WalkieTalkie);
+        if (state_.mode() == Mode::Sync) {
+            sync();
+        } else {
+            // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
+            //state_.setMode(Mode::WalkieTalkie);
+            //setMode(Mode::Music);
+            state_.setMode(Mode::Music);
+            setMode(Mode::WalkieTalkie);
+        }
     }
 
     static void loop() {
@@ -140,10 +144,6 @@ public:
                 if (status_.updateMessages) {
                     status_.updateMessages = false;
                     checkBotMessages();
-                }
-                if (status_.updateTime) {
-                    status_.updateTime = false;
-                    updateNTPTime();
                 }
             }
             ArduinoOTA.handle();            
@@ -293,6 +293,32 @@ private:
         // TODO do more stuff
     }
 
+    /** Synchronizes the player with the rest of the world. 
+     
+        Attempts to connect to the WiFi and update time from NTP servers. If the walkie-talkie mode is enabled also checks any new telegram messages. The synchronization happens every day at the predefined hour *and* immediately after power on. 
+     */
+    static void sync() {
+        LOG("Synchronizing...");
+        // first connect to WiFi unless already connected, if in AP mode, terminate AP mode first
+        if (state_.wifiStatus() == WiFiStatus::AP)
+            disconnectWiFi();
+        if (state_.wifiStatus() != WiFiStatus::Connected) {
+            connectWiFi();
+            while (state_.wifiStatus() == WiFiStatus::Connecting) { };
+        }
+        // if the connection was successful, proceed with the sync
+        if (state_.wifiStatus() == WiFiStatus::Connected) {
+            if (! updateNTPTime()) {
+                delay(1000);
+                updateNTPTime();
+            }
+            // check walkie talkie messages if walkie talkie enabled
+            if (settings_.walkieTalkieEnabled)
+                checkBotMessages();
+        }
+        // now we are done, let's sleep some more
+        send(msg::Sleep{});
+    }
 
     /** Number of times the loop function gets called in the past second. 
 
@@ -477,7 +503,6 @@ private:
             case Mode::WalkieTalkie: {
                 // convert to volume press (play/pause)
                 volumePress();
-                //updateNTPTime();
                 break;
             }
             default:
@@ -1081,7 +1106,7 @@ private:
             } else {
                 LOG("Recording done");
                 File f = SD.open("/rec.wav", FILE_READ);
-                if (f.size() >= minRecordingLength_) {
+                if (f.size() >= MIN_WALKIE_TALKIE_RECORDING) {
                     send(msg::SetESPBusy{true});
                     bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
                         send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
@@ -1280,8 +1305,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static inline uint8_t numMessages_;
     static inline uint8_t playingMessage_ = 0;
 
-    static inline uint16_t minRecordingLength_ = 8000;
-
     //@}
 
     /** \name Night Lights mode
@@ -1309,12 +1332,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
     //@}
 
     /** \name Birthday Greeting mode
-     */
-    //@{
-
-    //@}
-
-    /** \name Sync mode
      */
     //@{
 
@@ -1420,8 +1437,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
         state_.setWiFiStatus(WiFiStatus::Connected);
         send(msg::SetWiFiStatus{WiFiStatus::Connected});
-        // TODO this should really not happen here...
-        updateNTPTime();
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
@@ -1475,7 +1490,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
      
         The time is synchronized with AVR upon a successful update. 
      */
-    static void updateNTPTime() {
+    static bool updateNTPTime() {
         WiFiUDP ntpUDP;
         NTPClient timeClient{ntpUDP, "pool.ntp.org", settings_.timezone};
         timeClient.begin();
@@ -1485,9 +1500,11 @@ MAX_WALKIE_TALKIE_MESSAGES;
             ex_.time.log();
             // now that we have obtained the time, send it
             setExtendedState(ex_.time);
+            return true;
         } else {
             LOG("NTP time updated failed");
             // TODO handle the NTP error
+            return false;
         }
     }
 
@@ -1681,9 +1698,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         /** When true, walkie talkie messages should be updated. 
          */
         bool updateMessages: 1;
-        /** When true, time should be updated from NTP servers.
-         */
-        bool updateTime : 1;
 
 
 

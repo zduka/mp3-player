@@ -12,6 +12,8 @@
 
 # ATTiny
 
+- enter sync mode after poweron unless WDT (or SW) reset
+- wakeup & enter sync mode when given hour
 - temp is wildly off up to being useless
 
 # ESP
@@ -37,18 +39,15 @@ Enters alarm clock mode, plays the alarm. Short press snoozes, Long press turns 
 
 # Sync Mode
 
-Run silently, check notifications & update time. When to run? Every N hours, if active, delay until poweroff.
-
-- add sync mode support in ATTiny
-- better integrate time update to the workflow, timezone support
+- timezone support
 
 # Disco Mode
 
 
 # Battery Times
 
-9:05 - 11:50 (4.2 - 4.08) ~3h
+9:05 - 11:50 (4.2 - 4.08)  ~3h
 8:30 - 10:45 (4.08 - 4.02) ~2h 5h
 5h?          (4.02 - 3.86) ~5h 10h
-8:15 - 11:10 (3.86 - 3.7) ~3h  13h
-8:35
+8:15 - 11:10 (3.86 - 3.7)  ~3h  13h
+8:35 - 11:15 (3.7 - 3.64)  ~3h 16h

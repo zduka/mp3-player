@@ -37,6 +37,7 @@
 #define DEFAULT_VOLUME 5
 
 #define MAX_WALKIE_TALKIE_MESSAGES 8
+#define MIN_WALKIE_TALKIE_RECORDING 8000
 
 
 /** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 
