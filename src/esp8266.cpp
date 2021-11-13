@@ -99,6 +99,8 @@ public:
             LOG("Initial power on");
             ex_.radio.stationId = 0;
             ex_.radio.frequency = radioStations_[0];
+            ex_.walkieTalkie.readId = numMessages_;
+            ex_.walkieTalkie.writeId = numMessages_;
         }
         // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
@@ -503,14 +505,20 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
                 if (state_.musicMode() == MusicMode::MP3) {
-                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3});
+                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3.withBrightness(settings_.maxBrightness)});
                     setTrack(state_.controlValue());
                 } else {
-                    send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO});
+                    send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO.withBrightness(settings_.maxBrightness)});
                     setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
                 }
                 break;
             case Mode::WalkieTalkie:
+                // if not empty, then the new messages must be played first via normal CTRL press
+                if (ex_.walkieTalkie.isEmpty()) {
+                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(numMessages_) - 1, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness)});
+                    // play from the updated value
+                    play();
+                }
                 break;
             case Mode::Lights: {
                 setNightLightHue(state_.controlValue());
@@ -1110,14 +1118,15 @@ private:
         }
     }
 
+    /** Plays stored messages. 
+     
+        If there are unplayed messages, plays these and then stops. Otherwise pl
+     */
     static void walkieTalkiePlay() {
-        if (!ex_.walkieTalkie.isEmpty()) {
-            char filename[32];
-            snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), ex_.walkieTalkie.readId);
-            audioFile_.open(filename);
-            i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
-            wav_.begin(& audioFile_, & i2s_);
-        }
+        if (!ex_.walkieTalkie.isEmpty())
+            playMessage((ex_.walkieTalkie.writeId - ex_.walkieTalkie.readId - 1) % MAX_WALKIE_TALKIE_MESSAGES);
+        else if (numMessages_ > 0) 
+            playMessage(static_cast<uint8_t>(state_.controlValue()));
     }
 
     static void walkieTalkieStop() {
@@ -1128,9 +1137,32 @@ private:
         }
     }
 
+    /** Plays the n-th latest message.
+     */
+    static void playMessage(uint8_t offset) {
+        playingMessage_ = offset;
+        char filename[32];
+        uint8_t id = static_cast<uint8_t>(ex_.walkieTalkie.writeId - 1 - offset) %         
+MAX_WALKIE_TALKIE_MESSAGES;
+        LOG("Playing message offset %u, id %u", offset, id);
+        snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), id);
+        audioFile_.open(filename);
+        i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
+        wav_.begin(& audioFile_, & i2s_);
+    }
+
     static void playNextMessage() {
-        walkieTalkieStop();
-        pause();
+        // if we were playing unread message, advance the buffer
+        if (! ex_.walkieTalkie.isEmpty()) {
+            ++ex_.walkieTalkie.readId;
+            setExtendedState(ex_.walkieTalkie);
+        }
+        if (playingMessage_ > 0) {
+            playMessage(playingMessage_ - 1);
+        } else {
+            walkieTalkieStop();
+            pause();
+        }
     }
 
     /** Checks the telegram bot messages. 
@@ -1246,6 +1278,7 @@ private:
     static inline int64_t telegramChatId_;
     static inline int64_t telegramAdminId_;
     static inline uint8_t numMessages_;
+    static inline uint8_t playingMessage_ = 0;
 
     static inline uint16_t minRecordingLength_ = 8000;
 

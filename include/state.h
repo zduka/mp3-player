@@ -401,7 +401,7 @@ public:
     }
 
     bool isFull() const {
-        return (readId + 1) % MAX_WALKIE_TALKIE_MESSAGES == writeId;
+        return (writeId + 1) % MAX_WALKIE_TALKIE_MESSAGES == readId;
     }
 
     uint8_t nextWrite() {

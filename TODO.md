@@ -16,18 +16,16 @@
 
 # ESP
 
-- simpler playlists management (just enable/disable/etc)
-- better integrate time update to the workflow, timezone support
-
-- check heap and health and reset when necessary
-
 - OTA Updates should be checked on proper network and explicitly enabled in the remote
+- mDNS should worn on proper network
+
+# MP3
+
+- simpler playlists management (just enable/disable/etc)
 
 # Walkie Talkie
 
 - maybe add a silence reduction as well (i.e values close to center are center). 
-- on initialize load indices so that we know how much messages we have
-- play already played messages & advance the id after played
 
 # Birthday reminder
 
@@ -40,6 +38,12 @@ Enters alarm clock mode, plays the alarm. Short press snoozes, Long press turns 
 # Sync Mode
 
 Run silently, check notifications & update time. When to run? Every N hours, if active, delay until poweroff.
+
+- add sync mode support in ATTiny
+- better integrate time update to the workflow, timezone support
+
+# Disco Mode
+
 
 # Battery Times
 
