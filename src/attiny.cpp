@@ -215,8 +215,11 @@ private:
     static void initializeAtTiny() {
         if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) {
             LOG("  power-on reset");
-            // set state to initial power on and proceed with a wakeup
-            state_.state.setMode(Mode::InitialPowerOn);
+            // set sync mode
+            state_.state.setMode(Mode::Sync);
+            status_.espBusy = true;
+            // set station, which is invalid value and signifies the initial power on state for ESP
+            state_.ex.radio.stationId = 0xff;
         }
         if (RSTCTRL.RSTFR & RSTCTRL_BORF_bm)
             LOG("  brown-out reset");
@@ -258,10 +261,8 @@ private:
     
     static void tick() {
         //digitalWrite(DEBUG_PIN, HIGH); 
-        if (state_.state.mode() == Mode::Sleep) {
-            state_.state.setMode(Mode::Music);
+        if (state_.state.mode() == Mode::Sleep)
             sleep();           
-        }
         // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
         if ((status_.irq || status_.espBusy) && (--irqCountdown_ == 0))
              resetESP();
@@ -274,7 +275,7 @@ private:
         // if we have accumulated 64 ticks, do a one second tick check
         if ((++tickCountdown_ % 64) == 0) {
             //LOG("time: %u", state_.ex.time.second());
-            state_.ex.time.secondTick();
+            secondTick();
             // TODO actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
             if (--powerCountdown_ == 0) {
                 LOG("ESP power off countdown");
@@ -283,6 +284,14 @@ private:
             }
         }
         //digitalWrite(DEBUG_PIN, LOW);
+    }
+
+    static void secondTick() {
+        state_.ex.time.secondTick();
+        if (state_.ex.time.hour() == syncHour_) {
+            status_.sync = true;
+            status_.sleep = false;
+        }
     }
 
     /** Puts the AVR to sleep. 
@@ -321,6 +330,11 @@ private:
 
     static void wakeup() {
         LOG("Wakeup");
+        if (status_.sync) {
+            LOG("Synchronization");
+            status_.sync = false;
+            state_.state.setMode(Mode::Sync);
+        }
         state_.ex.log();
         // enable RTC interrupt every 1/64th of a second
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
@@ -348,11 +362,10 @@ private:
             volume_.setInterrupt(volumeKnobChanged);
             // enable power to neopixels, esp8266 and other circuits
             peripheralPowerOn();
-            // TODO show the wakeup progressbar *if* not in silent mode
+            // shows the wakeup progressbar if not in sync mode (sync mode does not update neopixels)
             neopixels_.fill(Color::Black());
             strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(maxBrightness_));
             effectTimeout_ = SPECIAL_LIGHTS_TIMEOUT;
-            // TODO silent mode
         }
     }
 
@@ -504,6 +517,10 @@ private:
      */
     //@{
     static void controlButtonChanged() {
+        if (state_.state.mode() == Mode::Sync) {
+            neopixels_.fill(Color::Red().withBrightness(maxBrightness_));
+            neopixels_.update();
+        }
         if (status_.espBusy)
             return;
         controlBtn_.poll();
@@ -531,6 +548,10 @@ private:
     }
 
     static void volumeButtonChanged() {
+        if (state_.state.mode() == Mode::Sync) {
+            neopixels_.fill(Color::Red().withBrightness(maxBrightness_));
+            neopixels_.update();
+        }
         if (status_.espBusy)
             return;
         volumeBtn_.poll();
@@ -931,7 +952,7 @@ private:
         // enable the TWI in slave mode, enable all interrupts
         TWI0.SCTRLA = TWI_DIEN_bm | TWI_APIEN_bm | TWI_PIEN_bm  | TWI_ENABLE_bm;
         // bus Error Detection circuitry needs Master enabled to work 
-        // TODO not sure why we need it
+        // not sure why we need it
         TWI0.MCTRLA = TWI_ENABLE_bm;   
     }
     
@@ -971,7 +992,7 @@ private:
     }
 
     static void processCommand() {
-        // TODO process the I2C commands from ESP
+        // process the I2C commands from ESP
         switch (i2cRxBuffer_[0]) {
             /* Sets the specified part of the extended state to the given values via a simple memcpy.
              */
@@ -993,7 +1014,13 @@ private:
             }
             case msg::Sleep::Id: {
                 LOG("cmd Sleep");
-                state_.state.setMode(Mode::Sleep);
+                if (status_.sync) {
+                    status_.sync = false;
+                    state_.state.setMode(Mode::Sync);
+                    setIrq();
+                } else {
+                    state_.state.setMode(Mode::Sleep);
+                }
                 break;
             }
             /** Resets the AVR (software reset).
@@ -1232,6 +1259,10 @@ private:
          */        
         bool irq : 1;
 
+        /** If true, synchronization run is to be scheduled.
+         */
+        bool sync : 1;
+
         /** If true, there has been 1/64th of a second tick. 
          */
         bool tick: 1;
@@ -1261,6 +1292,10 @@ private:
 
 
     } status_;
+
+    /** Hour at which the automated daily synchronization should be performed.
+     */
+    static inline uint8_t syncHour_ = 3;
 
     /** Max brightness of the LED strip. 
      */
@@ -1304,9 +1339,8 @@ ISR(RTC_PIT_vect) {
                 Player::status_.sleep = false;
         } else {
             // do one second tick
-            Player::state_.ex.time.secondTick();
+            Player::secondTick();
         }
-        // TODO check alarm, set wakeup bits and wake up? 
     } else {
         // set the tick flag so that more resource demanding periodic tasks can be done in the loop
         Player::status_.tick = true;
@@ -1400,9 +1434,9 @@ ISR(TWI0_TWIS_vect) {
 }
 
 ISR(ADC1_RESRDY_vect) {
-    digitalWrite(DEBUG_PIN, HIGH);
+    //digitalWrite(DEBUG_PIN, HIGH);
     Player::recordingBuffer_[Player::recordingWrite_++] = (ADC1.RES / 8) & 0xff;
-    digitalWrite(DEBUG_PIN, LOW);
+    //digitalWrite(DEBUG_PIN, LOW);
     if (Player::recordingWrite_ % 32 == 0 && Player::status_.recording)
         Player::setIrq();
 }

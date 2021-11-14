@@ -74,7 +74,16 @@ public:
         // enable I2C and request the current state and the extended state
         Wire.begin(I2C_SDA, I2C_SCL);
         Wire.setClock(400000);
-        updateState();
+        // obtain the first state, without reacting to it
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
+        if (n == sizeof(State)) {
+            Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
+        } else {
+            ERROR("Incomplete transaction while reading state, %u bytes received", n);
+            while (n-- > 0) 
+                Wire.read();
+        }
+        // get the extended state as well. 
         getExtendedState(ex_);
         ex_.log();
         send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
@@ -95,20 +104,20 @@ public:
         send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         initializeSettings();
         // if this is the initial state, write basic settings from the mode configuration to cached state
-        if (state_.mode() == Mode::InitialPowerOn) {
+        if (ex_.radio.stationId == 0xff) {
             LOG("Initial power on");
             ex_.radio.stationId = 0;
             ex_.radio.frequency = radioStations_[0];
-            ex_.walkieTalkie.readId = numMessages_;
-            ex_.walkieTalkie.writeId = numMessages_;
+            ex_.walkieTalkie.readId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
+            ex_.walkieTalkie.writeId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
         }
         // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
         send(msg::SetSettings{settings_});
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
-        send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
+        send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
         if (state_.mode() == Mode::Sync) {
             sync();
         } else {
@@ -305,7 +314,9 @@ private:
             disconnectWiFi();
         if (state_.wifiStatus() != WiFiStatus::Connected) {
             connectWiFi();
-            while (state_.wifiStatus() == WiFiStatus::Connecting) { };
+            while (state_.wifiStatus() == WiFiStatus::Connecting) {
+                delay(1);
+            };
         }
         // if the connection was successful, proceed with the sync
         if (state_.wifiStatus() == WiFiStatus::Connected) {
@@ -318,6 +329,7 @@ private:
                 checkBotMessages();
         }
         // now we are done, let's sleep some more
+        LOG("Synchronization done.");
         send(msg::Sleep{});
     }
 
@@ -409,6 +421,8 @@ private:
             // check available events and react accordingly
             if (state_.mode() == Mode::ESPOff && old.mode() != Mode::ESPOff)
                 powerOff();
+            if (state_.mode() == Mode::Sync)
+                sync();
             if (state_.controlTurn()) 
                 controlTurn();
             if (state_.controlButtonDown() != old.controlButtonDown())
@@ -620,9 +634,7 @@ private:
 
     /** Changes volume. 
      
-        In music and lights settings mode updates the volume of the underlying music provider (mp3/radio). 
-
-        TODO in walkie talkie updates the WAV/MP3 player volume settings properly. 
+        Updates the volume of the underlying music provider (i2s/radio). 
      */
     static void volumeTurn() {
         // TODO check that the volume is within the settings available
@@ -1359,6 +1371,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
         LOG("WiFi: Scanning networks...");
         WiFi.mode(WIFI_STA);
         WiFi.disconnect();
+        state_.setWiFiStatus(WiFiStatus::Connecting);
         WiFi.scanNetworksAsync([](int n) {
             LOG("WiFi: Networks found: %i", n);
             File f = SD.open(WIFI_SETTINGS_FILE, FILE_READ);
@@ -1369,7 +1382,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
                         for (int i = 0; i < n; ++i) {
                             if (WiFi.SSID(i) == network["ssid"]) {
                                 LOG("WiFi: connecting to %s, rssi: %i, channel: %i", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i));
-                                state_.setWiFiStatus(WiFiStatus::Connecting);
                                 send(msg::SetWiFiStatus{WiFiStatus::Connecting});
                                 WiFi.begin(network["ssid"].as<char const *>(), network["password"].as<char const *>());
                                 // so that we do not start the access point just yet
@@ -1504,7 +1516,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
             return true;
         } else {
             LOG("NTP time updated failed");
-            // TODO handle the NTP error
             return false;
         }
     }

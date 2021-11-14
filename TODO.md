@@ -12,8 +12,8 @@
 
 # ATTiny
 
-- enter sync mode after poweron unless WDT (or SW) reset
-- wakeup & enter sync mode when given hour
+- wakeup & enter sync mode when given hour, check that it works
+- sync vs alarm
 
 # ESP
 

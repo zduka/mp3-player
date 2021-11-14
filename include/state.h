@@ -516,4 +516,8 @@ public:
     bool lightsEnabled = true;
     bool walkieTalkieEnabled = true;
 
+    /** Default hour at which we synchronize
+     */
+    uint8_t syncHour = 3;
+
 }; // ESPSettings
