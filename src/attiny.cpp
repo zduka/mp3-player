@@ -1,7 +1,7 @@
 #if (defined ARCH_ATTINY)
 
 #if (F_CPU!=8000000UL)
-#error "Only 8Mhz clock is supported"
+//#error "Only 8Mhz clock is supported"
 #endif
 
 #include <Arduino.h>
@@ -145,7 +145,7 @@ void loop() {
 class Player {
 public:
     static void initialize() {
-        Serial.begin(115200);
+        //Serial.begin(115200);
         pinMode(DEBUG_PIN, OUTPUT);
         digitalWrite(DEBUG_PIN, LOW);
         delay(10);
@@ -224,6 +224,8 @@ private:
             LOG("  watchdog reset");
         if (RSTCTRL.RSTFR & RSTCTRL_SWRF_bm)
             LOG("  software reset");
+        // disable clock prescaler
+        CLKCTRL.MCLKCTRLB = 0;            
     }
 
     /** Initializes the real-time clock. 
@@ -1147,7 +1149,7 @@ private:
         // configure the timer we use for 8kHz audio sampling
         TCB0.CTRLA = TCB_CLKSEL_CLKDIV1_gc;
         TCB0.CTRLB = TCB_CNTMODE_INT_gc;
-        TCB0.CCMP = 1000; // for 8kHz
+        TCB0.CCMP = 1250; // for 8kHz
         // setup the ADC pins (microphone input & audio out)
         static_assert(AUDIO_ADC == 12, "Must be PC2"); // ADC1 input 8
         PORTC.PIN2CTRL &= ~PORT_ISC_gm;
@@ -1390,11 +1392,11 @@ ISR(TWI0_TWIS_vect) {
 }
 
 ISR(ADC1_RESRDY_vect) {
-    //digitalWrite(DEBUG_PIN, HIGH);
+    digitalWrite(DEBUG_PIN, HIGH);
     Player::recordingBuffer_[Player::recordingWrite_++] = (ADC1.RES / 8) & 0xff;
+    digitalWrite(DEBUG_PIN, LOW);
     if (Player::recordingWrite_ % 32 == 0 && Player::status_.recording)
         Player::setIrq();
-    //digitalWrite(DEBUG_PIN, LOW);
 }
 
 void setup() {

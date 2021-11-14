@@ -51,3 +51,5 @@ Enters alarm clock mode, plays the alarm. Short press snoozes, Long press turns 
 5h?          (4.02 - 3.86) ~5h 10h
 8:15 - 11:10 (3.86 - 3.7)  ~3h  13h
 8:35 - 11:15 (3.7 - 3.64)  ~3h 16h
+10:30 - 12:00 (3.64 - 3.58) ~1.5h 17.5 (speakers)
+8:40 -        (3.58 - )

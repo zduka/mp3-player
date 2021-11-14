@@ -613,7 +613,8 @@ private:
 
     static void volumeLongPress() {
         LOG("Volume long press");
-        setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
+        if (state_.mode() != Mode::WalkieTalkie)
+            setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
     }
 
     /** Changes volume. 
@@ -713,6 +714,7 @@ private:
                 setControlRange(0, numMessages_);
                 // connect to WiFi
                 connectWiFi();
+                status_.recordingReady = true;
                 break;
             default:
                 break;
@@ -1082,14 +1084,14 @@ private:
     }
 
     static void startRecording() {
-        if (!recordingReady_ || !recording_.begin("/rec.wav")) {
+        if (!status_.recordingReady || !recording_.begin("/rec.wav")) {
             LOG("Unable to open recording target file or recording not ready");
             send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
         } else {
             LOG("Recording...");
             status_.recording = true;
             send(msg::StartRecording());
-            recordingReady_ = false;
+            status_.recordingReady = false;
         }        
     }
         
@@ -1102,7 +1104,7 @@ private:
             if (cancel) {
                 LOG("Recording cancelled");
                 send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
-                recordingReady_ = true;
+                status_.recordingReady = true;
             } else {
                 LOG("Recording done");
                 File f = SD.open("/rec.wav", FILE_READ);
@@ -1116,6 +1118,7 @@ private:
                 }
                 // TODO else do stuff
                 f.close();
+                status_.recordingReady = true;
             }
         }
     }
@@ -1286,9 +1289,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         return true;
     }
 
-    /** If true when recording can be done, i.e. the prevcious recording buffer has been sent. False if the buffer is currently being sent. 
-     */
-    static inline bool recordingReady_ = true;
 
     /** The WAV 8kHz recorder to an SD card file
      */
@@ -1695,11 +1695,13 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static inline volatile struct {
         bool irq : 1;
         bool recording : 1;
+        /** If true when recording can be done, i.e. the prevcious recording buffer has been sent. False if the buffer is currently being sent. 
+         */
+        bool recordingReady  : 1;
+
         /** When true, walkie talkie messages should be updated. 
          */
         bool updateMessages: 1;
-
-
 
     } status_;
 
