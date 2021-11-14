@@ -452,9 +452,17 @@ private:
                 break;
             }
             case ADC_MUXPOS_TEMPSENSE_gc: { // tempreature sensor
-                // TODO calculate the value properly
+                // taken from the ATTiny datasheet example
+                int8_t sigrow_offset = SIGROW.TEMPSENSE1; 
+                uint8_t sigrow_gain = SIGROW.TEMPSENSE0;
+                int32_t temp = value - sigrow_offset; // Result might overflow 16 bit variable (10bit+8bit)
+                temp *= sigrow_gain;
+                // temp is now in kelvin range, to convert to celsius, remove -273.15 (x256)
+                temp -= 69926;
+                // and now loose precision to 0.25C
+                temp = (temp >>= 6) * 30 / 12;
                 cli();
-                state_.ex.measurements.temp = value;
+                state_.ex.measurements.temp = static_cast<int16_t>(temp);
                 sei();
                 ADC0.MUXPOS = ADC_MUXPOS_AIN9_gc;
                 ADC0.CTRLC = ADC_PRESC_DIV16_gc | ADC_REFSEL_INTREF_gc | ADC_SAMPCAP_bm; // 0.5mhz

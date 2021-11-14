@@ -287,7 +287,8 @@ private:
     static void secondTick() {
         ex_.time.secondTick();
         if (! status_.recording)
-            updateState();
+            getExtendedState(ex_.measurements);
+            //updateState();
         if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie)
             status_.updateMessages = true;
         // TODO do more stuff

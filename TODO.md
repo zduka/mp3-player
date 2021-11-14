@@ -14,10 +14,10 @@
 
 - enter sync mode after poweron unless WDT (or SW) reset
 - wakeup & enter sync mode when given hour
-- temp is wildly off up to being useless
 
 # ESP
 
+- dont start new wiFi connect when entering Walkie-talkie if already connected
 - OTA Updates should be checked on proper network and explicitly enabled in the remote
 - mDNS should worn on proper network
 
