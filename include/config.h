@@ -8,7 +8,6 @@
 #define DEFAULT_IDLE_TIMEOUT 30
 #define DEFAULT_PLAY_TIMEOUT 60
 
-
 #define AVR_I2C_ADDRESS 67
 #define IRQ_RESPONSE_TIMEOUT 64
 
@@ -35,10 +34,14 @@
 #define ESP_BUSY_TIMEOUT 64 * 60 * 2 // 2 minutes timeout for busy
 
 #define DEFAULT_VOLUME 5
+#define DEFAULT_ALARM_VOLUME 5
 
 #define MAX_WALKIE_TALKIE_MESSAGES 8
 #define MIN_WALKIE_TALKIE_RECORDING 8000
 
+/** Timeout for connection in the sync mode in milliseconds. 
+ */
+#define SYNC_CONNECTION_TIMEOUT (120 * 1000)
 
 /** Number of ticks (1/64th of a second) for which a button must be pressed down uninterrupted to power the player on. 
  

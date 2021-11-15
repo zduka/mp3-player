@@ -121,12 +121,21 @@ public:
         if (state_.mode() == Mode::Sync) {
             sync();
         } else {
+            Mode m = state_.mode();
+            if (m != Mode::Alarm) {
+                ex_.alarm.setMinute(ex_.time.minute() + 2);
+                ex_.alarm.setHour(ex_.time.hour());
+                ex_.alarm.enable(true);
+                setExtendedState(ex_.alarm);
+                LOG("Alarm set to %u:%u", ex_.alarm.hour(), ex_.alarm.minute());
+            }
             // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-            //state_.setMode(Mode::WalkieTalkie);
-            //setMode(Mode::Music);
-            state_.setMode(Mode::Music);
-            setMode(Mode::WalkieTalkie);
+            state_.setMode(Mode::WalkieTalkie);
+            setMode(m);
+            //state_.setMode(Mode::Music);
+            //setMode(Mode::WalkieTalkie);
         }
+        //connectWiFi();
     }
 
     static void loop() {
@@ -138,7 +147,15 @@ public:
                 if (!mp3_.loop()) {
                     mp3_.stop();
                     LOG("MP3 playback done");
-                    playNextTrack();
+                    switch (state_.mode()) {
+                        case Mode::Music:
+                        case Mode::Lights:
+                            playNextTrack();
+                            break;
+                        case Mode::Alarm:
+                            alarmDone();
+                            break;
+                    }
                 }
             } else if (wav_.isRunning()) {
                 if (!wav_.loop()) {
@@ -314,8 +331,9 @@ private:
             disconnectWiFi();
         if (state_.wifiStatus() != WiFiStatus::Connected) {
             connectWiFi();
-            while (state_.wifiStatus() == WiFiStatus::Connecting) {
-                delay(1);
+            uint32_t start = millis();
+            while (state_.wifiStatus() == WiFiStatus::Connecting && millis() - start < SYNC_CONNECTION_TIMEOUT) {
+                delay(100);
             };
         }
         // if the connection was successful, proceed with the sync
@@ -419,10 +437,22 @@ private:
             State old = state_;
             Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
             // check available events and react accordingly
-            if (state_.mode() == Mode::ESPOff && old.mode() != Mode::ESPOff)
-                powerOff();
-            if (state_.mode() == Mode::Sync)
-                sync();
+            if (state_.mode() != old.mode()) {
+                switch (state_.mode()) {
+                    case Mode::ESPOff:
+                        powerOff();
+                        break;
+                    case Mode::Alarm:
+                        // revert the mode first so that we can pause current mode if needed and save it in the setMode function below
+                        state_.setMode(old.mode());
+                        setMode(Mode::Alarm);
+                        break;
+                    // this should not happen really
+                    default:
+                        LOG("Unexpected mode change: %u", static_cast<uint8_t>(state_.mode()));
+                        break;
+                }
+            }
             if (state_.controlTurn()) 
                 controlTurn();
             if (state_.controlButtonDown() != old.controlButtonDown())
@@ -515,11 +545,13 @@ private:
                 send(msg::LightsPoint{i, 7, MODE_COLOR_LIGHTS});
                 break;
             }
-            case Mode::WalkieTalkie: {
+            case Mode::WalkieTalkie:
                 // convert to volume press (play/pause)
                 volumePress();
                 break;
-            }
+            case Mode::Alarm:
+                snooze();
+                break;
             default:
                 break;
         }
@@ -529,11 +561,12 @@ private:
      */
     static void controlLongPress() {
         LOG("Control long press");
-        if (state_.mode() == Mode::Music) {
+        if (state_.mode() == Mode::Music)
             setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled));
-        } else {
+        else if (state_.mode() == Mode::Alarm)
+            alarmDone();
+        else
             setMode(Mode::Music);
-        }
     }
 
     /** Selects track id in mp3 mode, radio frequency in radio, or changes hue in night lights mode. 
@@ -621,6 +654,9 @@ private:
                 else
                     pause();
                 break;
+            case Mode::Alarm:
+                snooze();
+                break;
             default:
                 break;
         }
@@ -628,7 +664,9 @@ private:
 
     static void volumeLongPress() {
         LOG("Volume long press");
-        if (state_.mode() != Mode::WalkieTalkie)
+        if (state_.mode() == Mode::Alarm)
+            alarmDone();
+        else if (state_.mode() != Mode::WalkieTalkie)
             setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
     }
 
@@ -701,7 +739,7 @@ private:
         if (state_.mode() == Mode::WalkieTalkie) {
             walkieTalkieStop();
             resume = true;
-            if (! settings_.keepWiFiAlive)
+            if (! settings_.keepWiFiAlive && state_.wifiStatus() != WiFiStatus::Off)
                 disconnectWiFi();
         }
         switch (mode) {
@@ -725,9 +763,19 @@ private:
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 setControlRange(0, numMessages_);
-                // connect to WiFi
-                connectWiFi();
+                // connect to WiFi, if not already connected
+                if (state_.wifiStatus() != WiFiStatus::Connected)
+                    connectWiFi();
+                // make sure we are ready to record
                 status_.recordingReady = true;
+                break;
+            case Mode::Alarm:
+                alarmReturnMode_ = state_.mode();
+                alarmResume_ = ! state_.idle();
+                stop();
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                play();
                 break;
             default:
                 break;
@@ -752,6 +800,9 @@ private:
             case Mode::WalkieTalkie: 
                 if (! wav_.isRunning())
                     walkieTalkiePlay();
+                break;
+            case Mode::Alarm:
+                alarmPlay();
                 break;
             default:
                 break;
@@ -793,6 +844,9 @@ private:
                 break;
             case Mode::WalkieTalkie:
                 walkieTalkieStop();
+            case Mode::Alarm:
+                mp3Stop();
+                break;
             default:
                 break;
         }
@@ -1342,6 +1396,49 @@ MAX_WALKIE_TALKIE_MESSAGES;
      */
     //@{
 
+    static void initializeAlarm() {
+        
+    }
+
+    static void alarmPlay() {
+        audioFile_.open("5/a440.mp3");
+        i2s_.SetGain(static_cast<float>(alarmVolume_ + 1) / 16);
+        mp3_.begin(& audioFile_, & i2s_);
+        LOG("Alarm!!!");
+    }
+
+    static void snooze() {
+        LOG("Snooze");
+        stop();
+        ex_.alarm.snooze();
+        LOG("Alarm set to %u:%u", ex_.alarm.hour(), ex_.alarm.minute());
+        setExtendedState(ex_.alarm);
+        if (alarmReturnMode_ != Mode::Alarm) {
+            setMode(alarmReturnMode_);
+            if (alarmResume_)
+                play();
+        } else {
+            send(msg::Sleep{});
+        }
+    }
+
+    static void alarmDone() {
+        LOG("Alarm done");
+        stop();
+        // TODO load the alarm from SD card to get rid of any snoozing...
+        if (alarmReturnMode_ != Mode::Alarm) {
+            setMode(alarmReturnMode_);
+            if (alarmResume_)
+                play();
+        } else {
+            send(msg::Sleep{});
+        }
+    }
+
+    static inline Mode alarmReturnMode_;
+    static inline bool alarmResume_;
+    static inline uint8_t alarmVolume_ = DEFAULT_ALARM_VOLUME;
+
     //@}
 
     /** \name Birthday Greeting mode
@@ -1453,12 +1550,47 @@ MAX_WALKIE_TALKIE_MESSAGES;
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
-     * 
-     * reason 3?
-     * reason 201?
+     
+       reason 2
+       reason 3?
+       reason 201?
+
      */
     static void onWiFiDisconnected(WiFiEventStationModeDisconnected const & e) {
         LOG("WiFi: disconnected, reason: %u", e.reason);
+        switch (e.reason) {
+            case REASON_UNSPECIFIED:
+            case REASON_AUTH_EXPIRE:
+            case REASON_AUTH_LEAVE:
+            case REASON_ASSOC_EXPIRE:
+            case REASON_ASSOC_TOOMANY:
+            case REASON_NOT_AUTHED:
+            case REASON_NOT_ASSOCED:
+            case REASON_ASSOC_LEAVE:
+            case REASON_ASSOC_NOT_AUTHED:
+            case REASON_DISASSOC_PWRCAP_BAD:
+            case REASON_DISASSOC_SUPCHAN_BAD:
+            case REASON_IE_INVALID:
+            case REASON_MIC_FAILURE:
+            case REASON_4WAY_HANDSHAKE_TIMEOUT:
+            case REASON_GROUP_KEY_UPDATE_TIMEOUT:
+            case REASON_IE_IN_4WAY_DIFFERS:
+            case REASON_GROUP_CIPHER_INVALID:
+            case REASON_PAIRWISE_CIPHER_INVALID:
+            case REASON_AKMP_INVALID:
+            case REASON_UNSUPP_RSN_IE_VERSION:
+            case REASON_INVALID_RSN_IE_CAP:
+            case REASON_802_1X_AUTH_FAILED:
+            case REASON_CIPHER_SUITE_REJECTED:
+            case REASON_BEACON_TIMEOUT:
+            case REASON_NO_AP_FOUND:
+            case REASON_AUTH_FAIL:
+            case REASON_ASSOC_FAIL:
+            case REASON_HANDSHAKE_TIMEOUT:
+                break;
+        }
+        state_.setWiFiStatus(WiFiStatus::Off);
+        send(msg::SetWiFiStatus{WiFiStatus::Off});
     }
 
     static inline WiFiEventHandler wifiConnectedHandler_;
@@ -1486,6 +1618,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
         server_.on("/status", httpStatus);
         server_.on("/reset", httpReset);
+        server_.on("/sleep", httpSleep);
         server_.on("/generalSettings", httpSettings);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
@@ -1554,6 +1687,12 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static void httpReset() {
         LOG("http reset");
         send(msg::Reset{});
+        server_.send(200, GENERIC_MIME, "{response: 200}");
+    }
+
+    static void httpSleep() {
+        LOG("http sleep");
+        send(msg::Sleep{});
         server_.send(200, GENERIC_MIME, "{response: 200}");
     }
 

@@ -36,6 +36,15 @@ public:
         return raw_ & SECOND_MASK;
     }
 
+    // https://cs.uwaterloo.ca/~alopez-o/math-faq/node73.html
+    uint8_t dayOfWeek() const {
+        uint8_t m = month();
+        uint8_t d = day();
+        uint16_t y = year();
+        y -= m<3; 
+        return (y + y / 4 - y / 100 +y / 400 + "-bed=pen+mad."[m] + d) % 7;
+    }
+
     void setYear(uint16_t year) {
         //assert(year >= 2021 && year <= 2084);
         raw_ &= ~YEAR_MASK;
@@ -156,4 +165,76 @@ private:
 
     uint32_t raw_ = 0;
 
-} __attribute__((packed));
+} __attribute__((packed)); //DateTime
+
+static_assert(sizeof(DateTime) == 4);
+
+/** Alarm definition. 
+ */
+class Alarm {
+public:
+    uint8_t hour() const {
+        return h_ & HOUR_MASK;
+    }
+
+    Alarm & setHour(uint8_t value) {
+        h_ = (h_ & ~HOUR_MASK) | (value & HOUR_MASK);
+        return *this;
+    }
+
+    uint8_t minute() const {
+        return m_ & MINUTE_MASK;
+    }
+
+    Alarm & setMinute(uint8_t value) {
+        m_ = (m_ & ~MINUTE_MASK) | (value & MINUTE_MASK);
+        return *this;
+    }
+
+    void snooze() {
+        ctrl_ = 0xff; // enable temporarily all days
+        if (minute() + 1 >= 60) { // 5
+            setHour((hour() + 1) % 24);
+            setMinute((minute() + 1) % 60); // 5
+        } else {
+            setMinute(minute() + 1);
+        }
+    }
+
+    bool enabled() const {
+        return ctrl_ & ENABLED_MASK;
+    }
+
+    Alarm & enable(bool value) {
+        // TODO deal with days too
+        ctrl_ = value ? 0xff : 0;
+        return *this;
+    }
+
+    bool operator == (DateTime const & other) const {
+        if (enabled() /*&& (ctrl_ & (1 << other.day())) */)
+            return (other.hour() == hour()) && (other.minute() == minute()) && (other.second() == 0);
+        else
+            return false;
+    }
+
+private:
+    static constexpr uint8_t HOUR_MASK = 31;
+    
+    uint8_t h_; 
+
+    static constexpr uint8_t MINUTE_MASK = 63;
+    uint8_t m_; 
+
+    static constexpr uint8_t ENABLED_MASK = 1;
+    static constexpr uint8_t SUN_MASK = 2;
+    static constexpr uint8_t MON_MASK = 4;
+    static constexpr uint8_t TUE_MASK = 8;
+    static constexpr uint8_t WED_MASK = 16;
+    static constexpr uint8_t THU_MASK = 32;
+    static constexpr uint8_t FRI_MASK = 64;
+    static constexpr uint8_t SAT_MASK = 128;
+    uint8_t ctrl_;
+
+} __attribute__((packed)); // Alarm
+

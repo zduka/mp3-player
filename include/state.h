@@ -18,7 +18,8 @@ enum class Mode : uint8_t {
     Disco = 1,
     Lights = 2,
     WalkieTalkie = 3,
-    // the alarm clock and birthday greeting modes are not directly accessible via controls, but are automatically selected by the system when appropriate
+    /** Triggered when the ESP should play an alarm. 
+     */
     Alarm = 4,
     BirthdayGreeting = 5,
     // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
@@ -27,10 +28,10 @@ enum class Mode : uint8_t {
     /** Initial mode after power on of the AVR as opposed to wakeup. 
      */
     InitialPowerOn = 13,
-    /** Signals the AVR to sleep.
+    /** Signals the AVR to sleep. ESP should never see this mode, when ESP wants to sleep, the msg::Sleep informs AVR to set the mode.  
      */
     Sleep = 14,
-    /** Signals the ESP to poweroff so that AVR can go to sleep.
+    /** Signals the ESP to poweroff so that AVR can go to sleep. Set by AVR when it's time to turn off. 
      */
     ESPOff = 15
 }; // Mode
@@ -271,9 +272,9 @@ public:
         return static_cast<WiFiStatus>((mode_ & WIFI_STATUS_MASK) >> 6);
     }
 
-    void setWiFiStatus(WiFiStatus mode) volatile {
+    void setWiFiStatus(WiFiStatus status) volatile {
         mode_ &= ~WIFI_STATUS_MASK;
-        mode_ |= (static_cast<uint8_t>(mode) << 6);
+        mode_ |= (static_cast<uint8_t>(status) << 6);
     }
 
 
@@ -465,7 +466,7 @@ public:
     WalkieTalkieState walkieTalkie;
     LightsState lights;
     DateTime time;
-    DateTime alarm;
+    Alarm alarm;
 
     void log() const {
         measurements.log();
@@ -478,7 +479,7 @@ public:
 
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 22);
+static_assert(sizeof(ExtendedState) == 21);
 
 /** Returns the next music mode. 
  

@@ -276,7 +276,7 @@ private:
         if ((++tickCountdown_ % 64) == 0) {
             //LOG("time: %u", state_.ex.time.second());
             secondTick();
-            // TODO actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
+            // actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
             if (--powerCountdown_ == 0) {
                 LOG("ESP power off countdown");
                 state_.state.setMode(Mode::ESPOff);
@@ -288,8 +288,12 @@ private:
 
     static void secondTick() {
         state_.ex.time.secondTick();
-        if (state_.ex.time.hour() == syncHour_) {
+        if (state_.ex.time.hour() == syncHour_ && state_.ex.time.minute() == 0 && state_.ex.time.second() == 0) {
             status_.sync = true;
+            status_.sleep = false;
+        } else if (state_.ex.alarm == state_.ex.time) {
+            state_.state.setMode(Mode::Alarm);
+            setIrq();
             status_.sleep = false;
         }
     }
@@ -1035,7 +1039,7 @@ private:
                 LOG("cmd SetMode m: %u, %u", static_cast<uint8_t>(m->mode), static_cast<uint8_t>(m->musicMode));
                 state_.state.setMode(m->mode);
                 state_.state.setMusicMode(m->musicMode);
-                if (m->mode == Mode::WalkieTalkie || m->musicMode == MusicMode::MP3)
+                if (m->mode == Mode::Alarm || m->mode == Mode::WalkieTalkie || m->musicMode == MusicMode::MP3)
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
                 else 
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
@@ -1289,9 +1293,8 @@ private:
         bool walkieTalkieEnabled : 1;
         bool lightsEnabled : 1;
 
-
-
     } status_;
+
 
     /** Hour at which the automated daily synchronization should be performed.
      */
