@@ -10,7 +10,6 @@
 #include <SD.h>
 #include <Hash.h>
 #include <ArduinoJson.h>
-//#include <ArduinoOTA.h>
 #include <radio.h>
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
@@ -170,7 +169,6 @@ public:
                     checkBotMessages();
                 }
             }
-            //ArduinoOTA.handle();            
             server_.handleClient();
         }
     }
@@ -1803,14 +1801,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         server_.on("/sd", httpSD);
         server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
         server_.begin();
-        /*
-        ArduinoOTA.setPort(8266);        
-        ArduinoOTA.onStart(OTAStart);
-        ArduinoOTA.onEnd(OTAEnd);
-        ArduinoOTA.onProgress(OTAProgress);
-        ArduinoOTA.onError(OTAError);
-        ArduinoOTA.begin(); 
-        */       
     }
 
     /** Updates the time from NTP server. 
@@ -1984,47 +1974,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
             }
         }
     }
-
-    /*
-    static void OTAStart() {
-        LOG("OTA update of %s started",  (ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "spiffs"));
-        send(msg::SetESPBusy{true});
-    }
-
-    static void OTAEnd() {
-        LOG("OTA update done");
-    }
-
-    static void OTAProgress(unsigned progress, unsigned total) {
-        LOG("OTA progress %u/%u",progress,total);  
-        send(msg::SetESPBusy{true});
-        send(msg::LightsBar(progress / 1024, total / 1024, Color::Red().withBrightness(settings_.maxBrightness)));
-    }
-
-    static void OTAError(ota_error_t error) {
-        LOG("OTA error: %u", error);
-        switch (error) {
-            case OTA_AUTH_ERROR:
-                LOG("Auth failed");
-                break;
-            case OTA_BEGIN_ERROR:
-                LOG("Begin Failed");
-                break;
-            case OTA_CONNECT_ERROR:
-                LOG("Connect Failed");
-                break;
-            case OTA_RECEIVE_ERROR:
-                LOG("Receive Failed");
-                break;
-            case OTA_END_ERROR:
-                LOG("End Failed");
-                break;
-            default:
-                break;
-        }
-        send(msg::SetESPBusy{false});
-    }    
-    */
 
     static inline ESP8266WebServer server_{80};
     static inline File uploadFile_;
