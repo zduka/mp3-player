@@ -2,13 +2,11 @@
 
 # SW
 
-- sleep mode should probably not be mode
-- pressing control when idle? should start play?
 - should notification light do stuff if we are in non music mode? 
 
 # ATTiny
 
-- WiFi connection seems to be blinking even if not really
+- WiFi connection seems to be blinking even if not really (? hard to reproduce)
 - wakeup & enter sync mode when given hour, check that it works
 - check clock & ADC settings
 

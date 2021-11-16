@@ -122,13 +122,6 @@ public:
             sync();
         } else {
             Mode m = state_.mode();
-            if (m != Mode::Alarm) {
-                ex_.alarm.setMinute(ex_.time.minute() + 2);
-                ex_.alarm.setHour(ex_.time.hour());
-                ex_.alarm.enable(true);
-                setExtendedState(ex_.alarm);
-                LOG("Alarm set to %u:%u", ex_.alarm.hour(), ex_.alarm.minute());
-            }
             // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
             state_.setMode(Mode::WalkieTalkie);
             setMode(m);
@@ -535,6 +528,9 @@ private:
                     setRadioStation(i);
                     send(msg::LightsPoint{i, static_cast<uint16_t>(numRadioStations_ - 1), MODE_COLOR_RADIO});
                 }
+                // if not currently playing, start playing now
+                if (state_.idle())
+                    play();
                 break;
             }
             case Mode::Lights: {
@@ -561,12 +557,16 @@ private:
      */
     static void controlLongPress() {
         LOG("Control long press");
-        if (state_.mode() == Mode::Music)
+        if (state_.mode() == Mode::Music) {
             setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled));
-        else if (state_.mode() == Mode::Alarm)
+            // start playing if we were idle
+            if (state_.idle())
+                play();
+        } else if (state_.mode() == Mode::Alarm) {
             alarmDone();
-        else
+        } else {
             setMode(Mode::Music);
+        }
     }
 
     /** Selects track id in mp3 mode, radio frequency in radio, or changes hue in night lights mode. 
@@ -584,6 +584,9 @@ private:
                     send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO.withBrightness(settings_.maxBrightness)});
                     setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
                 }
+                // start playing if we were idle
+                if (state_.idle())
+                    play();
                 break;
             case Mode::WalkieTalkie:
                 // if not empty, then the new messages must be played first via normal CTRL press

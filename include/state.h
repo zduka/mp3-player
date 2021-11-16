@@ -22,15 +22,14 @@ enum class Mode : uint8_t {
      */
     Alarm = 4,
     BirthdayGreeting = 5,
-    // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
-    Sync = 6,
 
+
+
+    // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
+    Sync = 13,
     /** Initial mode after power on of the AVR as opposed to wakeup. 
      */
-    InitialPowerOn = 13,
-    /** Signals the AVR to sleep. ESP should never see this mode, when ESP wants to sleep, the msg::Sleep informs AVR to set the mode.  
-     */
-    Sleep = 14,
+    InitialPowerOn = 14,
     /** Signals the ESP to poweroff so that AVR can go to sleep. Set by AVR when it's time to turn off. 
      */
     ESPOff = 15

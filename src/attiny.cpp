@@ -261,7 +261,7 @@ private:
     
     static void tick() {
         //digitalWrite(DEBUG_PIN, HIGH); 
-        if (state_.state.mode() == Mode::Sleep)
+        if (status_.shouldSleep)
             sleep();           
         // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
         if ((status_.irq || status_.espBusy) && (--irqCountdown_ == 0))
@@ -290,11 +290,11 @@ private:
         state_.ex.time.secondTick();
         if (state_.ex.time.hour() == syncHour_ && state_.ex.time.minute() == 0 && state_.ex.time.second() == 0) {
             status_.sync = true;
-            status_.sleep = false;
+            status_.sleeping = false;
         } else if (state_.ex.alarm == state_.ex.time) {
             state_.state.setMode(Mode::Alarm);
             setIrq();
-            status_.sleep = false;
+            status_.sleeping = false;
         }
     }
 
@@ -302,6 +302,7 @@ private:
      */
     static void sleep() {
         LOG("entering sleep");
+        status_.shouldSleep = false;
         do { // wrapped in a loop to account to allow wakeup to re-enter sleep immediately (such as when low volatge, etc.)
             // disable rotary encoder interrupts so that they do not wake us from sleep
             control_.clearInterrupt();
@@ -319,17 +320,17 @@ private:
             // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
             LOG("sleep");
             state_.ex.log();
-            status_.sleep = true;
+            status_.sleeping = true;
             // clear the reset flags in CPU
             RSTCTRL.RSTFR = 0;
-            while (status_.sleep)
+            while (status_.sleeping)
                 sleep_cpu();
             // clear the button events that led to the wakeup
             // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
             state_.state.clearEvents();
             // if we are not longer sleeping, wakeup
             wakeup();
-        } while (status_.sleep);
+        } while (status_.sleeping);
     }
 
     static void wakeup() {
@@ -358,7 +359,7 @@ private:
         }
         if (undervoltageCountdown_ == 0) {
             criticalBatteryWarning();
-            status_.sleep = true;
+            status_.sleeping = true;
         } else {
             powerCountdown_ = 60; // make sure we are awake for at least 1 minute, the ESP will set proper timer when it turns on
             // enable interrupts for rotary encoders
@@ -528,7 +529,7 @@ private:
         if (status_.espBusy)
             return;
         controlBtn_.poll();
-        if (status_.sleep) {
+        if (status_.sleeping) {
             checkButtonWakeup(controlBtn_.pressed());
         } else if (controlBtn_.pressed()) {
             longPressCounter_ = BUTTON_LONG_PRESS_TICKS;
@@ -560,7 +561,7 @@ private:
             return;
         volumeBtn_.poll();
         // if we are sleeping check if we should wake up 
-        if (status_.sleep) {
+        if (status_.sleeping) {
             checkButtonWakeup(volumeBtn_.pressed());
         // if this is a press, reset the long press counter and update the state
         } else if (volumeBtn_.pressed()) {
@@ -1023,7 +1024,7 @@ private:
                     state_.state.setMode(Mode::Sync);
                     setIrq();
                 } else {
-                    state_.state.setMode(Mode::Sleep);
+                    status_.shouldSleep = true;
                 }
                 break;
             }
@@ -1256,9 +1257,14 @@ private:
 
     inline static volatile struct {
 
-        /** If true, AVR should sleep, or is currently sleeping.
+        /** If true, AVR is currently sleeping.
          */
-        bool sleep : 1;
+        bool sleeping : 1;
+
+        /** Set to notify the main thread to go to sleep. 
+         */
+        bool shouldSleep : 1;
+
         /** If true, the IRQ flag is currently raised, which is a notification to ESP that it should read the state and react to the changes (or recording buffer if we are recording).
          */        
         bool irq : 1;
@@ -1334,12 +1340,12 @@ private:
 ISR(RTC_PIT_vect) {
     //digitalWrite(DEBUG_PIN, HIGH);
     RTC.PITINTFLAGS = RTC_PI_bm;
-    if (Player::status_.sleep) {
+    if (Player::status_.sleeping) {
         if (Player::status_.wakeup) {
             if ((++Player::tickCountdown_ % 64) == 0) 
                 Player::state_.ex.time.secondTick();
             if (--Player::powerCountdown_ == 0)
-                Player::status_.sleep = false;
+                Player::status_.sleeping = false;
         } else {
             // do one second tick
             Player::secondTick();
