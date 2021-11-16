@@ -309,11 +309,9 @@ private:
             volume_.clearInterrupt();
             // turn off neopixels and esp
             peripheralPowerOff();
-            // disable idle mode when sleeping, disable wifi, disable ESP busy, set mode to music, which is the default after waking up
+            // disable idle mode when sleeping, set mode to music, which is the default after waking up
             state_.state.setIdle(false);
-            state_.state.setWiFiStatus(WiFiStatus::Off);
             state_.state.setMode(Mode::Music); 
-            status_.espBusy = false;
             // enable RTC interrupt every second so that the time can be kept
             while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
             RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
@@ -1040,10 +1038,10 @@ private:
                 LOG("cmd SetMode m: %u, %u", static_cast<uint8_t>(m->mode), static_cast<uint8_t>(m->musicMode));
                 state_.state.setMode(m->mode);
                 state_.state.setMusicMode(m->musicMode);
-                if (m->mode == Mode::Alarm || m->mode == Mode::WalkieTalkie || m->musicMode == MusicMode::MP3)
-                    digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
-                else 
+                if (m->mode == Mode::Music && m->musicMode == MusicMode::Radio)
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
+                else 
+                    digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
                 break;
             }
             case msg::SetIdle::Id: {

@@ -36,6 +36,10 @@ public:
         return raw_ & SECOND_MASK;
     }
 
+    /** Returns the day of week for given date. 
+     
+        Only works for dates in range. Returns 0 for Monday and 6 for Sunday. 
+     */
     // https://cs.uwaterloo.ca/~alopez-o/math-faq/node73.html
     uint8_t dayOfWeek() const {
         uint8_t m = month();
@@ -191,13 +195,13 @@ public:
         return *this;
     }
 
-    void snooze() {
+    void snooze(uint8_t by = 5) {
         ctrl_ = 0xff; // enable temporarily all days
-        if (minute() + 1 >= 60) { // 5
+        if (minute() + 5 >= 60) {
             setHour((hour() + 1) % 24);
-            setMinute((minute() + 1) % 60); // 5
+            setMinute((minute() + 5) % 60);
         } else {
-            setMinute(minute() + 1);
+            setMinute(minute() + 5);
         }
     }
 
@@ -205,14 +209,34 @@ public:
         return ctrl_ & ENABLED_MASK;
     }
 
+    /** Returns true if the alarm is active for given day (0 = Monday, 6 = Sunday). 
+     */
+    bool activeDay(uint8_t dayId) const {
+        return ctrl_ & (2 << dayId);
+    }
+
     Alarm & enable(bool value) {
-        // TODO deal with days too
-        ctrl_ = value ? 0xff : 0;
+        if (value) 
+            ctrl_ |= ENABLED_MASK;
+        else
+            ctrl_ &= ~ENABLED_MASK;
+        return *this;
+    }
+
+    Alarm & enable(bool enabled, bool mon, bool tue, bool wed, bool thu, bool fri, bool sat, bool sun) {
+        ctrl_ = (enabled ? ENABLED_MASK : 0)
+              | (mon ? MON_MASK : 0)
+              | (tue ? TUE_MASK : 0)
+              | (wed ? WED_MASK : 0)
+              | (thu ? THU_MASK : 0)
+              | (fri ? FRI_MASK : 0)
+              | (sat ? SAT_MASK : 0)
+              | (sun ? SUN_MASK : 0);
         return *this;
     }
 
     bool operator == (DateTime const & other) const {
-        if (enabled() /*&& (ctrl_ & (1 << other.day())) */)
+        if (enabled() && activeDay(other.dayOfWeek()))
             return (other.hour() == hour()) && (other.minute() == minute()) && (other.second() == 0);
         else
             return false;
@@ -227,14 +251,13 @@ private:
     uint8_t m_; 
 
     static constexpr uint8_t ENABLED_MASK = 1;
-    static constexpr uint8_t SUN_MASK = 2;
-    static constexpr uint8_t MON_MASK = 4;
-    static constexpr uint8_t TUE_MASK = 8;
-    static constexpr uint8_t WED_MASK = 16;
-    static constexpr uint8_t THU_MASK = 32;
-    static constexpr uint8_t FRI_MASK = 64;
-    static constexpr uint8_t SAT_MASK = 128;
+    static constexpr uint8_t MON_MASK = 2;
+    static constexpr uint8_t TUE_MASK = 4;
+    static constexpr uint8_t WED_MASK = 8;
+    static constexpr uint8_t THU_MASK = 16;
+    static constexpr uint8_t FRI_MASK = 32;
+    static constexpr uint8_t SAT_MASK = 64;
+    static constexpr uint8_t SUN_MASK = 128;
     uint8_t ctrl_;
 
 } __attribute__((packed)); // Alarm
-

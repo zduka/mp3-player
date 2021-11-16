@@ -10,7 +10,7 @@
 #include <SD.h>
 #include <Hash.h>
 #include <ArduinoJson.h>
-#include <ArduinoOTA.h>
+//#include <ArduinoOTA.h>
 #include <radio.h>
 #include <RDA5807M.h>
 #include <AudioFileSourceSD.h>
@@ -55,6 +55,8 @@ public:
     static inline char const * WALKIE_TALKIE_SETTINGS_FILE = "player/bot.json";
     static inline char const * WALKIE_TALKIE_CERT_FILE = "player/cert.txt";
     static inline char const * WIFI_SETTINGS_FILE = "player/wifi.json";
+    static inline char const * ALARM_SETTINGS_FILE = "player/alarm.json";
+    static inline char const * GREETING_SETTINGS_FILE = "player/greeting.json";
 
     /** Initializes the player
      */
@@ -103,6 +105,7 @@ public:
         initializeWalkieTalkie();
         send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         initializeSettings();
+        initializeAlarm();
         // if this is the initial state, write basic settings from the mode configuration to cached state
         if (ex_.radio.stationId == 0xff) {
             LOG("Initial power on");
@@ -118,17 +121,19 @@ public:
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
         send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
-        if (state_.mode() == Mode::Sync) {
+        if (state_.mode() == Mode::Sync)
             sync();
-        } else {
-            Mode m = state_.mode();
+        else
+            if (! checkGreeting())
+                setMode(state_.mode());
+            //Mode m = state_.mode();
             // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-            state_.setMode(Mode::WalkieTalkie);
-            setMode(m);
+            //state_.setMode(Mode::WalkieTalkie);
             //state_.setMode(Mode::Music);
             //setMode(Mode::WalkieTalkie);
-        }
-        //connectWiFi();
+        //}
+        // this is pretty dangerous as the server in MP3 mode does not really work at all
+        connectWiFi();
     }
 
     static void loop() {
@@ -165,7 +170,7 @@ public:
                     checkBotMessages();
                 }
             }
-            ArduinoOTA.handle();            
+            //ArduinoOTA.handle();            
             server_.handleClient();
         }
     }
@@ -249,7 +254,6 @@ private:
         settings_.maxHeadphonesVolume = json["maxHeadphonesVolume"].as<uint8_t>();
         settings_.timezone = json["timezone"].as<int32_t>();
         settings_.maxBrightness = json["maxBrightness"].as<uint8_t>();
-        settings_.keepWiFiAlive = json["keepWiFiAlive"].as<bool>();
         settings_.radioEnabled = json["radioEnabled"].as<bool>();
         settings_.lightsEnabled = json["lightsEnabled"].as<bool>();
         settings_.walkieTalkieEnabled = json["walkieTalkieEnabled"].as<bool>();
@@ -262,7 +266,6 @@ private:
         "maxHeadphonesVolume:%u,"
         "timezone:%lli,"
         "maxBrightness:%u,"
-        "keepWiFiAlive:%u,"
         "radioEnabled:%u,"
         "lightsEnabled:%u,"
         "walkieTalkieEnabled:%u"
@@ -272,11 +275,9 @@ private:
         settings_.maxHeadphonesVolume,
         settings_.timezone,
         settings_.maxBrightness,
-        settings_.keepWiFiAlive,
         settings_.radioEnabled,
         settings_.lightsEnabled,
-        settings_.walkieTalkieEnabled
-        );
+        settings_.walkieTalkieEnabled);
     }
 
     //@}
@@ -548,6 +549,10 @@ private:
             case Mode::Alarm:
                 snooze();
                 break;
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
             default:
                 break;
         }
@@ -557,15 +562,22 @@ private:
      */
     static void controlLongPress() {
         LOG("Control long press");
-        if (state_.mode() == Mode::Music) {
-            setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled));
-            // start playing if we were idle
-            if (state_.idle())
-                play();
-        } else if (state_.mode() == Mode::Alarm) {
-            alarmDone();
-        } else {
-            setMode(Mode::Music);
+        switch (state_.mode()) {
+            case Mode::Music: 
+                setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled));
+                // start playing if we were idle
+                if (state_.idle())
+                    play();
+                break;
+            case Mode::Alarm:
+                alarmDone();
+                break;
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                setMode(Mode::Music);
         }
     }
 
@@ -613,6 +625,10 @@ private:
                     send(msg::LightsBar{8, 8, Color::HSV(ex_.lights.colorHue(), 255, settings_.maxBrightness)});
                 break;
             }
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
             default:
                 break;
         }
@@ -660,6 +676,10 @@ private:
             case Mode::Alarm:
                 snooze();
                 break;
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
             default:
                 break;
         }
@@ -667,7 +687,10 @@ private:
 
     static void volumeLongPress() {
         LOG("Volume long press");
-        if (state_.mode() == Mode::Alarm)
+        // any button press while in greeting mode moves to the music mode instead
+        if (state_.mode() == Mode::Greeting)
+            setMode(Mode::Music);
+        else if (state_.mode() == Mode::Alarm)
             alarmDone();
         else if (state_.mode() != Mode::WalkieTalkie)
             setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
@@ -689,6 +712,7 @@ private:
                     radioUpdateVolume();
                 break;
             case Mode::WalkieTalkie:
+            case Mode::Greeting:
                 i2sUpdateVolume();
                 break;
             default:
@@ -701,7 +725,24 @@ private:
      */
     static void doubleLongPress() {
         LOG("Double long press");
-        setMode(state_.mode() == Mode::Music ? Mode::WalkieTalkie : Mode::Music);
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                setMode(Mode::WalkieTalkie);
+                break;
+            case Mode::WalkieTalkie:
+                setMode(Mode::Music);
+                break;
+            case Mode::Alarm:
+                alarmDone();
+                break;
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                // unreachable
+                break;
+        }
     }
 
     //@}
@@ -737,16 +778,19 @@ private:
 
     static void setMode(Mode mode) {
         LOG("Setting mode %u", mode);
-        bool resume = false;
         // if we are coming from walkie talkie, disconnect WiFi too and make sure the playback of messages is stopped
         if (state_.mode() == Mode::WalkieTalkie) {
             walkieTalkieStop();
-            resume = true;
-            if (! settings_.keepWiFiAlive && state_.wifiStatus() != WiFiStatus::Off)
+            if (state_.wifiStatus() != WiFiStatus::Off)
                 disconnectWiFi();
         }
         switch (mode) {
-            case Mode::Music:
+            case Mode::Music: {
+                // stop if we are moving from the greeting mode so that we can play proper mp3
+                if (state_.mode() == Mode::Greeting)
+                    stop();
+                // if we are going back from lights and already playing, otherwise resume
+                bool resume = state_.idle() || (state_.mode() != Mode::Lights);
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 if (resume)
@@ -756,6 +800,7 @@ private:
                 else
                     setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
                 break;
+            }
             case Mode::Lights:
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
@@ -776,6 +821,11 @@ private:
                 alarmReturnMode_ = state_.mode();
                 alarmResume_ = ! state_.idle();
                 stop();
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                play();
+                break;
+            case Mode::Greeting:
                 state_.setMode(mode);
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 play();
@@ -806,6 +856,9 @@ private:
                 break;
             case Mode::Alarm:
                 alarmPlay();
+                break;
+            // don't do anything - the playback will start later as we don't know the filename at this point
+            case Mode::Greeting:
                 break;
             default:
                 break;
@@ -848,6 +901,7 @@ private:
             case Mode::WalkieTalkie:
                 walkieTalkieStop();
             case Mode::Alarm:
+            case Mode::Greeting:
                 mp3Stop();
                 break;
             default:
@@ -1396,15 +1450,93 @@ MAX_WALKIE_TALKIE_MESSAGES;
     //@}
 
     /** \name Alarm Clock mode
+     
+        One alarm can be defined. ESP will wake/up & start playing the selected mp3 file when the time is right. Short press of any of the buttons snoozes the alarm for 5 minutes. Long press stops the alarm (but the alarm will be activated next time it occurs).
+
+        See the `/sd/player/alarm.json` for an example alarm file. To get alarm, use the `alarm` URL. To upload alarm, first upload the `player/alarm.json` file and then call the `cmd?cmd=alarm_upload` command to reload the alarm. 
+
      */
     //@{
 
     static void initializeAlarm() {
-        
+        LOG("Setting alarm from SD card");
+        File f = SD.open(ALARM_SETTINGS_FILE, FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                bool enabled = json["enabled"].as<bool>();
+                uint8_t h = json["h"].as<uint8_t>();
+                uint8_t m = json["m"].as<uint8_t>();
+                bool mon = json["mon"].as<bool>();
+                bool tue = json["tue"].as<bool>();
+                bool wed = json["wed"].as<bool>();
+                bool thu = json["thu"].as<bool>();
+                bool fri = json["fri"].as<bool>();
+                bool sat = json["sat"].as<bool>();
+                bool sun = json["sun"].as<bool>();
+                ex_.alarm.setHour(h).setMinute(m).enable(enabled, mon, tue, wed, thu, fri, sat, sun);
+                char buf[256];
+                alarmToJson(buf, sizeof(buf));
+                LOG("Alarm set to: %s", buf);
+            } else {
+                LOG("Invalid alarm settings");
+            }
+            f.close();
+        } else {
+            LOG("No alarm found");
+        }
+    }
+
+    static int getAlarmMP3(char * buffer, int bufLen) {
+        File f = SD.open(ALARM_SETTINGS_FILE, FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                char const * filename = json["file"].as<char const *>();
+                if (filename != nullptr)
+                    return snprintf_P(buffer, bufLen, PSTR("%s"), filename);
+            }
+                
+            f.close();
+        }
+        buffer[0] = 0;
+        return 0;
+    }
+
+    static int alarmToJson(char * buffer, int bufLen) {
+        char filename[32];
+        getAlarmMP3(filename, sizeof(filename));
+        return snprintf_P(buffer, bufLen, PSTR("{"
+        "enabled:%u,"
+        "h:%u,"
+        "m:%u,"
+        "mon:%u,"
+        "tue:%u,"
+        "wed:%u,"
+        "thu:%u,"
+        "fri:%u,"
+        "sat:%u,"
+        "sun:%u,"
+        "file:\"%s\""
+        "}"),
+        ex_.alarm.enabled(),
+        ex_.alarm.hour(),
+        ex_.alarm.minute(),
+        ex_.alarm.activeDay(0), 
+        ex_.alarm.activeDay(1), 
+        ex_.alarm.activeDay(2), 
+        ex_.alarm.activeDay(3), 
+        ex_.alarm.activeDay(4), 
+        ex_.alarm.activeDay(5), 
+        ex_.alarm.activeDay(6),
+        filename
+        );
     }
 
     static void alarmPlay() {
-        audioFile_.open("5/a440.mp3");
+        char filename[32];
+        getAlarmMP3(filename, sizeof(filename));
+        audioFile_.open(filename);
         i2s_.SetGain(static_cast<float>(alarmVolume_ + 1) / 16);
         mp3_.begin(& audioFile_, & i2s_);
         LOG("Alarm!!!");
@@ -1445,8 +1577,48 @@ MAX_WALKIE_TALKIE_MESSAGES;
     //@}
 
     /** \name Birthday Greeting mode
+     
+        The greeting mode is really simple as no persistent configuration or even ESP memory is needed. At each start we just check whether any of the stored dates apply and if they do play the appropriate greeting. 
+
+        To read/update the greeting information use the sd download and sd upload routines.
      */
     //@{
+
+    /** Checks if a greeting should be played and plays if true. 
+     
+        Returns true if a greeting is played, false otherwise.
+     */
+    static bool checkGreeting() {
+        LOG("Checking greeting...");
+        File f = SD.open(GREETING_SETTINGS_FILE, FILE_READ);
+        bool result = false;
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                for (JsonVariant greeting : json.as<JsonArray>()) {
+                    bool enabled = greeting["enabled"].as<bool>();
+                    uint8_t m = greeting["m"].as<uint8_t>();
+                    uint8_t d = greeting["d"].as<uint8_t>();
+                    LOG("Greeting date %u/%u, enabled : %u", d, m, enabled ? 1 : 0);
+                    if (enabled && m == ex_.time.month() && d == ex_.time.day()) {
+                        char const * filename = greeting["file"].as<char const *>();
+                        if (filename != nullptr) {
+                            result = true;
+                            setMode(Mode::Greeting);
+                            audioFile_.open(filename);
+                            i2s_.SetGain(static_cast<float>(alarmVolume_ + 1) / 16);
+                            mp3_.begin(& audioFile_, & i2s_);
+                            LOG("Greeting!!!");
+                            break;
+                        }
+                    }
+                }
+            }
+            f.close();
+        }
+        return result;
+    }
+
 
     //@}
 
@@ -1458,6 +1630,8 @@ MAX_WALKIE_TALKIE_MESSAGES;
      */
     static void initializeWiFi() {
         LOG("Initializing WiFi...");
+        // make sure AVR knows wifi is currently off (in case of ESP resets, etc.)
+        send(msg::SetWiFiStatus{WiFiStatus::Off});
         wifiConnectedHandler_ = WiFi.onStationModeConnected(onWiFiConnected);
         wifiIPAssignedHandler_ = WiFi.onStationModeGotIP(onWiFiIPAssigned);
         wifiDisconnectedHandler_ = WiFi.onStationModeDisconnected(onWiFiDisconnected);
@@ -1592,8 +1766,10 @@ MAX_WALKIE_TALKIE_MESSAGES;
             case REASON_HANDSHAKE_TIMEOUT:
                 break;
         }
-        state_.setWiFiStatus(WiFiStatus::Off);
-        send(msg::SetWiFiStatus{WiFiStatus::Off});
+        if (state_.wifiStatus() != WiFiStatus::Connecting) {
+            state_.setWiFiStatus(WiFiStatus::Off);
+            send(msg::SetWiFiStatus{WiFiStatus::Off});
+        }
     }
 
     static inline WiFiEventHandler wifiConnectedHandler_;
@@ -1619,20 +1795,22 @@ MAX_WALKIE_TALKIE_MESSAGES;
         server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
         server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
+        server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
-        server_.on("/reset", httpReset);
-        server_.on("/sleep", httpSleep);
         server_.on("/generalSettings", httpSettings);
+        server_.on("/alarm", httpAlarm);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
         server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
         server_.begin();
+        /*
         ArduinoOTA.setPort(8266);        
         ArduinoOTA.onStart(OTAStart);
         ArduinoOTA.onEnd(OTAEnd);
         ArduinoOTA.onProgress(OTAProgress);
         ArduinoOTA.onError(OTAError);
-        ArduinoOTA.begin();        
+        ArduinoOTA.begin(); 
+        */       
     }
 
     /** Updates the time from NTP server. 
@@ -1658,6 +1836,26 @@ MAX_WALKIE_TALKIE_MESSAGES;
 
     static void http404() {
         server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + server_.uri() + "\" }");
+    }
+
+    static void httpCommand() {
+        String const & cmd = server_.arg("cmd");
+        if (cmd == "reset") {
+            LOG("http reset");
+            send(msg::Reset{});
+        } else if (cmd == "sleep") {
+            LOG("http sleep");
+            send(msg::Sleep{});
+        } else if (cmd == "reload_alarm") {
+            LOG("http reload alarm");
+            initializeAlarm();
+            setExtendedState(ex_.alarm);
+            return httpAlarm();
+        } else {
+            LOG("http invalid command: %s", cmd.c_str());
+            return server_.send(404, GENERIC_MIME, "{response: 404}");
+        }
+        server_.send(200, GENERIC_MIME, "{response: 200}");
     }
 
     /** Returns the status of the player.
@@ -1687,22 +1885,17 @@ MAX_WALKIE_TALKIE_MESSAGES;
         server_.send(200, JSON_MIME, buf, len);
     }
 
-    static void httpReset() {
-        LOG("http reset");
-        send(msg::Reset{});
-        server_.send(200, GENERIC_MIME, "{response: 200}");
-    }
-
-    static void httpSleep() {
-        LOG("http sleep");
-        send(msg::Sleep{});
-        server_.send(200, GENERIC_MIME, "{response: 200}");
-    }
-
     static void httpSettings() {
         LOG("http settings");
         char buffer[1024];
         int len = settingsToJson(buffer, sizeof(buffer));
+        server_.send(200, JSON_MIME, buffer, len);
+    }
+
+    static void httpAlarm() {
+        LOG("http alarm");
+        char buffer[256];
+        int len = alarmToJson(buffer, sizeof(buffer));
         server_.send(200, JSON_MIME, buffer, len);
     }
 
@@ -1775,7 +1968,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
                 LOG("http upload done.");
                 if (uploadFile_) {
                     uploadFile_.close();
-                    server_.send(200, JSON_MIME, "{ response: 200 }");
+                    //server_.send(200, JSON_MIME, "{ response: 200 }");
                 } else {
                     server_.send(500, JSON_MIME, "{ response: 500 }");
                 }
@@ -1792,6 +1985,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
         }
     }
 
+    /*
     static void OTAStart() {
         LOG("OTA update of %s started",  (ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "spiffs"));
         send(msg::SetESPBusy{true});
@@ -1830,6 +2024,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
         }
         send(msg::SetESPBusy{false});
     }    
+    */
 
     static inline ESP8266WebServer server_{80};
     static inline File uploadFile_;

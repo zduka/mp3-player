@@ -21,9 +21,7 @@ enum class Mode : uint8_t {
     /** Triggered when the ESP should play an alarm. 
      */
     Alarm = 4,
-    BirthdayGreeting = 5,
-
-
+    Greeting = 5,
 
     // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
     Sync = 13,
@@ -507,10 +505,6 @@ public:
     int32_t timezone = 0;
 
     uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
-
-    /** If true, WiFi is not disconnected when leaving the walkie-talkie mode. 
-     */
-    bool keepWiFiAlive = true;
 
     bool radioEnabled = true;
     bool lightsEnabled = true;
