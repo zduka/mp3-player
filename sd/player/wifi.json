@@ -1,0 +1,11 @@
+{
+    networks : [
+        { ssid : "NETWORK1", password : "PASS1" },
+        { ssid : "NETWORK2", password : "PASS2" },
+        { ssid : "NETWORK3", password : "PASS3" }
+    ],
+    ap : {
+        ssid : "mp3-player",
+        password : "mp3-player"
+    }
+}
