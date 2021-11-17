@@ -69,14 +69,6 @@ class AVRState {
 public:
     volatile State state;
     ExtendedState ex;
-
-    void saveToEEPROM() {
-
-    }
-
-    void loadFromEEPROM() {
-        
-    }
 } __attribute__((packed));
 
 static_assert(sizeof(AVRState) == sizeof(State) + sizeof(ExtendedState));
@@ -152,6 +144,8 @@ public:
         USART0.CTRLB &= ~ USART_RXEN_bm;
         LOG("Initializing AVR");
         initializeAtTiny();
+        // enable watchdog
+        wdt_enable();
 
         //pinMode(DEBUG_PIN, OUTPUT);
         //digitalWrite(DEBUG_PIN, LOW);
@@ -227,8 +221,20 @@ private:
             LOG("  watchdog reset");
         if (RSTCTRL.RSTFR & RSTCTRL_SWRF_bm)
             LOG("  software reset");
-        // disable clock prescaler
-        CLKCTRL.MCLKCTRLB = 0;            
+        // reset the flags
+        RSTCTRL.RSTFR = 0;
+    }
+
+    static void wdt_enable() {
+        _PROTECTED_WRITE(WDT.CTRLA,WDT_PERIOD_8KCLK_gc); // no window, 8sec
+    }
+
+    static void wdt_reset() {
+        __asm__ __volatile__ ("wdr"::);
+    }
+
+    static void wdt_disable() {
+        _PROTECTED_WRITE(WDT.CTRLA,0);
     }
 
     /** Initializes the real-time clock. 
@@ -261,6 +267,9 @@ private:
     
     static void tick() {
         //digitalWrite(DEBUG_PIN, HIGH); 
+        // TODO enable this in production settings
+        //if (status_.espBusy || status_.recording)
+            wdt_reset();
         if (status_.shouldSleep)
             sleep();           
         // it is possible that between the irq check and the countdown check the irq will be cleared, however the second check would then only pass if the irq countdown was at its end and therefore the reset is ok
@@ -321,8 +330,10 @@ private:
             status_.sleeping = true;
             // clear the reset flags in CPU
             RSTCTRL.RSTFR = 0;
+            wdt_disable();
             while (status_.sleeping)
                 sleep_cpu();
+            wdt_enable();
             // clear the button events that led to the wakeup
             // no need to disable interruts as esp is not running and so I2C can't be reading state at this point
             state_.state.clearEvents();
@@ -624,7 +635,7 @@ private:
     //@}
 
     inline static RotaryEncoder control_{CTRL_A, CTRL_B, 256};
-    inline static RotaryEncoder volume_{VOL_A, VOL_B, 16};
+    inline static RotaryEncoder volume_{VOL_A, VOL_B, MAX_VOLUME};
     inline static Button controlBtn_{CTRL_BTN};
     inline static Button volumeBtn_{VOL_BTN};
 
@@ -947,6 +958,17 @@ private:
 //@{
 
     static void initializeI2C() {
+        cli();
+        // turn I2C off in case it was running before
+        TWI0.MCTRLA = 0;
+        TWI0.SCTRLA = 0;
+        // reset I2C buffers and state
+        i2cTxLength_ = 0;
+        i2cTxBuffer_ = nullptr;
+        i2cRxOffset_ = 0;
+        recordingWrite_ = 0;
+        recordingRead_ = 0;
+        status_.i2cRxReady = false;
         // make sure that the pins are nout out - HW issue with the chip, will fail otherwise
         PORTB.OUTCLR = 0x03; // PB0, PB1
         // set the address and disable general call, disable second address and set no address mask (i.e. only the actual address will be responded to)
@@ -957,6 +979,7 @@ private:
         // bus Error Detection circuitry needs Master enabled to work 
         // not sure why we need it
         TWI0.MCTRLA = TWI_ENABLE_bm;   
+        sei();
     }
     
     /** Sets the IRQ to inform ESP that there is a state change it should attend to. 
@@ -965,7 +988,7 @@ private:
      */
     static void setIrq() {
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-            if (! status_.irq && digitalRead(DCDC_PWR) == DCDC_PWR_ON) {
+            if (! status_.irq && digitalRead(DCDC_PWR) == DCDC_PWR_ON && state_.state.mode() != Mode::Sync) {
                 status_.irq = true;
                 pinMode(AVR_IRQ, OUTPUT);
                 digitalWrite(AVR_IRQ, LOW);
@@ -976,7 +999,7 @@ private:
         }
     }
 
-    static void clearIrq() {
+    static void clearIrq(bool force = false) {
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
             if (status_.irq) {
                 pinMode(AVR_IRQ, INPUT);
@@ -990,8 +1013,16 @@ private:
      */
     static void resetESP() {
         LOG("Resetting ESP");
-        clearIrq(); // this is necessary so that ESP boots into a normal mode
-        // TODO
+        peripheralPowerOff();
+        clearIrq(true); // this is necessary so that ESP boots into a normal mode
+        state_.state.setMode(Mode::ESPReset);
+        if (status_.recording)
+            stopAudioCapture();
+        status_.espBusy = false;
+        // reinitialize I2C so that there are no issues with some pending state
+        initializeI2C();
+        delay(200);
+        peripheralPowerOn();
     }
 
     static void processCommand() {
@@ -1011,7 +1042,6 @@ private:
                 LOG("cmd SetSettings");
                 maxBrightness_ = m->maxBrightness;
                 status_.radioEnabled = m->radioEnabled;
-                status_.walkieTalkieEnabled = m->walkieTalkieEnabled;
                 status_.lightsEnabled = m->lightsEnabled;
                 break;
             }
@@ -1031,6 +1061,11 @@ private:
             case msg::Reset::Id: {
                 LOG("cmd reset");
                 _PROTECTED_WRITE(RSTCTRL.SWRR,1);
+                break;
+            }
+            case msg::AVRWatchdogReset::Id: {
+                LOG("wdt_reset");
+                wdt_reset();
                 break;
             }
             case msg::SetMode::Id: {
@@ -1294,7 +1329,6 @@ private:
         bool espBusy : 1;
 
         bool radioEnabled : 1;
-        bool walkieTalkieEnabled : 1;
         bool lightsEnabled : 1;
 
     } status_;

@@ -23,6 +23,9 @@ enum class Mode : uint8_t {
     Alarm = 4,
     Greeting = 5,
 
+    /** Triggered when ESP is being reset by AVR. Switches to music immediately and won't play any greeting. 
+     */
+    ESPReset = 12,
     // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
     Sync = 13,
     /** Initial mode after power on of the AVR as opposed to wakeup. 
@@ -457,7 +460,6 @@ static_assert(sizeof(LightsState) == 2);
 class ExtendedState {
 public:
     Measurements measurements; 
-    //Settings settings;
     MP3State mp3;
     RadioState radio;
     WalkieTalkieState walkieTalkie;
@@ -467,7 +469,6 @@ public:
 
     void log() const {
         measurements.log();
-        //settings.log();
         mp3.log();
         radio.log();
         walkieTalkie.log();
@@ -489,29 +490,3 @@ inline MusicMode getNextMusicMode(Mode mode, MusicMode current, bool radioEnable
         return MusicMode::Radio;
     return MusicMode::MP3;
 }
-
-/** Settings stored on the SD card and used by the ESP alone. 
- 
-    TODO move to esp only
- */  
-class ESPSettings {
-public:
-
-    bool speakerEnabled = true;
-    uint8_t maxSpeakerVolume = 15;
-    uint8_t maxHeadphonesVolume = 15;
-    /** Timezone offset in seconds. 
-     */
-    int32_t timezone = 0;
-
-    uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
-
-    bool radioEnabled = true;
-    bool lightsEnabled = true;
-    bool walkieTalkieEnabled = true;
-
-    /** Default hour at which we synchronize
-     */
-    uint8_t syncHour = 3;
-
-}; // ESPSettings

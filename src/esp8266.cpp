@@ -45,6 +45,42 @@
 
 #define ERROR LOG
 
+/** Settings stored on the SD card and used by the ESP alone. 
+ 
+ */  
+class ESPSettings {
+public:
+
+    uint8_t maxSpeakerVolume = 15;
+    uint8_t maxHeadphonesVolume = 15;
+    /** Timezone offset in seconds. 
+     */
+    int32_t timezone = 0;
+
+    uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
+
+    bool radioEnabled = true;
+    bool lightsEnabled = true;
+    bool walkieTalkieEnabled = true;
+
+    /** Default hour at which we synchronize
+     */
+    uint8_t syncHour = 3;
+
+    void fromJSON(JsonDocument const & json) {
+        maxSpeakerVolume = json["maxSpeakerVolume"];
+        maxHeadphonesVolume = json["maxHeadphonesVolume"];
+        timezone = json["timezone"];
+        maxBrightness = json["maxBrightness"];
+        radioEnabled = json["radioEnabled"];
+        lightsEnabled = json["lightsEnabled"];
+        walkieTalkieEnabled = json["walkieTalkieEnabled"];
+        syncHour = json["syncHour"];
+    }
+
+}; // ESPSettings
+
+
 class Player {
 public:
 
@@ -73,16 +109,13 @@ public:
         pinMode(AVR_IRQ, INPUT_PULLUP);
         attachInterrupt(digitalPinToInterrupt(AVR_IRQ), avrIrq, FALLING);
         // enable I2C and request the current state and the extended state
+        // obtain the first state, without reacting to it
         Wire.begin(I2C_SDA, I2C_SCL);
         Wire.setClock(400000);
-        // obtain the first state, without reacting to it
-        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
-        if (n == sizeof(State)) {
-            Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
-        } else {
-            ERROR("Incomplete transaction while reading state, %u bytes received", n);
-            while (n-- > 0) 
-                Wire.read();
+        if (! readState()) {
+            LOG("Attempt 2:");
+            delay(200);
+            readState();
         }
         // get the extended state as well. 
         getExtendedState(ex_);
@@ -115,24 +148,25 @@ public:
         }
         // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
-        send(msg::SetSettings{settings_});
+        send(msg::SetSettings{settings_.maxBrightness, settings_.radioEnabled, settings_.lightsEnabled});
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
         send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
-        if (state_.mode() == Mode::Sync)
-            sync();
-        else
-            if (! checkGreeting())
-                setMode(state_.mode());
-            //Mode m = state_.mode();
-            // enter the last used music mode, which we do by a trick by setting mode internally to walkie talkie and then switching to music mode, which should force playback on
-            //state_.setMode(Mode::WalkieTalkie);
-            //state_.setMode(Mode::Music);
-            //setMode(Mode::WalkieTalkie);
-        //}
-        // this is pretty dangerous as the server in MP3 mode does not really work at all
-        connectWiFi();
+        switch (state_.mode()) {
+            case Mode::Sync:
+                sync();
+                break;
+            case Mode::ESPReset:
+                LOG("ESP reset detected!!!");
+                setMode(Mode::Music);
+                break;
+            default:
+                if (! checkGreeting())
+                    setMode(state_.mode());
+        }
+        // check the volume is within max range
+        volumeTurn();
     }
 
     static void loop() {
@@ -240,42 +274,9 @@ private:
         StaticJsonDocument<1024> json;
         File f = SD.open(SETTINGS_FILE, FILE_READ);
         if (f && deserializeJson(json, f) == DeserializationError::Ok) {
-            setSettings(json);
+            settings_.fromJSON(json);
             f.close();
         }
-    }
-
-    static void setSettings(JsonDocument const & json) {
-        LOG("Setting general settings");
-        settings_.speakerEnabled = json["speakerEnabled"].as<bool>();
-        settings_.maxSpeakerVolume = json["maxSpeakerVolume"].as<uint8_t>();
-        settings_.maxHeadphonesVolume = json["maxHeadphonesVolume"].as<uint8_t>();
-        settings_.timezone = json["timezone"].as<int32_t>();
-        settings_.maxBrightness = json["maxBrightness"].as<uint8_t>();
-        settings_.radioEnabled = json["radioEnabled"].as<bool>();
-        settings_.lightsEnabled = json["lightsEnabled"].as<bool>();
-        settings_.walkieTalkieEnabled = json["walkieTalkieEnabled"].as<bool>();
-    }
-
-    static int settingsToJson(char * buffer, int bufLen) {
-        return snprintf_P(buffer, bufLen, PSTR("{"
-        "speakerEnabled:%u,"
-        "maxSpeakerVolume:%u,"
-        "maxHeadphonesVolume:%u,"
-        "timezone:%lli,"
-        "maxBrightness:%u,"
-        "radioEnabled:%u,"
-        "lightsEnabled:%u,"
-        "walkieTalkieEnabled:%u"
-        "}"), 
-        settings_.speakerEnabled,
-        settings_.maxSpeakerVolume,
-        settings_.maxHeadphonesVolume,
-        settings_.timezone,
-        settings_.maxBrightness,
-        settings_.radioEnabled,
-        settings_.lightsEnabled,
-        settings_.walkieTalkieEnabled);
     }
 
     //@}
@@ -305,9 +306,10 @@ private:
     static void secondTick() {
         ex_.time.secondTick();
         if (! status_.recording)
-            getExtendedState(ex_.measurements);
+            if (getExtendedState(ex_.measurements))
+                send(msg::AVRWatchdogReset{});
             //updateState();
-        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie)
+        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie && settings_.walkieTalkieEnabled)
             status_.updateMessages = true;
         // TODO do more stuff
     }
@@ -318,6 +320,7 @@ private:
      */
     static void sync() {
         LOG("Synchronizing...");
+        send(msg::SetESPBusy{true});
         // first connect to WiFi unless already connected, if in AP mode, terminate AP mode first
         if (state_.wifiStatus() == WiFiStatus::AP)
             disconnectWiFi();
@@ -340,6 +343,7 @@ private:
         }
         // now we are done, let's sleep some more
         LOG("Synchronization done.");
+        send(msg::SetESPBusy{false});
         send(msg::Sleep{});
     }
 
@@ -408,26 +412,40 @@ private:
     }
 
     template<typename T>
-    static void getExtendedState(T & part) {
+    static bool getExtendedState(T & part) {
         Wire.beginTransmission(AVR_I2C_ADDRESS);
         Wire.write(static_cast<uint8_t>((uint8_t*)(& part) - (uint8_t *)(& ex_) + sizeof(State)));
         Wire.endTransmission(false); // repeated start
         size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(part));
-        if (n == sizeof(part))
+        if (n == sizeof(part)) {
             Wire.readBytes(pointer_cast<uint8_t *>(& part), n);
-        else
+            return true;
+        } else {
             ERROR("Incomplete transaction while reading extended state, %u bytes received", n);
+            return false;
+        }
+    }
+
+    static bool readState() {
+        // set IRQ to false before we get the state. It is possibile that the IRQ will be set to true after this but before the state request, thus being cleared on AVR side by the request. This is ok as it would only result in an extra state request afterwards, which would be identical, and therefore no action will be taken
+        status_.irq = false;
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
+        if (n == sizeof(State)) {
+            Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
+            return true;
+        } else {
+            ERROR("Incomplete transaction while reading state, %u bytes received", n);
+            while (n-- > 0) 
+                Wire.read();
+            return false;
+        }
     }
 
     /** Requests state update from ATTiny. 
      */
     static void updateState() {
-        // set IRQ to false before we get the state. It is possibile that the IRQ will be set to true after this but before the state request, thus being cleared on AVR side by the request. This is ok as it would only result in an extra state request afterwards, which would be identical, and therefore no action will be taken
-        status_.irq = false;
-        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, sizeof(State));
-        if (n == sizeof(State)) {
-            State old = state_;
-            Wire.readBytes(pointer_cast<uint8_t*>(& state_), sizeof(State));
+        State old = state_;
+        if (readState()) {
             // check available events and react accordingly
             if (state_.mode() != old.mode()) {
                 switch (state_.mode()) {
@@ -463,13 +481,11 @@ private:
                 volumeLongPress();
             if (state_.doubleButtonLongPress())
                 doubleLongPress();
+            // if there is change in headphones, simulate change in volume to cap the volume value if necessary
+            if (state_.headphonesConnected() != old.headphonesConnected())
+                volumeTurn();
             // clear the events so that they can be triggered again (ATTiny did so after the transmission as well)
             state_.clearEvents();
-        } else {
-            ERROR("Incomplete transaction while reading state, %u bytes received", n);
-            // clear the incomplete transaction from the wire buffer
-            while (n-- > 0) 
-                Wire.read();
         }
     }
 
@@ -496,7 +512,7 @@ private:
         LOG("Control down");
         switch (state_.mode()) {
             case Mode::WalkieTalkie:
-                 if (status_.recording)
+                 if (status_.recording) // can only record if walkie talkie is already enabled
                      stopRecording(/*cancel*/ true);
             default:
                 break;
@@ -542,7 +558,8 @@ private:
             }
             case Mode::WalkieTalkie:
                 // convert to volume press (play/pause)
-                volumePress();
+                if (settings_.walkieTalkieEnabled)
+                    volumePress();
                 break;
             case Mode::Alarm:
                 snooze();
@@ -600,7 +617,7 @@ private:
                 break;
             case Mode::WalkieTalkie:
                 // if not empty, then the new messages must be played first via normal CTRL press
-                if (ex_.walkieTalkie.isEmpty()) {
+                if (settings_.walkieTalkieEnabled && ex_.walkieTalkie.isEmpty()) {
                     send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(numMessages_) - 1, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness)});
                     // play from the updated value
                     play();
@@ -638,7 +655,8 @@ private:
         LOG("Volume down");
         switch (state_.mode()) {
             case Mode::WalkieTalkie:
-                startRecording();
+                if (settings_.walkieTalkieEnabled)
+                    startRecording();
                 break;
             default:
                 break;
@@ -649,7 +667,7 @@ private:
         LOG("Volume up");
         switch (state_.mode()) {
             case Mode::WalkieTalkie:
-                stopRecording();
+                stopRecording(); // walkie talkie must have been enabled to start the recording, no need to check here
                 break;
             default:
                 break;
@@ -699,8 +717,14 @@ private:
         Updates the volume of the underlying music provider (i2s/radio). 
      */
     static void volumeTurn() {
-        // TODO check that the volume is within the settings available
         LOG("Volume: %u", state_.volumeValue());
+        // check that the volume is within the settings available
+        uint8_t maxVolume = state_.headphonesConnected() ? settings_.maxHeadphonesVolume : settings_.maxSpeakerVolume;
+        if (state_.volumeValue() > maxVolume) {
+            state_.setVolumeValue(maxVolume);
+            send(msg::SetVolumeRange{state_.volumeValue(), MAX_VOLUME});
+            LOG("Limited to %u", state_.volumeValue());
+        }
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
@@ -919,8 +943,11 @@ private:
             StaticJsonDocument<1024> json;
             if (deserializeJson(json, f) == DeserializationError::Ok) {
                 numPlaylists_ = 0;
+                uint8_t id = 0;
                 for (JsonVariant playlist : json.as<JsonArray>()) {
-                    uint8_t id = playlist["id"];
+                    ++id; // so that we start at one
+                    if (! playlist["enabled"].as<bool>()) // skip disabled playlists
+                        continue;
                     uint16_t numTracks = initializePlaylistTracks(id);
                     if (numTracks > 0) {
                         playlists_[numPlaylists_++] = PlaylistInfo{id, numTracks};
@@ -936,9 +963,6 @@ private:
         } else {
             LOG("%s not found", MP3_SETTINGS_FILE);
         }
-        // TODO add the feed me with music playlist if there are no playlists provided
-        //if (numPlaylists_ == 0)
-        //    ex_.settings.setMp3Enabled(false);
     }
 
     /** Searches the playlist to determine the number of tracks it contains. 
@@ -1621,6 +1645,8 @@ MAX_WALKIE_TALKIE_MESSAGES;
     //@}
 
     /** \name WiFi Connection
+     
+        Due to pretty limited ESP memory, WiFi is not really compatible with mp3 playback. As such it is only available in the walkie talkie mode and cannot be used in other modes. 
      */
     //@{
 
@@ -1795,7 +1821,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
         server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
-        server_.on("/generalSettings", httpSettings);
         server_.on("/alarm", httpAlarm);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
@@ -1812,7 +1837,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
         NTPClient timeClient{ntpUDP, "pool.ntp.org", settings_.timezone};
         timeClient.begin();
         if (timeClient.forceUpdate()) {
-            ex_.time.setFromNTP(timeClient.getEpochTime());
+            ex_.time.setFromNTP(timeClient.getEpochTime() + settings_.timezone);
             LOG("NTP time update:");
             ex_.time.log();
             // now that we have obtained the time, send it
@@ -1873,13 +1898,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         maxLoopTime_
         );
         server_.send(200, JSON_MIME, buf, len);
-    }
-
-    static void httpSettings() {
-        LOG("http settings");
-        char buffer[1024];
-        int len = settingsToJson(buffer, sizeof(buffer));
-        server_.send(200, JSON_MIME, buffer, len);
     }
 
     static void httpAlarm() {

@@ -1,0 +1,10 @@
+{
+    maxSpeakerVolume : 15,
+    maxHeadphonesVolume : 15,
+    timezone : 3600,
+    maxBrightness : 32,
+    radioEnabled : true,
+    lightsEnabled : true,
+    walkieTalkieEnabled : true,
+    syncHour : 3
+}

@@ -37,19 +37,19 @@ namespace msg {
     MESSAGE(SetSettings,
         uint8_t maxBrightness;
         bool radioEnabled;
-        bool walkieTalkieEnabled;
         bool lightsEnabled;
-        SetSettings(ESPSettings const & from):
-            maxBrightness{from.maxBrightness},
-            radioEnabled{from.radioEnabled},
-            walkieTalkieEnabled{from.walkieTalkieEnabled},
-            lightsEnabled{from.lightsEnabled} {
+        SetSettings(uint8_t maxBrightness, uint8_t radioEnabled, uint8_t lightsEnabled):
+            maxBrightness{maxBrightness},
+            radioEnabled{radioEnabled},
+            lightsEnabled{lightsEnabled} {
         }
     );
 
     MESSAGE(Sleep);
 
     MESSAGE(Reset);
+
+    MESSAGE(AVRWatchdogReset);
 
     MESSAGE(SetMode,
         Mode mode;
