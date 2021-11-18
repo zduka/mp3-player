@@ -148,7 +148,12 @@ public:
         }
         // store the extended state as it was updated by the SD card
         setExtendedState(ex_);
-        send(msg::SetSettings{settings_.maxBrightness, settings_.radioEnabled, settings_.lightsEnabled});
+        send(msg::SetSettings{
+            settings_.maxBrightness,
+            settings_.radioEnabled,
+            settings_.lightsEnabled,
+            settings_.syncHour}
+        );
         send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
@@ -204,6 +209,7 @@ public:
                 }
             }
             server_.handleClient();
+            MDNS.update();
         }
     }
 
@@ -277,6 +283,7 @@ private:
             settings_.fromJSON(json);
             f.close();
         }
+        settings_.syncHour = 21;
     }
 
     //@}
@@ -309,8 +316,11 @@ private:
             if (getExtendedState(ex_.measurements))
                 send(msg::AVRWatchdogReset{});
             //updateState();
-        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie && settings_.walkieTalkieEnabled)
-            status_.updateMessages = true;
+        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie && ! status_.recording) {
+            if (settings_.walkieTalkieEnabled)
+                status_.updateMessages = true;
+            updateNTPTime();
+        }
         // TODO do more stuff
     }
 
@@ -328,7 +338,8 @@ private:
             connectWiFi();
             uint32_t start = millis();
             while (state_.wifiStatus() == WiFiStatus::Connecting && millis() - start < SYNC_CONNECTION_TIMEOUT) {
-                delay(100);
+                delay(1000);
+                send(msg::SetESPBusy{true});
             };
         }
         // if the connection was successful, proceed with the sync
@@ -345,16 +356,11 @@ private:
         LOG("Synchronization done.");
         send(msg::SetESPBusy{false});
         send(msg::Sleep{});
+        // wait for the death to come
+        while (true) { delay(100); }
     }
 
     /** Number of times the loop function gets called in the past second. 
-
-        Very roughly measured like this:
-
-        55k when completely idle
-        16k when playing mp3 with hiccups
-        38k when playing low quality mono mp3 
-        20k when playing stereo mp3 
      */
     static inline uint16_t loopCount_ = 0;
     static inline uint16_t maxLoopTime_ = 0;
@@ -1230,6 +1236,7 @@ private:
     }
 
     static void startRecording() {
+        walkieTalkieStop();
         if (!status_.recordingReady || !recording_.begin("/rec.wav")) {
             LOG("Unable to open recording target file or recording not ready");
             send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
@@ -1238,6 +1245,7 @@ private:
             status_.recording = true;
             send(msg::StartRecording());
             status_.recordingReady = false;
+            messageStart_ = millis();
         }        
     }
         
@@ -1247,6 +1255,7 @@ private:
             send(msg::StopRecording{});
             recording_.end();
             status_.recording = false;
+            cancel = cancel || ((millis() - messageStart_) < MIN_WALKIE_TALKIE_RECORDING);
             if (cancel) {
                 LOG("Recording cancelled");
                 send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
@@ -1254,15 +1263,12 @@ private:
             } else {
                 LOG("Recording done");
                 File f = SD.open("/rec.wav", FILE_READ);
-                if (f.size() >= MIN_WALKIE_TALKIE_RECORDING) {
-                    send(msg::SetESPBusy{true});
-                    bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
-                        send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
-                    });
-                    send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 32));
-                    send(msg::SetESPBusy{false});
-                }
-                // TODO else do stuff
+                send(msg::SetESPBusy{true});
+                bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
+                    send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
+                });
+                send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 32));
+                send(msg::SetESPBusy{false});
                 f.close();
                 status_.recordingReady = true;
             }
@@ -1278,8 +1284,8 @@ private:
                 recording_.add(Wire.read());
             // get the first bit of state (we can update our state with it)
             ((uint8_t*)(& state_))[0] = Wire.read();
-            // if the volume button has been released, stop recording
-            if (! state_.volumeButtonDown())
+            // if the volume button has been released or the message is too long, stop recording
+            if (! state_.volumeButtonDown() || (millis() - messageStart_) > MAX_WALKIE_TALKIE_RECORDING)
                 stopRecording();
             // otherwise if the control button has been pressed, cancel the recorded sound
             else if (state_.controlButtonDown())
@@ -1450,6 +1456,9 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static inline int64_t telegramAdminId_;
     static inline uint8_t numMessages_;
     static inline uint8_t playingMessage_ = 0;
+    /** Start of the message. 
+     */
+    static inline uint32_t messageStart_;
 
     //@}
 
@@ -1582,7 +1591,8 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static void alarmDone() {
         LOG("Alarm done");
         stop();
-        // TODO load the alarm from SD card to get rid of any snoozing...
+        // load the alarm from SD card to get rid of any snoozing...
+        initializeAlarm();
         if (alarmReturnMode_ != Mode::Alarm) {
             setMode(alarmReturnMode_);
             if (alarmResume_)

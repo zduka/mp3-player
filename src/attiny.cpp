@@ -137,7 +137,9 @@ void loop() {
 class Player {
 public:
     static void initialize() {
-        //Serial.begin(115200);
+#ifdef DEBUG_LOG
+        Serial.begin(115200);
+#endif
         pinMode(DEBUG_PIN, OUTPUT);
         digitalWrite(DEBUG_PIN, LOW);
         delay(10);
@@ -210,8 +212,8 @@ private:
         if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) {
             LOG("  power-on reset");
             // set sync mode
-            state_.state.setMode(Mode::Sync);
-            status_.espBusy = true;
+            //state_.state.setMode(Mode::Sync);
+            //status_.espBusy = true;
             // set station, which is invalid value and signifies the initial power on state for ESP
             state_.ex.radio.stationId = 0xff;
         }
@@ -225,14 +227,26 @@ private:
         RSTCTRL.RSTFR = 0;
     }
 
+    /** Enables the WDT with the longest period (8 seconds). 
+     
+        Note that WDT should be disabled before going to sleep to prevent resets. 
+     */
     static void wdt_enable() {
+#ifndef DEBUG_DISABLE_WDT
         _PROTECTED_WRITE(WDT.CTRLA,WDT_PERIOD_8KCLK_gc); // no window, 8sec
+#endif
     }
 
+    /** Resets the WDT timer. 
+     */
     static void wdt_reset() {
         __asm__ __volatile__ ("wdr"::);
     }
 
+    /** Disables the watchdog. 
+     
+        This *must* be called before going to sleep. 
+     */
     static void wdt_disable() {
         _PROTECTED_WRITE(WDT.CTRLA,0);
     }
@@ -268,7 +282,7 @@ private:
     static void tick() {
         //digitalWrite(DEBUG_PIN, HIGH); 
         // TODO enable this in production settings
-        //if (status_.espBusy || status_.recording)
+        if (status_.espBusy || status_.recording)
             wdt_reset();
         if (status_.shouldSleep)
             sleep();           
@@ -286,7 +300,8 @@ private:
             //LOG("time: %u", state_.ex.time.second());
             secondTick();
             // actually do a proper poweroff - telling ESP first, dimming the lights, etc. 
-            if (--powerCountdown_ == 0) {
+            // this does not happen in sync mode, where the ESP busy timeout is used instead
+            if (state_.state.mode() != Mode::Sync && --powerCountdown_ == 0) {
                 LOG("ESP power off countdown");
                 state_.state.setMode(Mode::ESPOff);
                 setIrq();
@@ -297,7 +312,7 @@ private:
 
     static void secondTick() {
         state_.ex.time.secondTick();
-        if (state_.ex.time.hour() == syncHour_ && state_.ex.time.minute() == 0 && state_.ex.time.second() == 0) {
+        if (state_.ex.time.hour() == syncHour_ && state_.ex.time.minute() == 50 && state_.ex.time.second() == 0) {
             status_.sync = true;
             status_.sleeping = false;
         } else if (state_.ex.alarm == state_.ex.time) {
@@ -321,12 +336,12 @@ private:
             // disable idle mode when sleeping, set mode to music, which is the default after waking up
             state_.state.setIdle(false);
             state_.state.setMode(Mode::Music); 
+            state_.state.setWiFiStatus(WiFiStatus::Off);
             // enable RTC interrupt every second so that the time can be kept
             while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
             RTC.PITCTRLA = RTC_PERIOD_CYC1024_gc + RTC_PITEN_bm;
             // enter the sleep mode. Upon wakeup, go to sleep immediately for as long as the sleep mode is on (we wake up every second to increment the clock and when buttons are pressed as well)
             LOG("sleep");
-            state_.ex.log();
             status_.sleeping = true;
             // clear the reset flags in CPU
             RSTCTRL.RSTFR = 0;
@@ -349,7 +364,6 @@ private:
             status_.sync = false;
             state_.state.setMode(Mode::Sync);
         }
-        state_.ex.log();
         // enable RTC interrupt every 1/64th of a second
         while (RTC.PITSTATUS & RTC_CTRLBUSY_bm) {}
         RTC.PITCTRLA = RTC_PERIOD_CYC16_gc + RTC_PITEN_bm;
@@ -377,7 +391,6 @@ private:
             // enable power to neopixels, esp8266 and other circuits
             peripheralPowerOn();
             // shows the wakeup progressbar if not in sync mode (sync mode does not update neopixels)
-            neopixels_.fill(Color::Black());
             strip_.showBar(1, 8, DEFAULT_COLOR.withBrightness(maxBrightness_));
             effectTimeout_ = SPECIAL_LIGHTS_TIMEOUT;
         }
@@ -427,6 +440,9 @@ private:
         digitalWrite(DCDC_PWR, DCDC_PWR_ON);
         // add a delay so that the capacitors can be charged, voltage stabilized and ESP started
         delay(100);
+        // clear the LED strip
+        neopixels_.fill(Color::Black());
+        neopixels_.update();
         // enable the headphones interrupt detection and set the current headphones state
         attachInterrupt(digitalPinToInterrupt(HEADPHONES), Player::headphonesChange, CHANGE);
         cli(); // the headphones change expects to run as an interrupt already
@@ -1004,6 +1020,8 @@ private:
             if (status_.irq) {
                 pinMode(AVR_IRQ, INPUT);
                 status_.irq = false;
+                // reset the WDT as this only happened because of some ESP action
+                wdt_reset();
                 // let the countdown to reach 0 naturally
             }
         }
@@ -1043,6 +1061,7 @@ private:
                 maxBrightness_ = m->maxBrightness;
                 status_.radioEnabled = m->radioEnabled;
                 status_.lightsEnabled = m->lightsEnabled;
+                syncHour_ = m->syncHour;
                 break;
             }
             case msg::Sleep::Id: {
@@ -1155,6 +1174,7 @@ private:
             case msg::StopRecording::Id: {
                 LOG("cmd StopRecording");
                 status_.recording = false;
+                state_.state.setVolumeButtonDown(false);
                 stopAudioCapture();
                 break;
             }
@@ -1284,7 +1304,9 @@ private:
         showByte(value, color);
         neopixels_.moveTowardsReversed(strip_, 255);
         neopixels_.update();
-        while (true) { };
+        while (true) { 
+            wdt_reset();
+        };
     }
 //@}
 

@@ -27,15 +27,23 @@ inline T pointer_cast(W * from) {
 
 #define assert(...)
 
+#if (defined DEBUG_LOG)
 #if (defined ARCH_ESP8266)
+
 // TODO __VA_OPT__(,) works better than the GNU extension here with C++20, but although it works for ESP, it confuses the editor so I am stuck with ##__VA_ARGS__ for now
 #define LOG(FORMAT,...) do { Serial.printf_P(PSTR("%u: "), millis() / 1000); Serial.printf_P(PSTR(FORMAT), ##__VA_ARGS__); Serial.println(); } while (false)
 
 #elif (defined ARCH_ATTINY)
+
+#define LOG(FORMAT,...) do { Serial.printf(F(FORMAT), ##__VA_ARGS__); Serial.println(); } while (false)
+
+#endif // ESP vs AVR
+#else // not DEBUG_LOG
+
 #define LOG(...)
-//#define LOG(FORMAT,...) do { Serial.printf(F(FORMAT), ##__VA_ARGS__); Serial.println(); } while (false)
 
 #endif
+
 
 
 /** Returns true if given string ends with the given suffix. 

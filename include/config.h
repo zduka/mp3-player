@@ -31,14 +31,21 @@
  */
 #define UNDERVOLTAGE_TIMEOUT 20
 
-#define ESP_BUSY_TIMEOUT 64 * 60 * 2 // 2 minutes timeout for busy
+#define ESP_BUSY_TIMEOUT 64 * 60 * 1 // 1 minute timeout for busy
 
 #define DEFAULT_VOLUME 5
 #define DEFAULT_ALARM_VOLUME 5
 #define MAX_VOLUME 16
 
 #define MAX_WALKIE_TALKIE_MESSAGES 8
-#define MIN_WALKIE_TALKIE_RECORDING 8000
+
+/** A walkie talkie recording shorter than this number of milliseconds will be ignored. 
+ */
+#define MIN_WALKIE_TALKIE_RECORDING 1000 * 1
+
+/** If the walkie-talkie recording will be longer than this number of milliseconds, it will be automatically stopped and sent.
+ */
+#define MAX_WALKIE_TALKIE_RECORDING 1000 * 10
 
 /** Timeout for connection in the sync mode in milliseconds. 
  */
@@ -49,8 +56,8 @@
     Currently set to 2 seconds
  */
 #define POWER_ON_PRESS_TICKS 128
-#define BUTTON_LONG_PRESS_TICKS 128
-#define BUTTON_LONG_PRESS_THRESHOLD 96
+#define BUTTON_LONG_PRESS_TICKS 96
+#define BUTTON_LONG_PRESS_THRESHOLD 84
 
 #define SPECIAL_LIGHTS_TIMEOUT 128
 

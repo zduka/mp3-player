@@ -34,21 +34,39 @@ namespace msg {
         }
     );
 
+    /** Sets the settings bits that from ESP's configuration that AVR needs to. 
+     
+        Mainly the brightness settings & mode support. 
+     */
     MESSAGE(SetSettings,
         uint8_t maxBrightness;
         bool radioEnabled;
         bool lightsEnabled;
-        SetSettings(uint8_t maxBrightness, uint8_t radioEnabled, uint8_t lightsEnabled):
+        uint8_t syncHour;
+        SetSettings(uint8_t maxBrightness, bool radioEnabled, bool lightsEnabled, uint8_t syncHour):
             maxBrightness{maxBrightness},
             radioEnabled{radioEnabled},
-            lightsEnabled{lightsEnabled} {
+            lightsEnabled{lightsEnabled},
+            syncHour{syncHour} {
         }
     );
 
+    /** Tells the AVR to go to sleep. 
+     
+        Before going to sleep, AVR first checks whether synchronization is due and if so pute ESP into Sync mode, otherwise ESP is terminated and AVR goes to sleep immediately. 
+     */
     MESSAGE(Sleep);
 
+    /** Instructs AVR to reset itself immediately. 
+     
+        This translates into a full system reset. 
+     */
     MESSAGE(Reset);
 
+    /** Resets the AVR's watchdog. 
+     
+        Is called each time extended status VCC & temp are obtained (every second). Does not have to be called in ESPBusy and recording modes where AVR has its own timer to reset ESP if necessary. 
+     */
     MESSAGE(AVRWatchdogReset);
 
     MESSAGE(SetMode,
@@ -85,6 +103,8 @@ namespace msg {
         }
     );
 
+    /** Sets the volume range and value. 
+     */
     MESSAGE(SetVolumeRange,
         uint8_t value;
         uint8_t max;
@@ -186,11 +206,6 @@ namespace msg {
             busy{busy} {
         }
     );
-
-    // TODO 
-    MESSAGE(SetSync);
-
-
 
 #undef MESSAGE
  

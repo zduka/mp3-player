@@ -3,16 +3,16 @@
 - check that I have all HW I need
 - buy stuff at GM (battery holder, extra speaker and extra card holder)
 
+# SW
 # ATTiny
 
-- reenable WDT - AVR seems to hang sometimes after wakeup from sync(?), likely just unstable circuit with programmer attached
-- wakeup & enter sync mode when given hour, check that it works
 - should notification light do stuff if we are in non music mode? 
 
 # ESP
 
 - format SD card if necessary (keep default basic settings in LittleFS)
-- mDNS should worn on proper network
+- don't show volume bar when powering on / headphones change
+
 
 # Walkie Talkie
 

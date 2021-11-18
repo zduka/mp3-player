@@ -2,7 +2,8 @@
 
 /** Library for working with neopixels. Comes with the megatinycore and does not require any additional arduino setup. 
 
-    NOTE The library does not work well with 10MHz speed, 8MHz (or likely 16MHz) should be used instead. On 10MHz when turned completely off, the neopixels still gave faint light. 
+    NOTE The library does not work well with 10MHz speed, 8MHz (or likely 16MHz) should be used instead. On 10MHz when turned completely off, the neopixels still gave faint light. The timing is actually really werid. Requires 8MHz clock debug info, *but* 10MHz actual clock.
+
  */
 #include <tinyNeoPixel_Static.h>
 
