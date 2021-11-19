@@ -1098,7 +1098,7 @@ private:
                 LOG("cmd SetMode m: %u, %u", static_cast<uint8_t>(m->mode), static_cast<uint8_t>(m->musicMode));
                 state_.state.setMode(m->mode);
                 state_.state.setMusicMode(m->musicMode);
-                if (m->mode == Mode::Music && m->musicMode == MusicMode::Radio)
+                if ((m->mode == Mode::Music || m->mode == Mode::Lights) && m->musicMode == MusicMode::Radio)
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
                 else 
                     digitalWrite(AUDIO_SRC, AUDIO_SRC_ESP);
