@@ -678,10 +678,14 @@ private:
     static Color getModeColor(Mode mode, MusicMode musicMode) {
         switch (mode) {
             case Mode::Music:
-                if (musicMode == MusicMode::MP3)
-                    return MODE_COLOR_MP3;
-                else
-                    return MODE_COLOR_RADIO;
+                switch (musicMode) {
+                    case MusicMode::MP3:
+                        return MODE_COLOR_MP3;
+                    case MusicMode::Radio:
+                        return MODE_COLOR_RADIO;
+                    case MusicMode::Disco:
+                        return MODE_COLOR_DISCO;
+                }
             case Mode::WalkieTalkie:
                 return MODE_COLOR_WALKIE_TALKIE;
             case Mode::Lights:
@@ -712,7 +716,7 @@ private:
                 Color color;
                 // only control button long press - music mode change
                 if (! state_.state.volumeButtonDown())
-                    color = getModeColor(Mode::Music, getNextMusicMode(state_.state.mode(), state_.state.musicMode(), status_.radioEnabled));
+                    color = getModeColor(Mode::Music, getNextMusicMode(state_.state.mode(), state_.state.musicMode(), status_.radioEnabled, status_.discoEnabled));
                 // only volume button pressed (and not recording, which is handled above), toggle the lights settings mode on/off
                 else if (! state_.state.controlButtonDown()) // TODO what to with walkie-talkie long press
                     color = state_.state.mode() == Mode::Music ? MODE_COLOR_LIGHTS : getModeColor(Mode::Music, state_.state.musicMode());
@@ -1033,13 +1037,14 @@ private:
         LOG("Resetting ESP");
         peripheralPowerOff();
         clearIrq(true); // this is necessary so that ESP boots into a normal mode
-        state_.state.setMode(Mode::ESPReset);
+        state_.state.setEspReset(true);
+        state_.state.setWiFiStatus(WiFiStatus::Off);
         if (status_.recording)
             stopAudioCapture();
         status_.espBusy = false;
         // reinitialize I2C so that there are no issues with some pending state
         initializeI2C();
-        delay(200);
+        delay(200); // enough delay to drain 3V3 capacitors so that the reset actually occurs
         peripheralPowerOn();
     }
 
@@ -1060,6 +1065,7 @@ private:
                 LOG("cmd SetSettings");
                 maxBrightness_ = m->maxBrightness;
                 status_.radioEnabled = m->radioEnabled;
+                status_.discoEnabled = m->discoEnabled;
                 status_.lightsEnabled = m->lightsEnabled;
                 syncHour_ = m->syncHour;
                 break;
@@ -1351,6 +1357,7 @@ private:
         bool espBusy : 1;
 
         bool radioEnabled : 1;
+        bool discoEnabled : 1;
         bool lightsEnabled : 1;
 
     } status_;

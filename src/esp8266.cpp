@@ -60,6 +60,7 @@ public:
     uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
 
     bool radioEnabled = true;
+    bool discoEnabled = true;
     bool lightsEnabled = true;
     bool walkieTalkieEnabled = true;
 
@@ -116,7 +117,9 @@ public:
             LOG("Attempt 2:");
             delay(200);
             readState();
-        }
+        }      
+        // store if this has been ESP reset, in which case we skip the greeting later on
+        bool espReset = state_.espReset();
         // get the extended state as well. 
         getExtendedState(ex_);
         ex_.log();
@@ -151,6 +154,7 @@ public:
         send(msg::SetSettings{
             settings_.maxBrightness,
             settings_.radioEnabled,
+            settings_.discoEnabled,
             settings_.lightsEnabled,
             settings_.syncHour}
         );
@@ -162,12 +166,9 @@ public:
             case Mode::Sync:
                 sync();
                 break;
-            case Mode::ESPReset:
-                LOG("ESP reset detected!!!");
-                setMode(Mode::Music);
-                break;
             default:
-                if (! checkGreeting())
+                // checkGreeting enters the greeting state if its active, so that we save a few bytes of global state where we do not have to remember the greeting parameters if successful. If there's no greeting we have to set the state ourselves later on. Only check the greeting is this is not a reset situation, in which case proceed immediately to the latest known mode
+                if (espReset || ! checkGreeting())
                     setMode(state_.mode());
         }
         // check the volume is within max range
@@ -585,7 +586,7 @@ private:
         LOG("Control long press");
         switch (state_.mode()) {
             case Mode::Music: 
-                setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled));
+                setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled, settings_.discoEnabled));
                 // start playing if we were idle
                 if (state_.idle())
                     play();
@@ -610,12 +611,18 @@ private:
         LOG("Control: %u", state_.controlValue());
         switch (state_.mode()) {
             case Mode::Music:
-                if (state_.musicMode() == MusicMode::MP3) {
-                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3.withBrightness(settings_.maxBrightness)});
-                    setTrack(state_.controlValue());
-                } else {
-                    send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO.withBrightness(settings_.maxBrightness)});
-                    setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3.withBrightness(settings_.maxBrightness)});
+                        setTrack(state_.controlValue());
+                        break;
+                    case MusicMode::Radio:
+                        send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO.withBrightness(settings_.maxBrightness)});
+                        setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
+                        break;
+                    case MusicMode::Disco:
+                        // TODO 
+                        break;
                 }
                 // start playing if we were idle
                 if (state_.idle())
@@ -660,6 +667,7 @@ private:
     static void volumeDown() {
         LOG("Volume down");
         switch (state_.mode()) {
+            // TODO recording in disco
             case Mode::WalkieTalkie:
                 if (settings_.walkieTalkieEnabled)
                     startRecording();
@@ -672,6 +680,7 @@ private:
     static void volumeUp() {
         LOG("Volume up");
         switch (state_.mode()) {
+            // TODO recording in disco
             case Mode::WalkieTalkie:
                 stopRecording(); // walkie talkie must have been enabled to start the recording, no need to check here
                 break;
@@ -689,6 +698,8 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
+                if (state_.musicMode() == MusicMode::Disco)
+                    break; // in disco mode, volume pressing does nothing 
             case Mode::WalkieTalkie:
                 if (state_.idle())
                     play();
@@ -714,7 +725,7 @@ private:
             setMode(Mode::Music);
         else if (state_.mode() == Mode::Alarm)
             alarmDone();
-        else if (state_.mode() != Mode::WalkieTalkie)
+        else if (state_.mode() != Mode::WalkieTalkie && state_.musicMode() != MusicMode::Disco)
             setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
     }
 
@@ -734,10 +745,10 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
-                if (state_.musicMode() == MusicMode::MP3)
-                    i2sUpdateVolume();
-                else
+                if (state_.musicMode() == MusicMode::Radio)
                     radioUpdateVolume();
+                else // both MP3 and disco use i2s
+                    i2sUpdateVolume();
                 break;
             case Mode::WalkieTalkie:
             case Mode::Greeting:
@@ -823,10 +834,16 @@ private:
                 send(msg::SetMode{state_.mode(), state_.musicMode()});
                 if (resume)
                     play();
-                else if (state_.musicMode() == MusicMode::MP3)
-                    setControlRange(ex_.mp3.trackId, playlists_[ex_.mp3.playlistId].numTracks);
-                else
-                    setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+                else switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        setControlRange(ex_.mp3.trackId, playlists_[ex_.mp3.playlistId].numTracks);
+                        break;
+                    case MusicMode::Radio:
+                        setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
                 break;
             }
             case Mode::Lights:
@@ -870,12 +887,17 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
-                if (state_.musicMode() == MusicMode::MP3) {
-                    // if we are resuming from pause, just setting idle to false above did the trick
-                    if (! mp3_.isRunning())
-                        mp3Play();
-                } else {
-                    radioPlay();
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        // if we are resuming from pause, just setting idle to false above did the trick
+                        if (! mp3_.isRunning())
+                            mp3Play();
+                        break;
+                    case MusicMode::Radio:
+                        radioPlay();
+                        break;
+                    case MusicMode::Disco:
+                        break;
                 }
                 break;
             case Mode::WalkieTalkie: 
@@ -904,8 +926,15 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
-                if (state_.musicMode() == MusicMode::Radio)
-                    radioStop();
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        break;
+                    case MusicMode::Radio:
+                        radioStop();
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
                 break;
             default:
                 break;
@@ -921,10 +950,16 @@ private:
         switch (state_.mode()) {
             case Mode::Music:
             case Mode::Lights:
-                if (state_.musicMode() == MusicMode::MP3)
-                    mp3Stop();
-                else
-                    radioStop();
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        mp3Stop();
+                        break;
+                    case MusicMode::Radio:
+                        radioStop();
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
                 break;
             case Mode::WalkieTalkie:
                 walkieTalkieStop();

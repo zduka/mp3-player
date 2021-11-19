@@ -7,33 +7,33 @@
 #include "datetime.h"
 
 enum class MusicMode : uint8_t {
+    /** MP3 Player.
+     */
     MP3,
-    Radio
+    /** FM radio. 
+     */
+    Radio,
+    /** Disco mode
+     */
+    Disco,
 };
 
 /** Main mode. 
  */
 enum class Mode : uint8_t {
     Music = 0,
-    Disco = 1,
-    Lights = 2,
-    WalkieTalkie = 3,
+    Lights = 1,
+    WalkieTalkie = 2,
     /** Triggered when the ESP should play an alarm. 
      */
-    Alarm = 4,
-    Greeting = 5,
-
-    /** Triggered when ESP is being reset by AVR. Switches to music immediately and won't play any greeting. 
+    Alarm = 3,
+    Greeting = 4,
+    /** Special mode for ESP to silently synchronize time & messages that is executed periodically when off 
      */
-    ESPReset = 12,
-    // Special mode for ESP to silently synchronize time & messages that is executed periodically when off
-    Sync = 13,
-    /** Initial mode after power on of the AVR as opposed to wakeup. 
-     */
-    InitialPowerOn = 14,
+    Sync = 5,
     /** Signals the ESP to poweroff so that AVR can go to sleep. Set by AVR when it's time to turn off. 
      */
-    ESPOff = 15
+    ESPOff = 6
 }; // Mode
 
 enum class WiFiStatus : uint8_t {
@@ -115,6 +115,8 @@ private:
     static constexpr uint8_t CHARGING_MASK = 1 << 3;
     static constexpr uint8_t BATTERY_MASK = 1 << 4;
     static constexpr uint8_t LOW_BATTERY_MASK = 1 << 5;
+    //static constexpr uint8_t _MASK = 1 << 6;
+    //static constexpr uint8_t _MASK = 1 << 7;
     volatile uint8_t peripherals_; 
 //@}
 /** \name Events register. 
@@ -206,6 +208,19 @@ public:
             events_ &= ~VOLUME_TURN_MASK;
     }
 
+    /** True in first state update if the ESP has been restarted by AVR due to irq timeout (likely ESP got stuck). 
+     */
+    bool espReset() const volatile {
+        return events_ & ESP_RESET_MASK;
+    }
+
+    void setEspReset(bool value = true) volatile {
+        if (value)
+            events_ |= ESP_RESET_MASK;
+        else
+            events_ &= ~ESP_RESET_MASK;
+    }
+
 private:
     static constexpr uint8_t CONTROL_PRESS_MASK = 1 << 0;
     static constexpr uint8_t CONTROL_LONG_PRESS_MASK = 1 << 1;
@@ -214,6 +229,7 @@ private:
     static constexpr uint8_t DOUBLE_LONG_PRESS_MASK = 1 << 4;
     static constexpr uint8_t CONTROL_TURN_MASK = 1 << 5;
     static constexpr uint8_t VOLUME_TURN_MASK = 1 << 6;
+    static constexpr uint8_t ESP_RESET_MASK = 1 << 7;
     uint8_t events_;
 //@}
 
@@ -240,14 +256,12 @@ public:
         This is either mp3, or radio. 
      */
     MusicMode musicMode() const volatile {
-        return static_cast<MusicMode>((mode_ & MUSIC_MODE_MASK) >> 4);
+        return static_cast<MusicMode>((mode_ & MUSIC_MODE_MASK) >> 3);
     }
 
     void setMusicMode(MusicMode mode) volatile {
-        if (mode == MusicMode::MP3)
-            mode_ &= ~ MUSIC_MODE_MASK;
-        else
-            mode_ |= MUSIC_MODE_MASK;
+        mode_ &= ~MUSIC_MODE_MASK;
+        mode_ |= (static_cast<uint8_t>(mode) << 3) & MUSIC_MODE_MASK;
     }
 
     /** Returns true if the player is idle. 
@@ -279,8 +293,8 @@ public:
 
 
 private:
-    static constexpr uint8_t MODE_MASK = 15;
-    static constexpr uint8_t MUSIC_MODE_MASK = 1 << 4;
+    static constexpr uint8_t MODE_MASK = 7;
+    static constexpr uint8_t MUSIC_MODE_MASK = 3 << 3;
     static constexpr uint8_t IDLE_MASK = 1 << 5;
     static constexpr uint8_t WIFI_STATUS_MASK = 3 << 6;
     uint8_t mode_;
@@ -483,10 +497,19 @@ static_assert(sizeof(ExtendedState) == 21);
  
     This is the current music mode if the mode is not music, or the other music mode (if available) and current mode is music. 
  */
-inline MusicMode getNextMusicMode(Mode mode, MusicMode current, bool radioEnabled) {
+inline MusicMode getNextMusicMode(Mode mode, MusicMode current, bool radioEnabled, bool discoEnabled) {
     if (mode != Mode::Music)
         return current;
-    if (current == MusicMode::MP3 && radioEnabled)
-        return MusicMode::Radio;
-    return MusicMode::MP3;
+    switch (current) {
+        case MusicMode::MP3:
+            if (radioEnabled)
+                return MusicMode::Radio;
+            // fallback
+        case MusicMode::Radio:
+            if (discoEnabled)
+                return MusicMode::Disco;
+            // fallback
+        default:
+            return MusicMode::MP3;
+    }
 }

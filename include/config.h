@@ -72,6 +72,7 @@
  */
 #define MODE_COLOR_MP3 Color::Blue()
 #define MODE_COLOR_RADIO Color::Green()
+#define MODE_COLOR_DISCO Color::Purple()
 #define MODE_COLOR_WALKIE_TALKIE Color::Cyan()
 #define MODE_COLOR_LIGHTS Color::Yellow()
 

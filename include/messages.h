@@ -41,11 +41,13 @@ namespace msg {
     MESSAGE(SetSettings,
         uint8_t maxBrightness;
         bool radioEnabled;
+        bool discoEnabled;
         bool lightsEnabled;
         uint8_t syncHour;
-        SetSettings(uint8_t maxBrightness, bool radioEnabled, bool lightsEnabled, uint8_t syncHour):
+        SetSettings(uint8_t maxBrightness, bool radioEnabled, bool discoEnabled, bool lightsEnabled, uint8_t syncHour):
             maxBrightness{maxBrightness},
             radioEnabled{radioEnabled},
+            discoEnabled{discoEnabled},
             lightsEnabled{lightsEnabled},
             syncHour{syncHour} {
         }
