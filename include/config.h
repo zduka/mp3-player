@@ -3,6 +3,8 @@
 #define DEFAULT_AP_SSID "mp3-player"
 #define DEFAULT_AP_PASSWORD "mp3-player"
 
+#define DEFAULT_TIMEZONE 1
+
 /** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 
  */
 #define DEFAULT_IDLE_TIMEOUT 30
@@ -45,7 +47,7 @@
 
 /** If the walkie-talkie recording will be longer than this number of milliseconds, it will be automatically stopped and sent.
  */
-#define MAX_WALKIE_TALKIE_RECORDING 1000 * 10
+#define MAX_RECORDING_LENGTH 1000 * 30
 
 /** Timeout for connection in the sync mode in milliseconds. 
  */

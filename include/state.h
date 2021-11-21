@@ -279,7 +279,6 @@ public:
             mode_ &= ~IDLE_MASK;
     }
 
-
     /** WiFi mode. 
      */
     WiFiStatus wifiStatus() const volatile {
@@ -386,14 +385,16 @@ static_assert(sizeof(MP3State) == 3);
  */
 class RadioState {
 public:
-    uint8_t stationId;
-    uint16_t frequency;
+    uint8_t stationId = POWER_ON_STATION_ID;
+    uint16_t frequency = 0;
 
     void log() const {
         LOG("Radio State:");
         LOG("    stationId: %u", stationId);
         LOG("    frequency: %u", frequency);
     }
+
+    static constexpr uint8_t POWER_ON_STATION_ID = 0xff;
 
 } __attribute__((packed)); // RadioState
 
@@ -403,8 +404,8 @@ static_assert(sizeof(RadioState) == 3);
  */
 class WalkieTalkieState {
 public:
-    uint8_t readId= 0;
-    uint8_t writeId = 0;
+    uint8_t readId = POWER_ON_MESSAGE_ID;
+    uint8_t writeId = POWER_ON_MESSAGE_ID;
 
     bool isEmpty() const {
         return readId == writeId;
@@ -430,6 +431,8 @@ public:
         LOG("    read: %u", readId);
         LOG("    write: %u", writeId);
     }
+
+    static constexpr uint8_t POWER_ON_MESSAGE_ID = 0xff;
 
 } __attribute__((packed)); // WalkieTalkieState
 

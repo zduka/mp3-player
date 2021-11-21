@@ -209,14 +209,8 @@ private:
         Checks the reset reason and updates the state accordingly.
      */ 
     static void initializeAtTiny() {
-        if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) {
+        if (RSTCTRL.RSTFR & RSTCTRL_PORF_bm) 
             LOG("  power-on reset");
-            // set sync mode
-            //state_.state.setMode(Mode::Sync);
-            //status_.espBusy = true;
-            // set station, which is invalid value and signifies the initial power on state for ESP
-            state_.ex.radio.stationId = 0xff;
-        }
         if (RSTCTRL.RSTFR & RSTCTRL_BORF_bm)
             LOG("  brown-out reset");
         if (RSTCTRL.RSTFR & RSTCTRL_WDRF_bm)

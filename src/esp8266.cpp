@@ -22,6 +22,7 @@
 #include "messages.h"
 #include "esp8266/wav_writer.h"
 #include "esp8266/telegram_bot.h"
+#include "esp8266/modes.h"
 
 /* ESP8266 PINOUT
 
@@ -45,8 +46,11 @@
 
 #define ERROR LOG
 
+
+
 /** Settings stored on the SD card and used by the ESP alone. 
  
+    TODO make this use less memory
  */  
 class ESPSettings {
 public:
@@ -68,31 +72,24 @@ public:
      */
     uint8_t syncHour = 3;
 
-    void fromJSON(JsonDocument const & json) {
-        maxSpeakerVolume = json["maxSpeakerVolume"];
-        maxHeadphonesVolume = json["maxHeadphonesVolume"];
-        timezone = json["timezone"];
-        maxBrightness = json["maxBrightness"];
-        radioEnabled = json["radioEnabled"];
-        lightsEnabled = json["lightsEnabled"];
-        walkieTalkieEnabled = json["walkieTalkieEnabled"];
-        syncHour = json["syncHour"];
-    }
 
 }; // ESPSettings
 
 
 class Player {
-public:
+    friend class ESPMode;
+    friend class MP3Mode;
+    friend class RadioMode;
+    friend class DiscoMode;
+    friend class LightsMode;
+    friend class WalkieTalkieMode;
+    friend class AlarmMode;
+    friend class GreetingMode;
 
     static inline char const * SETTINGS_FILE = "player/settings.json";
-    static inline char const * MP3_SETTINGS_FILE = "player/playlists.json";
-    static inline char const * RADIO_SETTINGS_FILE = "player/radio.json";
-    static inline char const * WALKIE_TALKIE_SETTINGS_FILE = "player/bot.json";
-    static inline char const * WALKIE_TALKIE_CERT_FILE = "player/cert.txt";
     static inline char const * WIFI_SETTINGS_FILE = "player/wifi.json";
-    static inline char const * ALARM_SETTINGS_FILE = "player/alarm.json";
-    static inline char const * GREETING_SETTINGS_FILE = "player/greeting.json";
+
+public:
 
     /** Initializes the player
      */
@@ -118,49 +115,73 @@ public:
             delay(200);
             readState();
         }      
-        // store if this has been ESP reset, in which case we skip the greeting later on
-        bool espReset = state_.espReset();
         // get the extended state as well. 
         getExtendedState(ex_);
         ex_.log();
-        send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        send(msg::LightsBar{2, 8, adjustBrightness(DEFAULT_COLOR)});
         // initialize the chip and core peripherals
         initializeESP();
         initializeLittleFS();
         initializeWiFi();
         initializeServer();
-        send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        send(msg::LightsBar{3, 8, adjustBrightness(DEFAULT_COLOR)});
         initializeSDCard();
-        send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        send(msg::LightsBar{4, 8, adjustBrightness(DEFAULT_COLOR)});
         // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
-        initializePlaylists();
-        send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
-        initializeRadio();
-        send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
-        initializeWalkieTalkie();
-        send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        mp3Mode_.initialize();
+        send(msg::LightsBar{5, 8, adjustBrightness(DEFAULT_COLOR)});
+        radioMode_.initialize();
+        send(msg::LightsBar{6, 8, adjustBrightness(DEFAULT_COLOR)});
+        walkieTalkieMode_.initialize();
+        send(msg::LightsBar{7, 8, adjustBrightness(DEFAULT_COLOR)});
         initializeSettings();
-        initializeAlarm();
+        alarmMode_.initialize();
         // if this is the initial state, write basic settings from the mode configuration to cached state
+#ifdef HAHA
         if (ex_.radio.stationId == 0xff) {
             LOG("Initial power on");
-            ex_.radio.stationId = 0;
-            ex_.radio.frequency = radioStations_[0];
+//            ex_.radio.stationId = 0;
+//            ex_.radio.frequency = radioStations_[0];
             ex_.walkieTalkie.readId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
             ex_.walkieTalkie.writeId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
         }
+#endif
         // store the extended state as it was updated by the SD card
-        setExtendedState(ex_);
+        sendExtendedState(ex_);
         send(msg::SetSettings{
-            settings_.maxBrightness,
-            settings_.radioEnabled,
-            settings_.discoEnabled,
-            settings_.lightsEnabled,
-            settings_.syncHour}
+            status_.maxBrightness,
+            status_.radioEnabled,
+            status_.discoEnabled,
+            status_.lightsEnabled,
+            status_.syncHour}
         );
-        send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        send(msg::LightsBar{8, 8, adjustBrightness(DEFAULT_COLOR)});
         LOG("Free heap: %u", ESP.getFreeHeap());
         ex_.time.log();
+        setBusy(false); // just make sure we have no leftovers from resets & stuff
+        setIdle(false);
+        // set the current mode
+        currentMode_ = getModeFor(state_.mode(), state_.musicMode());
+        // verify greeting 
+        if (! state_.espReset())
+            greetingMode_.checkGreeting();
+        
+        setMode(currentMode_);
+        currentMode_->volumeTurn();
+        /*
+        switch (state_.mode()) {
+            case Mode::Music:
+                
+            case Mode::Lights:
+            case Mode::WalkieTalkie:
+            case Mode::Alarm:
+            case Mode::Sync:
+            default:
+                LOG("unexpected mode: %u", static_cast<uint8_t>(state_.mode()));
+        }
+
+        
+
         send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
         switch (state_.mode()) {
             case Mode::Sync:
@@ -173,54 +194,12 @@ public:
         }
         // check the volume is within max range
         volumeTurn();
+        */
     }
 
-    static void loop() {
-        tick();
-        if (status_.irq) 
-            status_.recording ? record() : updateState();
-        if (!state_.idle()) {
-            if (mp3_.isRunning()) {
-                if (!mp3_.loop()) {
-                    mp3_.stop();
-                    LOG("MP3 playback done");
-                    switch (state_.mode()) {
-                        case Mode::Music:
-                        case Mode::Lights:
-                            playNextTrack();
-                            break;
-                        case Mode::Alarm:
-                            alarmDone();
-                            break;
-                    }
-                }
-            } else if (wav_.isRunning()) {
-                if (!wav_.loop()) {
-                    wav_.stop();
-                    LOG("Message playback done");
-                    playNextMessage();
-                }
-            }
-        }
-        if (state_.wifiStatus() == WiFiStatus::Connected) {
-            if (state_.idle()) {
-                if (status_.updateMessages) {
-                    status_.updateMessages = false;
-                    checkBotMessages();
-                }
-            }
-            server_.handleClient();
-            MDNS.update();
-        }
-    }
 
 private:
 
-    /** \name Chip & Peripherals Initialization routines
-     
-        Functions that initialize the ESP chip, image's little fs, attached SD card, etc. 
-     */
-    //@{
     static void initializeESP() {
         LOG("Initializing ESP8266...");
         LOG("  chip id:      %u", ESP.getChipId());
@@ -271,118 +250,74 @@ private:
         }
     }
 
-    /** Initializes the global settings from the SD card.
-     
-        The settings are split into multiple files so that we can be sure we fit in static JSON buffers. 
-
-         
+    /** Reads the settings from the JSON file stored on the SD card. 
      */
     static void initializeSettings() {
+        LOG("Initializing settings...");
+        // this should not be needed, but to make sure that at least something is displayed, fill in reasonable defaults here (the bitstruct does not do easy constructor)
+        status_.maxBrightness = DEFAULT_BRIGHTNESS;
+        status_.timezone = DEFAULT_TIMEZONE;
+        status_.maxSpeakerVolume = 15;
+        status_.maxHeadphonesVolume = 15;
+        status_.syncHour = 3;
+        status_.radioEnabled = true;
+        status_.discoEnabled = true;
+        status_.lightsEnabled = true; 
         StaticJsonDocument<1024> json;
         File f = SD.open(SETTINGS_FILE, FILE_READ);
         if (f && deserializeJson(json, f) == DeserializationError::Ok) {
-            settings_.fromJSON(json);
+            status_.maxSpeakerVolume = json["maxSpeakerVolume"];
+            status_.maxHeadphonesVolume = json["maxHeadphonesVolume"];
+            status_.timezone = json["timezone"];
+            status_.maxBrightness = json["maxBrightness"];
+            status_.radioEnabled = json["radioEnabled"];
+            status_.lightsEnabled = json["lightsEnabled"];
+            status_.walkieTalkieEnabled = json["walkieTalkieEnabled"];
+            status_.syncHour = json["syncHour"];
             f.close();
         }
-        settings_.syncHour = 21;
     }
 
-    //@}
-
-    /** \name ESP Core 
+    /** \name Main loop and timekeeping. 
      */
     //@{
-    static void tick() {
-        // update the running usage statistics
-        uint32_t t = millis();
-        ++runningLoopCount_;
-        uint16_t delay = t - lastMillis_;
-        if (runningMaxLoopTime_ < delay)
-            runningMaxLoopTime_ = delay;
-        lastMillis_ = t;
-        // see if we have a second tick, in which case update the time and utilization counters, then do a second tick
-        while (t - previousSecondMillis_ >= 1000) {
-            previousSecondMillis_ += 1000;
-            loopCount_ = runningLoopCount_;
-            maxLoopTime_ = runningMaxLoopTime_;
-            runningLoopCount_ = 0;
-            runningMaxLoopTime_ = 0;
-            secondTick();
+public:
+    static void loop() {
+        maxLoopTime_ = std::max(maxLoopTime_, static_cast<uint16_t>(millis() - lastMillis_));
+        lastMillis_ = millis();
+        bool secondTick = false;
+        while (lastMillis_ - lastSecondMillis_ >= 1000) {
+            secondTick = true;
+            maxLoopTime_ = 0;
+            lastSecondMillis_ += 1000;
+            ex_.time.secondTick();
         }
+        if (status_.irq)
+            status_.recording ? updateRecording() : updateState();
+        // playback loop
+        if (! state_.idle())
+            playbackLoop();
+        // let the current mode do what it needs to 
+        currentMode_->loop(secondTick);
+        // if connected to the internet, handle the server & mcast dns (http://mp3-player.local)
+        if (state_.wifiStatus() == WiFiStatus::Connected || state_.wifiStatus() == WiFiStatus::AP) {
+            server_.handleClient();
+            MDNS.update();
+        }
+        // TODO check time every hour
     }
 
-    static void secondTick() {
-        ex_.time.secondTick();
-        if (! status_.recording)
-            if (getExtendedState(ex_.measurements))
-                send(msg::AVRWatchdogReset{});
-            //updateState();
-        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie && ! status_.recording) {
-            if (settings_.walkieTalkieEnabled)
-                status_.updateMessages = true;
-            updateNTPTime();
-        }
-        // TODO do more stuff
-    }
+private:
 
-    /** Synchronizes the player with the rest of the world. 
-     
-        Attempts to connect to the WiFi and update time from NTP servers. If the walkie-talkie mode is enabled also checks any new telegram messages. The synchronization happens every day at the predefined hour *and* immediately after power on. 
-     */
-    static void sync() {
-        LOG("Synchronizing...");
-        send(msg::SetESPBusy{true});
-        // first connect to WiFi unless already connected, if in AP mode, terminate AP mode first
-        if (state_.wifiStatus() == WiFiStatus::AP)
-            disconnectWiFi();
-        if (state_.wifiStatus() != WiFiStatus::Connected) {
-            connectWiFi();
-            uint32_t start = millis();
-            while (state_.wifiStatus() == WiFiStatus::Connecting && millis() - start < SYNC_CONNECTION_TIMEOUT) {
-                delay(1000);
-                send(msg::SetESPBusy{true});
-            };
-        }
-        // if the connection was successful, proceed with the sync
-        if (state_.wifiStatus() == WiFiStatus::Connected) {
-            if (! updateNTPTime()) {
-                delay(1000);
-                updateNTPTime();
-            }
-            // check walkie talkie messages if walkie talkie enabled
-            if (settings_.walkieTalkieEnabled)
-                checkBotMessages();
-        }
-        // now we are done, let's sleep some more
-        LOG("Synchronization done.");
-        send(msg::SetESPBusy{false});
-        send(msg::Sleep{});
-        // wait for the death to come
-        while (true) { delay(100); }
-    }
-
-    /** Number of times the loop function gets called in the past second. 
-     */
-    static inline uint16_t loopCount_ = 0;
     static inline uint16_t maxLoopTime_ = 0;
     static inline uint32_t lastMillis_ = 0;
-    static inline uint16_t runningLoopCount_ = 0;
-    static inline uint16_t runningMaxLoopTime_ = 0;
-    static inline uint32_t previousSecondMillis_ = 0;
+    static inline uint32_t lastSecondMillis_ = 0;
 
     //@}
-    
-    /** \name Communication with ATTiny
+
+    /** \name AVR Communication & Synchronisation
      */
     //@{
-
-    /** Handler for the state update requests.
-
-        These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
-     */
-    static IRAM_ATTR void avrIrq() {
-        status_.irq = true;
-    }
 
     template<typename T>
     static void send(T const & msg, unsigned retries = 1) {
@@ -404,7 +339,7 @@ private:
     }
 
     template<typename T>
-    static void setExtendedState(T const & part) {
+    static void sendExtendedState(T const & part) {
         Wire.beginTransmission(AVR_I2C_ADDRESS);
         uint8_t offset = static_cast<uint8_t>((uint8_t*)(& part) - (uint8_t *)(& ex_));
         msg::SetExtendedState msg{
@@ -433,6 +368,52 @@ private:
         }
     }
 
+    static void setControlRange(uint16_t value, uint16_t max) {
+        LOG("Control range update: %u (max %u)", value, max);
+        if (value > max) {
+            value = max;
+            LOG("  mac value clipped to %u", max);
+        }
+        state_.setControlValue(value);
+        send(msg::SetControlRange{value, max});
+    }
+
+    static void sleep() {
+        send(msg::Sleep{});
+    }
+
+    static bool idle() {
+        return state_.idle();
+    }
+
+    static void setIdle(bool value) {
+        setIdle(value, value ? DEFAULT_IDLE_TIMEOUT : DEFAULT_PLAY_TIMEOUT);
+    }
+
+    static void setIdle(bool value, uint8_t timeout) {
+        LOG("idle: %u (%u)", value, timeout);
+        state_.setIdle(value);
+        send(msg::SetIdle{value, timeout});
+    }
+
+    static bool busy() {
+        return status_.busy;
+    }
+
+    static void setBusy(bool value) {
+        LOG("busy: %u", value);
+        status_.busy = value;
+        send(msg::SetESPBusy{value});
+    }
+
+    /** Handler for the state update requests.
+
+        These are never done by the interrupt itself, but a flag is raised so that the main loop can handle the actual I2C request when ready. 
+     */
+    static IRAM_ATTR void avrIrq() {
+        status_.irq = true;
+    }
+
     static bool readState() {
         // set IRQ to false before we get the state. It is possibile that the IRQ will be set to true after this but before the state request, thus being cleared on AVR side by the request. This is ok as it would only result in an extra state request afterwards, which would be identical, and therefore no action will be taken
         status_.irq = false;
@@ -448,869 +429,240 @@ private:
         }
     }
 
-    /** Requests state update from ATTiny. 
+    /** Requests state update from ATTiny and processes its events.
      */
     static void updateState() {
         State old = state_;
         if (readState()) {
-            // check available events and react accordingly
             if (state_.mode() != old.mode()) {
-                switch (state_.mode()) {
-                    case Mode::ESPOff:
-                        powerOff();
-                        break;
-                    case Mode::Alarm:
-                        // revert the mode first so that we can pause current mode if needed and save it in the setMode function below
-                        state_.setMode(old.mode());
-                        setMode(Mode::Alarm);
-                        break;
-                    // this should not happen really
-                    default:
-                        LOG("Unexpected mode change: %u", static_cast<uint8_t>(state_.mode()));
-                        break;
-                }
+                LOG("mode: %u", static_cast<uint8_t>(state_.mode()));
+                setMode(getModeFor(state_.mode(), state_.musicMode()));
             }
-            if (state_.controlTurn()) 
-                controlTurn();
             if (state_.controlButtonDown() != old.controlButtonDown())
-                state_.controlButtonDown() ? controlDown() : controlUp();
-            if (state_.controlButtonPress())
-                controlPress();
-            if (state_.controlButtonLongPress())
-                controlLongPress();
-            if (state_.volumeTurn())
-                volumeTurn();
+                if (state_.controlButtonDown()) {
+                    LOG("ctrl down");
+                    currentMode_->controlDown();
+                } else {
+                    LOG("ctrl up");
+                    currentMode_->controlUp();
+                }
+            if (state_.controlButtonPress()) {
+                LOG("ctrl press");
+                currentMode_->controlPress();
+            }
+            if (state_.controlButtonLongPress()) {
+                LOG("ctrl long press");
+                currentMode_->controlLongPress();
+            }
+            if (state_.controlTurn()) {
+                LOG("ctrl: %u", state_.controlValue());
+                currentMode_->controlTurn();
+            }
             if (state_.volumeButtonDown() != old.volumeButtonDown())
-                state_.volumeButtonDown() ? volumeDown() : volumeUp();
-            if (state_.volumeButtonPress())
-                volumePress();
-            if (state_.volumeButtonLongPress())
-                volumeLongPress();
-            if (state_.doubleButtonLongPress())
-                doubleLongPress();
+                if (state_.volumeButtonDown()) {
+                    LOG("vol down");
+                    currentMode_->volumeDown();
+                } else {
+                    LOG("vol up");
+                    currentMode_->volumeUp();
+                }
+            if (state_.volumeButtonPress()) {
+                LOG("vol press");
+                currentMode_->volumePress();
+            }
+            if (state_.volumeButtonLongPress()) {
+                LOG("vol long press");
+                currentMode_->volumeLongPress();
+            }
+            if (state_.volumeTurn()) {
+                LOG("vol: %u", state_.volumeValue());
+                currentMode_->volumeTurn();
+            }
+            if (state_.doubleButtonLongPress()) {
+                LOG("double long press");
+                currentMode_->doubleLongPress();
+            }
             // if there is change in headphones, simulate change in volume to cap the volume value if necessary
-            if (state_.headphonesConnected() != old.headphonesConnected())
-                volumeTurn();
+            if (state_.headphonesConnected() != old.headphonesConnected()) {
+                LOG("headphones: ", state_.headphonesConnected());
+                currentMode_->volumeTurn();
+            }
             // clear the events so that they can be triggered again (ATTiny did so after the transmission as well)
             state_.clearEvents();
         }
     }
 
-    /** Power off the ESP. 
-     */
-    static void powerOff() {
-        LOG("PowerOff");
-        stop();
-        send(msg::Sleep{});
-        LOG("All done");
-        while(true)
-            delay(1);
-    }
-
+    static inline State state_;
+    static inline ExtendedState ex_;
     //@}
 
-    /** \name Controls
-     
-        Events corresponding directly to user interface events as reported by the ATTiny. Methods in this section translate the raw ui events to actionable items based on the current mode & other context. 
+    /** \name Modes
      */
     //@{
 
-    static void controlDown() {
-        LOG("Control down");
-        switch (state_.mode()) {
-            case Mode::WalkieTalkie:
-                 if (status_.recording) // can only record if walkie talkie is already enabled
-                     stopRecording(/*cancel*/ true);
-            default:
-                break;
-        }
-    }
+    static inline MP3Mode mp3Mode_;
+    static inline RadioMode radioMode_;
+    static inline DiscoMode discoMode_;
+    static inline LightsMode lightsMode_;
+    static inline WalkieTalkieMode walkieTalkieMode_;
+    static inline AlarmMode alarmMode_;
+    static inline GreetingMode greetingMode_;
 
-    static void controlUp() {
-        LOG("Control up");
-
-    }
-
-    /** Cycles through playlists in mp3 mode, cycles through stations in radio mode, cycles through latest received messages in walkie talkie mode (and plays them) and cycles through light effects for night light mode. 
+    /** The current mode. 
      */
-    static void controlPress() {
-        LOG("Control press");
-        switch (state_.mode()) {
-            case Mode::Music: {
-                if (state_.musicMode() == MusicMode::MP3) {
-                    uint8_t i = ex_.mp3.playlistId + 1;
-                    if (i >= numPlaylists_)
-                        i = 0;
-                    setPlaylist(i);
-                    send(msg::LightsPoint{i, static_cast<uint16_t>(numPlaylists_ - 1), MODE_COLOR_MP3});
-                } else {
-                    uint8_t i = ex_.radio.stationId + 1;
-                    if (i >= numRadioStations_)
-                        i = 0;
-                    setRadioStation(i);
-                    send(msg::LightsPoint{i, static_cast<uint16_t>(numRadioStations_ - 1), MODE_COLOR_RADIO});
-                }
-                // if not currently playing, start playing now
-                if (state_.idle())
-                    play();
-                break;
-            }
-            case Mode::Lights: {
-                uint8_t i = static_cast<uint8_t>(ex_.lights.effect) + 1;
-                if (i == 8)
-                    i = 0;
-                setLightsEffect(static_cast<LightsEffect>(i));
-                send(msg::LightsPoint{i, 7, MODE_COLOR_LIGHTS});
-                break;
-            }
-            case Mode::WalkieTalkie:
-                // convert to volume press (play/pause)
-                if (settings_.walkieTalkieEnabled)
-                    volumePress();
-                break;
-            case Mode::Alarm:
-                snooze();
-                break;
-            // any button press while in greeting mode moves to the music mode instead
-            case Mode::Greeting:
-                setMode(Mode::Music);
-                break;
-            default:
-                break;
-        }
-    }
+    static inline ESPMode * currentMode_ = nullptr;
 
-    /** Cycles through the modes. 
+    /** Sets the new mode. 
      */
-    static void controlLongPress() {
-        LOG("Control long press");
-        switch (state_.mode()) {
-            case Mode::Music: 
-                setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled, settings_.discoEnabled));
-                // start playing if we were idle
-                if (state_.idle())
-                    play();
-                break;
-            case Mode::Alarm:
-                alarmDone();
-                break;
-            // any button press while in greeting mode moves to the music mode instead
-            case Mode::Greeting:
-                setMode(Mode::Music);
-                break;
-            default:
-                setMode(Mode::Music);
-        }
-    }
-
-    /** Selects track id in mp3 mode, radio frequency in radio, or changes hue in night lights mode. 
-     
-        Does nothing in walkie-talkie, can select received messages to play? 
-     */
-    static void controlTurn() {
-        LOG("Control: %u", state_.controlValue());
-        switch (state_.mode()) {
-            case Mode::Music:
-                switch (state_.musicMode()) {
-                    case MusicMode::MP3:
-                        send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3.withBrightness(settings_.maxBrightness)});
-                        setTrack(state_.controlValue());
-                        break;
-                    case MusicMode::Radio:
-                        send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO.withBrightness(settings_.maxBrightness)});
-                        setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
-                        break;
-                    case MusicMode::Disco:
-                        // TODO 
-                        break;
-                }
-                // start playing if we were idle
-                if (state_.idle())
-                    play();
-                break;
-            case Mode::WalkieTalkie:
-                // if not empty, then the new messages must be played first via normal CTRL press
-                if (settings_.walkieTalkieEnabled && ex_.walkieTalkie.isEmpty()) {
-                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(numMessages_) - 1, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness)});
-                    // play from the updated value
-                    play();
-                }
-                break;
-            case Mode::Lights: {
-                setNightLightHue(state_.controlValue());
-                if (ex_.lights.hue == LightsState::HUE_RAINBOW)
-                    send(msg::LightsColors{
-                        Color::HSV(0 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(1 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(2 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(3 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(4 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(5 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(6 << 13, 255, settings_.maxBrightness),
-                        Color::HSV(7 << 13, 255, settings_.maxBrightness)
-                    });
-                else
-                    send(msg::LightsBar{8, 8, Color::HSV(ex_.lights.colorHue(), 255, settings_.maxBrightness)});
-                break;
-            }
-            // any button press while in greeting mode moves to the music mode instead
-            case Mode::Greeting:
-                setMode(Mode::Music);
-                break;
-            default:
-                break;
-        }
-    }
-
-    /** Starts recording in walkie-talkie mode. 
-     */
-    static void volumeDown() {
-        LOG("Volume down");
-        switch (state_.mode()) {
-            // TODO recording in disco
-            case Mode::WalkieTalkie:
-                if (settings_.walkieTalkieEnabled)
-                    startRecording();
-                break;
-            default:
-                break;
-        }
-    }
-
-    static void volumeUp() {
-        LOG("Volume up");
-        switch (state_.mode()) {
-            // TODO recording in disco
-            case Mode::WalkieTalkie:
-                stopRecording(); // walkie talkie must have been enabled to start the recording, no need to check here
-                break;
-            default:
-                break;
-        }
-    }
-
-    /** Play/Pause in mp3, radio and lights settings mode. 
-     
-        Does nothing in walkie-talkie mode as volume key press & hold is used to record messages. 
-      */
-    static void volumePress() {
-        LOG("Volume press");
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                if (state_.musicMode() == MusicMode::Disco)
-                    break; // in disco mode, volume pressing does nothing 
-            case Mode::WalkieTalkie:
-                if (state_.idle())
-                    play();
-                else
-                    pause();
-                break;
-            case Mode::Alarm:
-                snooze();
-                break;
-            // any button press while in greeting mode moves to the music mode instead
-            case Mode::Greeting:
-                setMode(Mode::Music);
-                break;
-            default:
-                break;
-        }
-    }
-
-    static void volumeLongPress() {
-        LOG("Volume long press");
-        // any button press while in greeting mode moves to the music mode instead
-        if (state_.mode() == Mode::Greeting)
-            setMode(Mode::Music);
-        else if (state_.mode() == Mode::Alarm)
-            alarmDone();
-        else if (state_.mode() != Mode::WalkieTalkie && state_.musicMode() != MusicMode::Disco)
-            setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
-    }
-
-    /** Changes volume. 
-     
-        Updates the volume of the underlying music provider (i2s/radio). 
-     */
-    static void volumeTurn() {
-        LOG("Volume: %u", state_.volumeValue());
-        // check that the volume is within the settings available
-        uint8_t maxVolume = state_.headphonesConnected() ? settings_.maxHeadphonesVolume : settings_.maxSpeakerVolume;
-        if (state_.volumeValue() > maxVolume) {
-            state_.setVolumeValue(maxVolume);
-            send(msg::SetVolumeRange{state_.volumeValue(), MAX_VOLUME});
-            LOG("Limited to %u", state_.volumeValue());
-        }
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                if (state_.musicMode() == MusicMode::Radio)
-                    radioUpdateVolume();
-                else // both MP3 and disco use i2s
-                    i2sUpdateVolume();
-                break;
-            case Mode::WalkieTalkie:
-            case Mode::Greeting:
-                i2sUpdateVolume();
-                break;
-            default:
-                break;
-        }
-        send(msg::LightsBar{static_cast<uint16_t>(state_.volumeValue() + 1), 16, DEFAULT_COLOR});
-    }
-
-    /** Turns wifi on/off, turns the player off. 
-     */
-    static void doubleLongPress() {
-        LOG("Double long press");
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                setMode(Mode::WalkieTalkie);
-                break;
-            case Mode::WalkieTalkie:
-                setMode(Mode::Music);
-                break;
-            case Mode::Alarm:
-                alarmDone();
-                break;
-            case Mode::Greeting:
-                setMode(Mode::Music);
-                break;
-            default:
-                // unreachable
-                break;
-        }
-    }
-
-    //@}
-
-    /** \name Actions
-     
-        Actual things that can happen. These can be triggered by various sources, such as the controls, web interface, or the telegram bot. 
-     */
-    //@{
-
-    static void setControlRange(uint16_t value, uint16_t max) {
-        LOG("Control range update: %u (max %u)", value, max);
-        if (value > max) {
-            value = max;
-            LOG("  mac value clipped to %u", max);
-        }
-        state_.setControlValue(value);
-        send(msg::SetControlRange{value, max});
-    }
-
-    /** Sets the music mode. 
-     */
-    static void setMusicMode(MusicMode mode) {
-        LOG("Setting music mode %u", mode);
-        bool resume = ! state_.idle() && state_.mode() == Mode::Music;
-        if (resume)
-            stop();
-        state_.setMusicMode(mode);
+    static void setMode(ESPMode * newMode) {
+        MusicMode old = state_.musicMode();
+        do {
+            if (currentMode_ != nullptr)
+                currentMode_->leave(newMode);
+            ESPMode * old = currentMode_;
+            currentMode_ = newMode;
+            newMode = currentMode_->enter(old);
+        } while (newMode != currentMode_);
+        state_.setMode(newMode->mode);
         send(msg::SetMode{state_.mode(), state_.musicMode()});
-        if (resume)
-            play();
-    }    
+        LOG("mode: %u, music: %u", static_cast<uint8_t>(state_.mode()), static_cast<uint8_t>(state_.musicMode()));
+    }
 
-    static void setMode(Mode mode) {
-        LOG("Setting mode %u", mode);
-        // if we are coming from walkie talkie, disconnect WiFi too and make sure the playback of messages is stopped
-        if (state_.mode() == Mode::WalkieTalkie) {
-            walkieTalkieStop();
-            if (state_.wifiStatus() != WiFiStatus::Off)
-                disconnectWiFi();
-        }
+    static void setMode(ESPMode & newMode) {
+        setMode(& newMode);
+    }
+
+    static ESPMode * getModeFor(Mode mode, MusicMode musicMode) {
         switch (mode) {
-            case Mode::Music: {
-                // stop if we are moving from the greeting mode so that we can play proper mp3
-                if (state_.mode() == Mode::Greeting)
-                    stop();
-                // if we are going back from lights and already playing, otherwise resume
-                bool resume = state_.idle() || (state_.mode() != Mode::Lights);
-                state_.setMode(mode);
-                send(msg::SetMode{state_.mode(), state_.musicMode()});
-                if (resume)
-                    play();
-                else switch (state_.musicMode()) {
+            case Mode::Music:
+                switch (musicMode) {
                     case MusicMode::MP3:
-                        setControlRange(ex_.mp3.trackId, playlists_[ex_.mp3.playlistId].numTracks);
-                        break;
+                        return & mp3Mode_;
                     case MusicMode::Radio:
-                        setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
-                        break;
+                        return & radioMode_;
                     case MusicMode::Disco:
-                        break;
+                        return & discoMode_;
                 }
-                break;
-            }
             case Mode::Lights:
-                state_.setMode(mode);
-                send(msg::SetMode{state_.mode(), state_.musicMode()});
-                setControlRange(ex_.lights.hue, LightsState::HUE_RAINBOW + 1);
-                break;
+                return & lightsMode_;
             case Mode::WalkieTalkie:
-                stop(); // stop music if any 
-                state_.setMode(mode);
-                send(msg::SetMode{state_.mode(), state_.musicMode()});
-                setControlRange(0, numMessages_);
-                // connect to WiFi, if not already connected
-                if (state_.wifiStatus() != WiFiStatus::Connected)
-                    connectWiFi();
-                // make sure we are ready to record
-                status_.recordingReady = true;
-                break;
+                return & walkieTalkieMode_;
             case Mode::Alarm:
-                alarmReturnMode_ = state_.mode();
-                alarmResume_ = ! state_.idle();
-                stop();
-                state_.setMode(mode);
-                send(msg::SetMode{state_.mode(), state_.musicMode()});
-                play();
-                break;
-            case Mode::Greeting:
-                state_.setMode(mode);
-                send(msg::SetMode{state_.mode(), state_.musicMode()});
-                play();
-                break;
+                return & alarmMode_;
+            // as a fallback, always go to the mp3 mode
             default:
-                break;
+                return & mp3Mode_;
         }
     }
-
-    static void play() {
-        LOG("Play");
-        state_.setIdle(false);
-        send(msg::SetIdle{false, timeoutPlay_});
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                switch (state_.musicMode()) {
-                    case MusicMode::MP3:
-                        // if we are resuming from pause, just setting idle to false above did the trick
-                        if (! mp3_.isRunning())
-                            mp3Play();
-                        break;
-                    case MusicMode::Radio:
-                        radioPlay();
-                        break;
-                    case MusicMode::Disco:
-                        break;
-                }
-                break;
-            case Mode::WalkieTalkie: 
-                if (! wav_.isRunning())
-                    walkieTalkiePlay();
-                break;
-            case Mode::Alarm:
-                alarmPlay();
-                break;
-            // don't do anything - the playback will start later as we don't know the filename at this point
-            case Mode::Greeting:
-                break;
-            default:
-                break;
-        }
-    }
-
-    /** Pauses the playback so that it can be resumed later on. 
-     
-        At this point it has only meaning for mp3 playback, for all else it is equivalent to a full stop.
-     */
-    static void pause() {
-        LOG("Pause");
-        state_.setIdle(true);
-        send(msg::SetIdle{true, timeoutIdle_});
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                switch (state_.musicMode()) {
-                    case MusicMode::MP3:
-                        break;
-                    case MusicMode::Radio:
-                        radioStop();
-                        break;
-                    case MusicMode::Disco:
-                        break;
-                }
-                break;
-            default:
-                break;
-        }
-    }
-
-    /** Stops the playback. 
-     */
-    static void stop() {
-        LOG("Stop");
-        state_.setIdle(true);
-        send(msg::SetIdle{true, timeoutIdle_});
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                switch (state_.musicMode()) {
-                    case MusicMode::MP3:
-                        mp3Stop();
-                        break;
-                    case MusicMode::Radio:
-                        radioStop();
-                        break;
-                    case MusicMode::Disco:
-                        break;
-                }
-                break;
-            case Mode::WalkieTalkie:
-                walkieTalkieStop();
-            case Mode::Alarm:
-            case Mode::Greeting:
-                mp3Stop();
-                break;
-            default:
-                break;
-        }
-    }
-
     //@}
 
-    /** \name MP3 Mode 
+    /** \name Playback
      */
     //@{
-    static void initializePlaylists() {
-        LOG("Initializing MP3 Playlists...");
-        File f = SD.open(MP3_SETTINGS_FILE, FILE_READ);
-        if (f) {
-            StaticJsonDocument<1024> json;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                numPlaylists_ = 0;
-                uint8_t id = 0;
-                for (JsonVariant playlist : json.as<JsonArray>()) {
-                    ++id; // so that we start at one
-                    if (! playlist["enabled"].as<bool>()) // skip disabled playlists
-                        continue;
-                    uint16_t numTracks = initializePlaylistTracks(id);
-                    if (numTracks > 0) {
-                        playlists_[numPlaylists_++] = PlaylistInfo{id, numTracks};
-                        LOG("  %u: %s (%u tracks)",id, playlist["name"].as<char const *>(), numTracks);
-                    } else {
-                        LOG("  %u: %s (no tracks found, skipping)", id, playlist["name"].as<char const *>());
-                    }
-                }
-            } else {
-                ERROR("%s is not valid JSON file", MP3_SETTINGS_FILE);
-            }
-            f.close();
-        } else {
-            LOG("%s not found", MP3_SETTINGS_FILE);
-        }
-    }
 
-    /** Searches the playlist to determine the number of tracks it contains. 
+    /** Starts immediate playback of the selected filename at given volume. 
      
-        A track is any file ending in `.mp3`. Up to 1023 tracks per playlist are supported in theory, but much smaller numbers should be used. 
+        The volume is expected to be in range 0..15 inclusive. 
      */
-    static uint16_t initializePlaylistTracks(uint8_t playlistId) {
-        uint16_t result = 0;
-        char playlistFolder[8];
-        snprintf_P(playlistFolder, sizeof(playlistFolder), PSTR("%u"), playlistId);
-        File d = SD.open(pointer_cast<char const *>(& playlistFolder));
-        while (true) {
-            File f = d.openNextFile();
-            if (!f)
-                break;
-            // this should not happen, but let's be sure
-            if (f.isDirectory())
-                continue;
-            if (EndsWith(f.name(), ".mp3"))
-                ++result;
-        }
-        if (result > 1023) {
-            LOG("Error: Playlist %u has %u tracks where only 1023 is allowed", playlistId, result);
-            result = 1023;
-        }
-        d.close();
-        return result;
+
+    static void playMP3(char const * filename) {
+        playMP3(filename, state_.volumeValue());
     }
 
-    static void mp3Play() {
-        setPlaylist(ex_.mp3.playlistId);
-    }
+    static void playMP3(char const * filename, uint8_t volume) {
+        LOG("MP3: %s (vol %u)", filename, volume);
+        stopPlayback();
+        audioFile_.open(filename);
+        i2s_.SetGain(static_cast<float>(volume + 1) / 16);
+        mp3_.begin(& audioFile_, & i2s_);
+    }        
 
-    static void mp3Stop() {
+    static void stopMP3() {
         if (mp3_.isRunning()) {
+            LOG("MP3 stop");
             mp3_.stop();
             i2s_.stop();
             audioFile_.close();
         }
     }
 
-    static void i2sUpdateVolume() {
-        if (mp3_.isRunning() || wav_.isRunning()) {
-            i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
+    static void playWAV(char const * filename) {
+        playWAV(filename, state_.volumeValue());
+    }
+
+    static void playWAV(char const * filename, uint8_t volume) {
+        LOG("WAV: %s (vol %u)", filename, volume);
+        stopPlayback();
+        audioFile_.open(filename);
+        i2s_.SetGain(static_cast<float>(volume + 1) / 16);
+        wav_.begin(& audioFile_, & i2s_);
+    }
+
+    static void stopWAV() {
+        if (wav_.isRunning()) {
+            LOG("WAV stop");
+            wav_.stop();
+            i2s_.stop();
+            audioFile_.close();
         }
     }
 
-    /** Sets the given playlist and starts playback from its first track. 
-     
-        Uses the playlist index, which is the order in which valid playlists in `playtlists.json` were found. 
-
-        Assumes the playlist is valid, which is actually checked by the initializePlaylists. 
-     */ 
-    static void setPlaylist(uint8_t index) {
-        LOG("Playlist %u (folder %u)", index, playlists_[index].id);
-        currentPlaylist_.close();
-        char playlistDir[8];
-        snprintf_P(playlistDir, sizeof(playlistDir), PSTR("%u"), playlists_[index].id);
-        currentPlaylist_ = SD.open(playlistDir);
-        ex_.mp3.playlistId = index;
-        ex_.mp3.trackId = 0;
-        setControlRange(0, playlists_[index].numTracks);
-        setTrack(0);
+    /** Stops all playback done by ESP (if any).
+     */
+    static void stopPlayback() {
+        stopMP3();
+        stopWAV();
     }
 
-    static void setTrack(uint16_t index) {
-        // pause current playback if any
-        mp3Stop();
-        // determune whether we have to start from the beginning, or can go forward from current track
-        uint16_t nextTrack = ex_.mp3.trackId + 1;
-        if (index < nextTrack) {
-            currentPlaylist_.rewindDirectory();
-            nextTrack = 0;
-        }
-        while (true) {
-            File f = currentPlaylist_.openNextFile();
-            if (!f)
-                break;
-            LOG("Checking file %s, index %u, nexttrack %u", f.name(), index, nextTrack);
-            if (EndsWith(f.name(), ".mp3")) {
-                if (index == nextTrack) {
-                    char filename[32]; // this should be plenty for 8.3 filename
-                    snprintf_P(filename, sizeof(filename), PSTR("%u/%s"), playlists_[ex_.mp3.playlistId].id, f.name());
-                    f.close();
-                    audioFile_.open(filename);
-                    i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
-                    mp3_.begin(& audioFile_, & i2s_);
-                    LOG("Track %u, file: %s", index, filename);
-                    ex_.mp3.trackId = index;
-                    setExtendedState(ex_.mp3);
-                    return;
-                } else {
-                    ++nextTrack;
-                }
-            } 
-            f.close();
-        }
-        LOG("No file found");
-        // TODO error
-    }
-
-    static void playNextTrack() {
-        if (ex_.mp3.trackId + 1 < playlists_[ex_.mp3.playlistId].numTracks) {
-            setTrack(ex_.mp3.trackId + 1);
-        } else {
-            mp3Stop();
-            pause();
+    static void playbackLoop() {
+        if (mp3_.isRunning() && ! mp3_.loop()) {
+            mp3_.stop();
+            LOG("MP3 playback done");
+            currentMode_->playbackFinished();
+        } else if (wav_.isRunning() && ! wav_.loop()) {
+            wav_.stop();
+            LOG("WAV playback done");
+            currentMode_->playbackFinished();
         }
     }
 
-    struct PlaylistInfo {
-        unsigned id : 4;
-        unsigned numTracks : 12;
-
-        PlaylistInfo() = default;
-
-        PlaylistInfo(uint8_t id, uint16_t numTracks):
-            id{id},
-            numTracks{numTracks} {
-        }
-
-    } __attribute__((packed)); // PlaylistInfo
-
-    static_assert(sizeof(PlaylistInfo) == 2);
+    static void setI2SVolume(uint8_t volume) {
+        i2s_.SetGain(static_cast<float>(volume + 1) / 16);
+    }
 
     static inline AudioGeneratorMP3 mp3_;
+    static inline AudioGeneratorWAV wav_;
     static inline AudioOutputI2S i2s_;
     static inline AudioFileSourceSD audioFile_;
-    static inline PlaylistInfo playlists_[8];
-    static inline uint8_t numPlaylists_ = 0;
-
-    static inline File currentPlaylist_;
 
     //@}
 
-    /** \name Radio Mode
-     
-        When enabled, allows the reception of FM radio via a RDA5807M module.
-     */
-    //@{
-    /** Initializes the predefined radio stations from the SD card. 
-
-     */
-    static void initializeRadio() {
-        LOG("Initializing radio stations...");
-        numRadioStations_ = 0;
-        File f = SD.open(RADIO_SETTINGS_FILE, FILE_READ);
-        if (f) {
-            StaticJsonDocument<1024> json;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                for (JsonVariant station : json["stations"].as<JsonArray>()) {
-                    radioStations_[numRadioStations_++] = station["freq"];
-                    LOG("  %s: %u", station["name"].as<char const *>(), station["freq"].as<unsigned>());
-                }
-                forceMono_ = json["forceMono"].as<bool>();
-                manualTuning_ = json["manualTuning"].as<bool>();
-            } else {
-                //LOG("  radio/stations.json file not found");
-            }
-            f.close();
-        } else {
-            LOG("  %s file not found", RADIO_SETTINGS_FILE);
-        }
-        // if the current frequency is out of bounds, set it to the frequency of the first station, which just means that when invalid state, default to the first station
-        if (ex_.radio.frequency < RADIO_FREQUENCY_MIN || ex_.radio.frequency > RADIO_FREQUENCY_MAX)
-            ex_.radio.frequency = radioStations_[0];
-    }
-
-    static void radioPlay() {
-        radio_.init();
-        radio_.setMono(forceMono_ || ! state_.headphonesConnected());
-        radio_.setVolume(state_.volumeValue());
-        setRadioFrequency(ex_.radio.frequency);
-        setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
-        // for reasons unknown to me, the RDA does not always work immediately after power on/wakeup unless we set the frequency again after a while
-        delay(100);
-        setRadioFrequency(ex_.radio.frequency);
-    }
-
-    static void radioStop() {
-        radio_.term();
-    }
-
-    static void radioUpdateVolume() {
-        if (state_.mode() == Mode::Music && state_.musicMode() == MusicMode::Radio) {
-            radio_.setVolume(state_.volumeValue());
-        }
-    }
-
-    static void setRadioFrequency(uint16_t mhzx10) {
-        LOG("Radio frequency: %u", mhzx10);
-        if (state_.mode() == Mode::Music && state_.musicMode() == MusicMode::Radio) {
-            ex_.radio.frequency = mhzx10;
-            radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
-            setExtendedState(ex_.radio);
-        }
-    }
-
-    static void setRadioStation(uint8_t index) {
-        LOG("Radio station: %u", index);
-        if (state_.mode() == Mode::Music && state_.musicMode() == MusicMode::Radio) {
-            ex_.radio.stationId = index;
-            ex_.radio.frequency = radioStations_[index];
-            radio_.setBandFrequency(RADIO_BAND_FM, ex_.radio.frequency * 10);
-            setExtendedState(ex_.radio);
-            setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
-        }
-    }
-
-    /** NOTE This uses about 500B RAM, none of which we really need as the only relevant radio state is kept in the extended state. This can be saved if we talk to the radio chip directly. 
-     */
-    static inline RDA5807M radio_;
-    static inline uint8_t numRadioStations_ = 0;
-    static inline uint16_t radioStations_[8];
-    static inline bool forceMono_ = false;
-    static inline bool manualTuning_ = true;
-
-    //@}
-
-    /** \name Walkie-Talkie Mode
-     
-        The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
-
-        
-
-        https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
-        https://core.telegram.org/bots/api#sending-files
-
+    /** \name Recording
      */
     //@{
 
-    static void initializeWalkieTalkie() {
-        File f = SD.open(WALKIE_TALKIE_SETTINGS_FILE, FILE_READ);
-        if (f) {
-            StaticJsonDocument<1024> json;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                int64_t id = json["id"].as<int64_t>();
-                String token = json["token"];
-                telegramAdminId_ = json["adminId"].as<int64_t>();
-                telegramChatId_ = json["chatId"].as<int64_t>();
-                LOG("Walkie-Talkie:\n  Bot %lli\n  Chat %lli\n  Token: %s\n  AdminId: %lli", id, telegramChatId_, token.c_str(), telegramAdminId_);
-                File cf = SD.open(WALKIE_TALKIE_CERT_FILE, FILE_READ);
-                if (cf && cf.size() < 2048) {
-                    String cert = cf.readString();
-                    // TODO security is hard, the certificate only works if time is proper...
-                    bot_.initialize(id, std::move(token), nullptr /*, cert.c_str() */);
-                } else {
-                    bot_.initialize(std::move(id), std::move(token), nullptr);
-                    LOG("No certificate found, telegram bot will be INSECURE!!!");
-                }
-                cf.close();
-            } else {
-                LOG("Deserialization error");
-            }
-            f.close();
-        }
-        // determine the number of messages in the buffer 
-        for (numMessages_ = 0; numMessages_ < MAX_WALKIE_TALKIE_MESSAGES; ++numMessages_) {
-            char filename[16];
-            snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), numMessages_);
-            if (! SD.exists(filename))
-                break;
-        }
-        LOG("WT messages found: %u", numMessages_);
-    }
-
-    static void startRecording() {
-        walkieTalkieStop();
-        if (!status_.recordingReady || !recording_.begin("/rec.wav")) {
-            LOG("Unable to open recording target file or recording not ready");
-            send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
+    static void startRecording(char const * filename) {
+        if (status_.recording || ! recording_.begin(filename)) {
+            ERROR("Unable to open recording target file (or already recording");
         } else {
             LOG("Recording...");
             status_.recording = true;
-            send(msg::StartRecording());
-            status_.recordingReady = false;
-            messageStart_ = millis();
-        }        
-    }
-        
-    static void stopRecording(bool cancel = false) {
-        if (status_.recording) {
-            // tell avr to return to normal state & stop own recording
-            send(msg::StopRecording{});
-            recording_.end();
-            status_.recording = false;
-            cancel = cancel || ((millis() - messageStart_) < MIN_WALKIE_TALKIE_RECORDING);
-            if (cancel) {
-                LOG("Recording cancelled");
-                send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
-                status_.recordingReady = true;
-            } else {
-                LOG("Recording done");
-                File f = SD.open("/rec.wav", FILE_READ);
-                send(msg::SetESPBusy{true});
-                bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
-                    send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
-                });
-                send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 32));
-                send(msg::SetESPBusy{false});
-                f.close();
-                status_.recordingReady = true;
-            }
+            send(msg::StartRecording{});
+            recordingStart_ = millis();
         }
     }
 
-    static void record() {
+    static void stopRecording(bool cancel = false) {
+        if (status_.recording) {
+            LOG("Recording %s", cancel ? "cancelled" : "done");
+            send(msg::StopRecording{});
+            recording_.end();
+            status_.recording = false;
+            currentMode_->recordingFinished(millis() - recordingStart_);
+        }
+    }
+
+    static void updateRecording() {
         status_.irq = false;
         size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, 33); // 32 for recorded audio + 1 for state's first byte
         if (n == 33) {
@@ -1320,11 +672,11 @@ private:
             // get the first bit of state (we can update our state with it)
             ((uint8_t*)(& state_))[0] = Wire.read();
             // if the volume button has been released or the message is too long, stop recording
-            if (! state_.volumeButtonDown() || (millis() - messageStart_) > MAX_WALKIE_TALKIE_RECORDING)
+            if (! state_.volumeButtonDown() || (millis() - recordingStart_) > MAX_RECORDING_LENGTH)
                 stopRecording();
             // otherwise if the control button has been pressed, cancel the recorded sound
             else if (state_.controlButtonDown())
-                stopRecording(/* cancel */ true);
+                stopRecording(/* cancel */ false);
         } else {
             ERROR("Incomplete transaction while recording audio, %u bytes received", n);
             // clear the incomplete transaction from the wire buffer
@@ -1333,365 +685,17 @@ private:
         }
     }
 
-    /** Plays stored messages. 
-     
-        If there are unplayed messages, plays these and then stops. Otherwise pl
-     */
-    static void walkieTalkiePlay() {
-        if (!ex_.walkieTalkie.isEmpty())
-            playMessage((ex_.walkieTalkie.writeId - ex_.walkieTalkie.readId - 1) % MAX_WALKIE_TALKIE_MESSAGES);
-        else if (numMessages_ > 0) 
-            playMessage(static_cast<uint8_t>(state_.controlValue()));
-    }
-
-    static void walkieTalkieStop() {
-        if (wav_.isRunning()) {
-            wav_.stop();
-            i2s_.stop();
-            audioFile_.close();
-        }
-    }
-
-    /** Plays the n-th latest message.
-     */
-    static void playMessage(uint8_t offset) {
-        playingMessage_ = offset;
-        char filename[32];
-        uint8_t id = static_cast<uint8_t>(ex_.walkieTalkie.writeId - 1 - offset) %         
-MAX_WALKIE_TALKIE_MESSAGES;
-        LOG("Playing message offset %u, id %u", offset, id);
-        snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), id);
-        audioFile_.open(filename);
-        i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
-        wav_.begin(& audioFile_, & i2s_);
-    }
-
-    static void playNextMessage() {
-        // if we were playing unread message, advance the buffer
-        if (! ex_.walkieTalkie.isEmpty()) {
-            ++ex_.walkieTalkie.readId;
-            setExtendedState(ex_.walkieTalkie);
-        }
-        if (playingMessage_ > 0) {
-            playMessage(playingMessage_ - 1);
-        } else {
-            walkieTalkieStop();
-            pause();
-        }
-    }
-
-    /** Checks the telegram bot messages. 
-     
-        Start always with update id 0 and then get message by message so that we always fit in the static json document moving the update id accordingly so that the received messages are confirmed and will not repeat next time. 
-     */
-    static void checkBotMessages() {
-        LOG("Checking telegram bot updates...");
-        send(msg::SetESPBusy{true});
-        int64_t updateId = 0;
-        StaticJsonDocument<1024> json;
-        while (bot_.getUpdate(json, updateId)) {
-            if (json["ok"] != true || ! json["result"].is<JsonArray>()) {
-                LOG("Bot update failure");
-                break;
-            }
-            JsonArray const & result = json["result"];
-            if (result.size() == 0) {
-                LOG("Bot update done.");
-                break;
-            }
-            JsonObject const & update = result[0];
-            updateId = update["update_id"].as<int64_t>() + 1;
-            LOG("bot update id: %lli", updateId);
-            // if the message cannot be currently processed, stop the update so that we can try again            
-            if (update.containsKey("message")) {
-                if (! processBotMessage(update["message"], json))
-                    break; 
-            } else if (update.containsKey("channel_post")) {
-                if (! processBotMessage(update["channel_post"], json))
-                    break;
-            } else {
-                LOG("Skipping unsuppoerted mesage type");
-            }
-        }
-        send(msg::SetESPBusy{false});
-    }
-
-    /** Deal with parsed telegram bot message. 
-     
-        This can either be text command from the admin, in which case we do as instructed, it can be a text message in the assigned chat, which is printed for debug purposes, or it can be an audio message in general chat which is downloadeded and queued for playing. 
-
-        All other messagfe types are ignored.
-     */
-    static bool processBotMessage(JsonObject const & msg, JsonDocument & json) {
-        int64_t chatId = msg["chat"]["id"];
-        if (chatId == telegramAdminId_ && msg.containsKey("text")) {
-            if (msg["text"] == "ip") {
-                bot_.sendMessage(chatId, WiFi.localIP().toString().c_str());
-            } else {
-                LOG("unknown command: %s", msg["text"].as<char const *>());
-            }
-        } else if (chatId == telegramChatId_) {
-            if (msg.containsKey("audio")) {
-                JsonObject const & audio = msg["audio"];
-                if (audio["mime_type"] == WAV_MIME) {
-                    // if we can't get new message, don't process the message
-                    if (ex_.walkieTalkie.isFull()) {
-                        LOG("Buffer full, cannot process");
-                        return false;
-                    }
-                    LOG("Downloading audio message...");
-                    char filename[32];
-                    snprintf_P(filename, sizeof(filename), PSTR("/wt/%u.wav"), ex_.walkieTalkie.writeId);
-                    SD.remove(filename);
-                    File f = SD.open(filename, FILE_WRITE);
-                    LOG("filename: %s", filename);
-                    if (bot_.getFile(audio["file_id"], json, f, [](uint32_t transferred, uint32_t size){
-                        // enough for ~60MB
-                        send(msg::LightsBar(static_cast<uint16_t>(transferred / 1024), static_cast<uint16_t>(size / 1024), MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
-                    })) {
-                        LOG("Done, %u bytes.", f.size());
-                        ex_.walkieTalkie.nextWrite();
-                        // update the extended state to flag the info
-                        setExtendedState(ex_.walkieTalkie);
-                        // update the number of available messages and the control range, if applicable
-                        if (numMessages_ < MAX_WALKIE_TALKIE_MESSAGES) {
-                            ++numMessages_;
-                            if (state_.mode() == Mode::WalkieTalkie)
-                                setControlRange(0, numMessages_);
-                        }
-                    } else {
-                        LOG("Error");
-                    }
-                    f.close();
-                } else {
-                    LOG("Unsupported audio mime-type: %s", audio["mime_type"].as<char const *>());
-                }
-            } else if (msg.containsKey("text")) {
-                LOG("text: %s", msg["text"].as<char const *>());
-            }
-        } else {
-            LOG("Ignoring message from chat %llu", chatId);
-        }
-        LOG("message processed");
-        return true;
-    }
-
-
     /** The WAV 8kHz recorder to an SD card file
      */
     static inline WavWriter recording_;
-
-    /** The telegram bot that handles the communication. 
-     */
-    static inline TelegramBot bot_;
-
-    static inline AudioGeneratorWAV wav_;
-
-    static inline int64_t telegramChatId_;
-    static inline int64_t telegramAdminId_;
-    static inline uint8_t numMessages_;
-    static inline uint8_t playingMessage_ = 0;
-    /** Start of the message. 
-     */
-    static inline uint32_t messageStart_;
+    static inline uint32_t recordingStart_;
 
     //@}
 
-    /** \name Night Lights mode
-     */
-    //@{
-
-    static void setLightsEffect(LightsEffect effect) {
-        LOG("Lights effect: %u", static_cast<uint8_t>(effect));
-        ex_.lights.effect = effect;
-        setExtendedState(ex_.lights);
-    }
-
-    static void setNightLightHue(uint8_t hue) {
-        LOG("Light hue: %u", hue);
-        ex_.lights.hue = hue;
-        setExtendedState(ex_.lights);
-    }
-
-    //@}
-
-    /** \name Alarm Clock mode
-     
-        One alarm can be defined. ESP will wake/up & start playing the selected mp3 file when the time is right. Short press of any of the buttons snoozes the alarm for 5 minutes. Long press stops the alarm (but the alarm will be activated next time it occurs).
-
-        See the `/sd/player/alarm.json` for an example alarm file. To get alarm, use the `alarm` URL. To upload alarm, first upload the `player/alarm.json` file and then call the `cmd?cmd=alarm_upload` command to reload the alarm. 
-
-     */
-    //@{
-
-    static void initializeAlarm() {
-        LOG("Setting alarm from SD card");
-        File f = SD.open(ALARM_SETTINGS_FILE, FILE_READ);
-        if (f) {
-            StaticJsonDocument<1024> json;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                bool enabled = json["enabled"].as<bool>();
-                uint8_t h = json["h"].as<uint8_t>();
-                uint8_t m = json["m"].as<uint8_t>();
-                bool mon = json["mon"].as<bool>();
-                bool tue = json["tue"].as<bool>();
-                bool wed = json["wed"].as<bool>();
-                bool thu = json["thu"].as<bool>();
-                bool fri = json["fri"].as<bool>();
-                bool sat = json["sat"].as<bool>();
-                bool sun = json["sun"].as<bool>();
-                ex_.alarm.setHour(h).setMinute(m).enable(enabled, mon, tue, wed, thu, fri, sat, sun);
-                char buf[256];
-                alarmToJson(buf, sizeof(buf));
-                LOG("Alarm set to: %s", buf);
-            } else {
-                LOG("Invalid alarm settings");
-            }
-            f.close();
-        } else {
-            LOG("No alarm found");
-        }
-    }
-
-    static int getAlarmMP3(char * buffer, int bufLen) {
-        File f = SD.open(ALARM_SETTINGS_FILE, FILE_READ);
-        if (f) {
-            StaticJsonDocument<1024> json;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                char const * filename = json["file"].as<char const *>();
-                if (filename != nullptr)
-                    return snprintf_P(buffer, bufLen, PSTR("%s"), filename);
-            }
-                
-            f.close();
-        }
-        buffer[0] = 0;
-        return 0;
-    }
-
-    static int alarmToJson(char * buffer, int bufLen) {
-        char filename[32];
-        getAlarmMP3(filename, sizeof(filename));
-        return snprintf_P(buffer, bufLen, PSTR("{"
-        "enabled:%u,"
-        "h:%u,"
-        "m:%u,"
-        "mon:%u,"
-        "tue:%u,"
-        "wed:%u,"
-        "thu:%u,"
-        "fri:%u,"
-        "sat:%u,"
-        "sun:%u,"
-        "file:\"%s\""
-        "}"),
-        ex_.alarm.enabled(),
-        ex_.alarm.hour(),
-        ex_.alarm.minute(),
-        ex_.alarm.activeDay(0), 
-        ex_.alarm.activeDay(1), 
-        ex_.alarm.activeDay(2), 
-        ex_.alarm.activeDay(3), 
-        ex_.alarm.activeDay(4), 
-        ex_.alarm.activeDay(5), 
-        ex_.alarm.activeDay(6),
-        filename
-        );
-    }
-
-    static void alarmPlay() {
-        char filename[32];
-        getAlarmMP3(filename, sizeof(filename));
-        audioFile_.open(filename);
-        i2s_.SetGain(static_cast<float>(alarmVolume_ + 1) / 16);
-        mp3_.begin(& audioFile_, & i2s_);
-        LOG("Alarm!!!");
-    }
-
-    static void snooze() {
-        LOG("Snooze");
-        stop();
-        ex_.alarm.snooze();
-        LOG("Alarm set to %u:%u", ex_.alarm.hour(), ex_.alarm.minute());
-        setExtendedState(ex_.alarm);
-        if (alarmReturnMode_ != Mode::Alarm) {
-            setMode(alarmReturnMode_);
-            if (alarmResume_)
-                play();
-        } else {
-            send(msg::Sleep{});
-        }
-    }
-
-    static void alarmDone() {
-        LOG("Alarm done");
-        stop();
-        // load the alarm from SD card to get rid of any snoozing...
-        initializeAlarm();
-        if (alarmReturnMode_ != Mode::Alarm) {
-            setMode(alarmReturnMode_);
-            if (alarmResume_)
-                play();
-        } else {
-            send(msg::Sleep{});
-        }
-    }
-
-    static inline Mode alarmReturnMode_;
-    static inline bool alarmResume_;
-    static inline uint8_t alarmVolume_ = DEFAULT_ALARM_VOLUME;
-
-    //@}
-
-    /** \name Birthday Greeting mode
-     
-        The greeting mode is really simple as no persistent configuration or even ESP memory is needed. At each start we just check whether any of the stored dates apply and if they do play the appropriate greeting. 
-
-        To read/update the greeting information use the sd download and sd upload routines.
-     */
-    //@{
-
-    /** Checks if a greeting should be played and plays if true. 
-     
-        Returns true if a greeting is played, false otherwise.
-     */
-    static bool checkGreeting() {
-        LOG("Checking greeting...");
-        File f = SD.open(GREETING_SETTINGS_FILE, FILE_READ);
-        bool result = false;
-        if (f) {
-            StaticJsonDocument<1024> json;
-            if (deserializeJson(json, f) == DeserializationError::Ok) {
-                for (JsonVariant greeting : json.as<JsonArray>()) {
-                    bool enabled = greeting["enabled"].as<bool>();
-                    uint8_t m = greeting["m"].as<uint8_t>();
-                    uint8_t d = greeting["d"].as<uint8_t>();
-                    LOG("Greeting date %u/%u, enabled : %u", d, m, enabled ? 1 : 0);
-                    if (enabled && m == ex_.time.month() && d == ex_.time.day()) {
-                        char const * filename = greeting["file"].as<char const *>();
-                        if (filename != nullptr) {
-                            result = true;
-                            setMode(Mode::Greeting);
-                            audioFile_.open(filename);
-                            i2s_.SetGain(static_cast<float>(alarmVolume_ + 1) / 16);
-                            mp3_.begin(& audioFile_, & i2s_);
-                            LOG("Greeting!!!");
-                            break;
-                        }
-                    }
-                }
-            }
-            f.close();
-        }
-        return result;
-    }
-
-
-    //@}
-
-    /** \name WiFi Connection
+    /** \name WiFi Connection. 
      
         Due to pretty limited ESP memory, WiFi is not really compatible with mp3 playback. As such it is only available in the walkie talkie mode and cannot be used in other modes. 
+
      */
     //@{
 
@@ -1707,8 +711,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
     }
 
     /** Connects to the WiFi. 
-     
-     
      */
     static void connectWiFi() {
         LOG("WiFi: Scanning networks...");
@@ -1847,8 +849,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
 
     //@}
 
-    /** \name Web Server & Remote Control
-       
+    /** \name HTTP Server
      */
     //@{
 
@@ -1879,14 +880,14 @@ MAX_WALKIE_TALKIE_MESSAGES;
      */
     static bool updateNTPTime() {
         WiFiUDP ntpUDP;
-        NTPClient timeClient{ntpUDP, "pool.ntp.org", settings_.timezone};
+        NTPClient timeClient{ntpUDP, "pool.ntp.org", 3600 * status_.timezone };
         timeClient.begin();
         if (timeClient.forceUpdate()) {
-            ex_.time.setFromNTP(timeClient.getEpochTime() + settings_.timezone);
+            ex_.time.setFromNTP(timeClient.getEpochTime());
             LOG("NTP time update:");
             ex_.time.log();
             // now that we have obtained the time, send it
-            setExtendedState(ex_.time);
+            sendExtendedState(ex_.time);
             return true;
         } else {
             LOG("NTP time updated failed");
@@ -1908,8 +909,8 @@ MAX_WALKIE_TALKIE_MESSAGES;
             send(msg::Sleep{});
         } else if (cmd == "reload_alarm") {
             LOG("http reload alarm");
-            initializeAlarm();
-            setExtendedState(ex_.alarm);
+            alarmMode_.initialize();
+            sendExtendedState(ex_.alarm);
             return httpAlarm();
         } else {
             LOG("http invalid command: %s", cmd.c_str());
@@ -1930,7 +931,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         "charging:%u,"
         "batt:%u,"
         "headphones:%u,"
-        "loops:%u,"
         "maxLoopTime:%u"
         "}"),
         ex_.measurements.vcc,
@@ -1939,7 +939,6 @@ MAX_WALKIE_TALKIE_MESSAGES;
         state_.charging() ? 1 : 0,
         state_.batteryMode() ? 1 : 0,
         state_.headphonesConnected() ? 1 : 0,
-        loopCount_,
         maxLoopTime_
         );
         server_.send(200, JSON_MIME, buf, len);
@@ -1948,7 +947,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static void httpAlarm() {
         LOG("http alarm");
         char buffer[256];
-        int len = alarmToJson(buffer, sizeof(buffer));
+        int len = alarmMode_.alarmToJson(buffer, sizeof(buffer));
         server_.send(200, JSON_MIME, buffer, len);
     }
 
@@ -2014,7 +1013,7 @@ MAX_WALKIE_TALKIE_MESSAGES;
                 send(msg::SetESPBusy{true});
                 if (uploadFile_)
                     uploadFile_.write(upload.buf, upload.currentSize);
-                send(msg::LightsBar(upload.totalSize / 1024, upload.contentLength / 1024, Color::Blue().withBrightness(settings_.maxBrightness)));
+                send(msg::LightsBar(upload.totalSize / 1024, upload.contentLength / 1024, adjustBrightness(Color::Blue())));
                 break;
             }
             case UPLOAD_FILE_END: {
@@ -2045,6 +1044,1357 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static inline char const * MP3_MIME = "audio/mp3";
     static inline char const * JSON_MIME = "text/json";
     static inline char const * WAV_MIME = "audio/wav";
+        
+    //@}
+
+
+    static Color adjustBrightness(Color const & color) {
+        return color.withBrightness(status_.maxBrightness);
+    }
+
+
+    static inline struct {
+        bool irq : 1;
+        bool busy : 1;
+
+        int timezone : 5; // -16 / + 15
+        uint8_t syncHour : 5; // 0..23
+        uint8_t maxSpeakerVolume : 4; // 0..15
+        uint8_t maxHeadphonesVolume : 4;
+        uint8_t maxBrightness : 8; // 0..255
+
+        bool radioEnabled : 1;
+        bool discoEnabled : 1;
+        bool lightsEnabled : 1;
+        bool walkieTalkieEnabled : 1;
+        
+        bool recording : 1;
+        bool updateMessages : 1;
+
+    } status_;
+
+}; // Player
+
+#ifdef HAHA
+
+class Player {
+    friend class ESPMode;
+    friend class MP3Mode;
+    friend class RadioMode;
+    friend class DiscoMode;
+    friend class LightsMode;
+    friend class WalkeTalkieMode;
+    friend class AlarmMode;
+public:
+
+    static inline char const * MP3_SETTINGS_FILE = "player/playlists.json";
+    static inline char const * RADIO_SETTINGS_FILE = "player/radio.json";
+    static inline char const * WALKIE_TALKIE_SETTINGS_FILE = "player/bot.json";
+    static inline char const * WALKIE_TALKIE_CERT_FILE = "player/cert.txt";
+    static inline char const * ALARM_SETTINGS_FILE = "player/alarm.json";
+    static inline char const * GREETING_SETTINGS_FILE = "player/greeting.json";
+
+    /** Initializes the player
+     */
+    static void initialize() {
+        // initialize serial port for debugging
+        Serial.begin(74880);
+        // before we do anything, check if we should go to deep sleep immediately conserving power
+        pinMode(I2C_SCL, INPUT);
+        pinMode(I2C_SDA, INPUT);
+        if (!digitalRead(I2C_SCL) && !digitalRead(I2C_SDA)) {
+            LOG("Entering deep sleep immediately");
+            ESP.deepSleep(0);
+        }
+        // initialize the IRQ pin and attach interrupt
+        pinMode(AVR_IRQ, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(AVR_IRQ), avrIrq, FALLING);
+        // enable I2C and request the current state and the extended state
+        // obtain the first state, without reacting to it
+        Wire.begin(I2C_SDA, I2C_SCL);
+        Wire.setClock(400000);
+        if (! readState()) {
+            LOG("Attempt 2:");
+            delay(200);
+            readState();
+        }      
+        // store if this has been ESP reset, in which case we skip the greeting later on
+        bool espReset = state_.espReset();
+        // get the extended state as well. 
+        getExtendedState(ex_);
+        ex_.log();
+        send(msg::LightsBar{2, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        // initialize the chip and core peripherals
+        initializeESP();
+        initializeLittleFS();
+        initializeWiFi();
+        initializeServer();
+        send(msg::LightsBar{3, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        initializeSDCard();
+        send(msg::LightsBar{4, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        // initialize mode settings from the SD card contents (SD card takes precedence over cached information in extended state)
+        mp3Mode_.initialize();
+        send(msg::LightsBar{5, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        initializeRadio();
+        send(msg::LightsBar{6, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        initializeWalkieTalkie();
+        send(msg::LightsBar{7, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        initializeSettings();
+        alarmMode_.initialize();
+        // if this is the initial state, write basic settings from the mode configuration to cached state
+        if (ex_.radio.stationId == 0xff) {
+            LOG("Initial power on");
+            ex_.radio.stationId = 0;
+            ex_.radio.frequency = radioStations_[0];
+            ex_.walkieTalkie.readId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
+            ex_.walkieTalkie.writeId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
+        }
+        // store the extended state as it was updated by the SD card
+        setExtendedState(ex_);
+        send(msg::SetSettings{
+            settings_.maxBrightness,
+            settings_.radioEnabled,
+            settings_.discoEnabled,
+            settings_.lightsEnabled,
+            settings_.syncHour}
+        );
+        send(msg::LightsBar{8, 8, DEFAULT_COLOR.withBrightness(settings_.maxBrightness)});
+        LOG("Free heap: %u", ESP.getFreeHeap());
+        ex_.time.log();
+        send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
+        switch (state_.mode()) {
+            case Mode::Sync:
+                sync();
+                break;
+            default:
+                // checkGreeting enters the greeting state if its active, so that we save a few bytes of global state where we do not have to remember the greeting parameters if successful. If there's no greeting we have to set the state ourselves later on. Only check the greeting is this is not a reset situation, in which case proceed immediately to the latest known mode
+                if (espReset || ! checkGreeting())
+                    setMode(state_.mode());
+        }
+        // check the volume is within max range
+        volumeTurn();
+    }
+
+    static void loop() {
+        tick();
+        if (status_.irq) 
+            status_.recording ? record() : updateState();
+        if (!state_.idle()) {
+            if (mp3_.isRunning()) {
+                if (!mp3_.loop()) {
+                    mp3_.stop();
+                    LOG("MP3 playback done");
+                    switch (state_.mode()) {
+                        case Mode::Music:
+                        case Mode::Lights:
+                            mp3Mode_.playNext();
+                            break;
+                        case Mode::Alarm:
+                            alarmMode_.playNext();
+                            break;
+                    }
+                }
+            } else if (wav_.isRunning()) {
+                if (!wav_.loop()) {
+                    wav_.stop();
+                    LOG("Message playback done");
+                    playNextMessage();
+                }
+            }
+        }
+        if (state_.wifiStatus() == WiFiStatus::Connected) {
+            if (state_.idle()) {
+                if (status_.updateMessages) {
+                    status_.updateMessages = false;
+                    checkBotMessages();
+                }
+            }
+            server_.handleClient();
+            MDNS.update();
+        }
+    }
+
+private:
+
+    /** \name Chip & Peripherals Initialization routines
+     
+        Functions that initialize the ESP chip, image's little fs, attached SD card, etc. 
+     */
+    //@{
+
+    /** Initializes the global settings from the SD card.
+     
+        The settings are split into multiple files so that we can be sure we fit in static JSON buffers. 
+
+         
+     */
+    /*
+    static void initializeSettings() {
+        StaticJsonDocument<1024> json;
+        File f = SD.open(SETTINGS_FILE, FILE_READ);
+        if (f && deserializeJson(json, f) == DeserializationError::Ok) {
+            settings_.fromJSON(json);
+            f.close();
+        }
+        settings_.syncHour = 21;
+    }
+    */
+
+    //@}
+
+    /** \name ESP Core 
+     */
+    //@{
+
+    static void sleep() {
+        Send(msg::Sleep{});
+    }
+    
+    static void tick() {
+        // update the running usage statistics
+        uint32_t t = millis();
+        ++runningLoopCount_;
+        uint16_t delay = t - lastMillis_;
+        if (runningMaxLoopTime_ < delay)
+            runningMaxLoopTime_ = delay;
+        lastMillis_ = t;
+        // see if we have a second tick, in which case update the time and utilization counters, then do a second tick
+        while (t - previousSecondMillis_ >= 1000) {
+            previousSecondMillis_ += 1000;
+            loopCount_ = runningLoopCount_;
+            maxLoopTime_ = runningMaxLoopTime_;
+            runningLoopCount_ = 0;
+            runningMaxLoopTime_ = 0;
+            secondTick();
+        }
+    }
+
+    static void secondTick() {
+        ex_.time.secondTick();
+        if (! status_.recording)
+            if (getExtendedState(ex_.measurements))
+                send(msg::AVRWatchdogReset{});
+            //updateState();
+        if (ex_.time.second() == 0 && state_.mode() == Mode::WalkieTalkie && ! status_.recording) {
+            if (settings_.walkieTalkieEnabled)
+                status_.updateMessages = true;
+            updateNTPTime();
+        }
+        // TODO do more stuff
+    }
+
+    /** Synchronizes the player with the rest of the world. 
+     
+        Attempts to connect to the WiFi and update time from NTP servers. If the walkie-talkie mode is enabled also checks any new telegram messages. The synchronization happens every day at the predefined hour *and* immediately after power on. 
+     */
+    static void sync() {
+        LOG("Synchronizing...");
+        send(msg::SetESPBusy{true});
+        // first connect to WiFi unless already connected, if in AP mode, terminate AP mode first
+        if (state_.wifiStatus() == WiFiStatus::AP)
+            disconnectWiFi();
+        if (state_.wifiStatus() != WiFiStatus::Connected) {
+            connectWiFi();
+            uint32_t start = millis();
+            while (state_.wifiStatus() == WiFiStatus::Connecting && millis() - start < SYNC_CONNECTION_TIMEOUT) {
+                delay(1000);
+                send(msg::SetESPBusy{true});
+            };
+        }
+        // if the connection was successful, proceed with the sync
+        if (state_.wifiStatus() == WiFiStatus::Connected) {
+            if (! updateNTPTime()) {
+                delay(1000);
+                updateNTPTime();
+            }
+            // check walkie talkie messages if walkie talkie enabled
+            if (settings_.walkieTalkieEnabled)
+                checkBotMessages();
+        }
+        // now we are done, let's sleep some more
+        LOG("Synchronization done.");
+        send(msg::SetESPBusy{false});
+        send(msg::Sleep{});
+        // wait for the death to come
+        while (true) { delay(100); }
+    }
+
+    /** Number of times the loop function gets called in the past second. 
+     */
+    static inline uint16_t loopCount_ = 0;
+    static inline uint16_t maxLoopTime_ = 0;
+    static inline uint32_t lastMillis_ = 0;
+    static inline uint16_t runningLoopCount_ = 0;
+    static inline uint16_t runningMaxLoopTime_ = 0;
+    static inline uint32_t previousSecondMillis_ = 0;
+
+    //@}
+    
+    /** \name Communication with ATTiny
+     */
+    //@{
+
+
+    /*
+    template<typename T>
+    static void send(T const & msg, unsigned retries = 1) {
+        while (true) {
+            Wire.beginTransmission(AVR_I2C_ADDRESS);
+            unsigned char const * msgBytes = pointer_cast<unsigned char const *>(& msg);
+            Wire.write(msgBytes, sizeof(T));
+            uint8_t status = Wire.endTransmission();
+            if (status == 0)
+                return;
+            if (retries-- == 0) {
+                ERROR("I2C command failed: %u", status);
+                return;
+            } else {
+                LOG("retrying I2C command, failed: %u", status);
+            }
+            delay(10); 
+        }
+    }
+    */
+
+
+
+    /** Requests state update from ATTiny. 
+     */
+    /*
+    static void updateState() {
+        State old = state_;
+        if (readState()) {
+            // check available events and react accordingly
+            if (state_.mode() != old.mode()) {
+                switch (state_.mode()) {
+                    case Mode::ESPOff:
+                        powerOff();
+                        break;
+                    case Mode::Alarm:
+                        // revert the mode first so that we can pause current mode if needed and save it in the setMode function below
+                        state_.setMode(old.mode());
+                        setMode(Mode::Alarm);
+                        break;
+                    // this should not happen really
+                    default:
+                        LOG("Unexpected mode change: %u", static_cast<uint8_t>(state_.mode()));
+                        break;
+                }
+            }
+            if (state_.controlTurn()) 
+                controlTurn();
+            if (state_.controlButtonDown() != old.controlButtonDown())
+                state_.controlButtonDown() ? controlDown() : controlUp();
+            if (state_.controlButtonPress())
+                controlPress();
+            if (state_.controlButtonLongPress())
+                controlLongPress();
+            if (state_.volumeTurn())
+                volumeTurn();
+            if (state_.volumeButtonDown() != old.volumeButtonDown())
+                state_.volumeButtonDown() ? volumeDown() : volumeUp();
+            if (state_.volumeButtonPress())
+                volumePress();
+            if (state_.volumeButtonLongPress())
+                volumeLongPress();
+            if (state_.doubleButtonLongPress())
+                doubleLongPress();
+            // if there is change in headphones, simulate change in volume to cap the volume value if necessary
+            if (state_.headphonesConnected() != old.headphonesConnected())
+                volumeTurn();
+            // clear the events so that they can be triggered again (ATTiny did so after the transmission as well)
+            state_.clearEvents();
+        }
+    }
+    */
+
+    /** Power off the ESP. 
+     */
+    static void powerOff() {
+        LOG("PowerOff");
+        stop();
+        send(msg::Sleep{});
+        LOG("All done");
+        while(true)
+            delay(1);
+    }
+
+    //@}
+
+    /** \name Controls
+     
+        Events corresponding directly to user interface events as reported by the ATTiny. Methods in this section translate the raw ui events to actionable items based on the current mode & other context. 
+     */
+    //@{
+
+    /*
+    static void controlDown() {
+        LOG("Control down");
+        switch (state_.mode()) {
+            case Mode::WalkieTalkie:
+                 if (status_.recording) // can only record if walkie talkie is already enabled
+                     stopRecording(/*cancel* / true);
+            default:
+                break;
+        }
+    } */
+
+    /*
+    static void controlUp() {
+        LOG("Control up");
+
+    }*/
+
+    /** Cycles through playlists in mp3 mode, cycles through stations in radio mode, cycles through latest received messages in walkie talkie mode (and plays them) and cycles through light effects for night light mode. 
+     */
+    static void controlPress() {
+        LOG("Control press");
+        switch (state_.mode()) {
+            case Mode::Music: {
+                if (state_.musicMode() == MusicMode::MP3) {
+                    mp3Mode_.controlPress();
+                    /*
+                    uint8_t i = ex_.mp3.playlistId + 1;
+                    if (i >= numPlaylists_)
+                        i = 0;
+                    setPlaylist(i);
+                    send(msg::LightsPoint{i, static_cast<uint16_t>(numPlaylists_ - 1), MODE_COLOR_MP3});
+                    */
+                } else {
+                    /*
+                    uint8_t i = ex_.radio.stationId + 1;
+                    if (i >= numRadioStations_)
+                        i = 0;
+                    setRadioStation(i);
+                    send(msg::LightsPoint{i, static_cast<uint16_t>(numRadioStations_ - 1), MODE_COLOR_RADIO});
+                    */
+                }
+                // if not currently playing, start playing now
+                if (state_.idle())
+                    play();
+                break;
+            }
+            case Mode::Lights: {
+                /*
+                uint8_t i = static_cast<uint8_t>(ex_.lights.effect) + 1;
+                if (i == 8)
+                    i = 0;
+                setLightsEffect(static_cast<LightsEffect>(i));
+                send(msg::LightsPoint{i, 7, MODE_COLOR_LIGHTS});
+                break;
+                */
+            }
+            case Mode::WalkieTalkie:
+                // convert to volume press (play/pause)
+                if (settings_.walkieTalkieEnabled)
+                    volumePress();
+                break;
+            case Mode::Alarm:
+                alarmMode_.controlPress();
+                break;
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** Cycles through the modes. 
+     */
+    static void controlLongPress() {
+        LOG("Control long press");
+        switch (state_.mode()) {
+            case Mode::Music: 
+                setMusicMode(getNextMusicMode(state_.mode(), state_.musicMode(), settings_.radioEnabled, settings_.discoEnabled));
+                // start playing if we were idle
+                if (state_.idle())
+                    play();
+                break;
+            case Mode::Alarm:
+                alarmMode_.controlLongPress();
+                break;
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                setMode(Mode::Music);
+        }
+    }
+
+    /** Selects track id in mp3 mode, radio frequency in radio, or changes hue in night lights mode. 
+     
+        Does nothing in walkie-talkie, can select received messages to play? 
+     */
+    static void controlTurn() {
+        LOG("Control: %u", state_.controlValue());
+        switch (state_.mode()) {
+            case Mode::Music:
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        mp3Mode_.controlTurn();
+                        /*
+                        send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(playlists_[ex_.mp3.playlistId].numTracks - 1), MODE_COLOR_MP3.withBrightness(settings_.maxBrightness)});
+                        setTrack(state_.controlValue()); */
+                        break;
+                    case MusicMode::Radio:
+                        /*
+                        send(msg::LightsPoint{state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, MODE_COLOR_RADIO.withBrightness(settings_.maxBrightness)});
+                        setRadioFrequency(state_.controlValue() + RADIO_FREQUENCY_MIN);
+                        break; */
+                    case MusicMode::Disco:
+                        // TODO 
+                        break;
+                }
+                // start playing if we were idle
+                if (state_.idle())
+                    play();
+                break;
+            case Mode::WalkieTalkie:
+                // if not empty, then the new messages must be played first via normal CTRL press
+                /*
+                if (settings_.walkieTalkieEnabled && ex_.walkieTalkie.isEmpty()) {
+                    send(msg::LightsPoint{state_.controlValue(), static_cast<uint16_t>(numMessages_) - 1, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness)});
+                    // play from the updated value
+                    play();
+                } */
+                break;
+            case Mode::Lights: {
+                /*
+                setNightLightHue(state_.controlValue());
+                if (ex_.lights.hue == LightsState::HUE_RAINBOW)
+                    send(msg::LightsColors{
+                        Color::HSV(0 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(1 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(2 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(3 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(4 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(5 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(6 << 13, 255, settings_.maxBrightness),
+                        Color::HSV(7 << 13, 255, settings_.maxBrightness)
+                    });
+                else
+                    send(msg::LightsBar{8, 8, Color::HSV(ex_.lights.colorHue(), 255, settings_.maxBrightness)});
+                break;
+                */
+            }
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** Starts recording in walkie-talkie mode. 
+     */
+    /*
+    static void volumeDown() {
+        LOG("Volume down");
+        switch (state_.mode()) {
+            // TODO recording in disco
+            case Mode::WalkieTalkie:
+                if (settings_.walkieTalkieEnabled)
+                    startRecording();
+                break;
+            default:
+                break;
+        }
+    }
+    */
+   /*
+    static void volumeUp() {
+        LOG("Volume up");
+        switch (state_.mode()) {
+            // TODO recording in disco
+            case Mode::WalkieTalkie:
+                stopRecording(); // walkie talkie must have been enabled to start the recording, no need to check here
+                break;
+            default:
+                break;
+        }
+    }
+    */
+
+    /** Play/Pause in mp3, radio and lights settings mode. 
+     
+        Does nothing in walkie-talkie mode as volume key press & hold is used to record messages. 
+      */
+    static void volumePress() {
+        LOG("Volume press");
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                if (state_.musicMode() == MusicMode::Disco)
+                    break; // in disco mode, volume pressing does nothing 
+            case Mode::WalkieTalkie:
+                if (state_.idle())
+                    play();
+                else
+                    pause();
+                break;
+            case Mode::Alarm:
+                alarmMode_.volumePress();
+                break;
+            // any button press while in greeting mode moves to the music mode instead
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                break;
+        }
+    }
+
+    static void volumeLongPress() {
+        LOG("Volume long press");
+        // any button press while in greeting mode moves to the music mode instead
+        if (state_.mode() == Mode::Greeting)
+            setMode(Mode::Music);
+        else if (state_.mode() == Mode::Alarm)
+            alarmMode_.volumeLongPress();
+        else if (state_.mode() != Mode::WalkieTalkie && state_.musicMode() != MusicMode::Disco)
+            setMode(state_.mode() == Mode::Music ? Mode::Lights : Mode::Music);
+    }
+
+    /** Changes volume. 
+     
+        Updates the volume of the underlying music provider (i2s/radio). 
+     */
+    static void volumeTurn() {
+        LOG("Volume: %u", state_.volumeValue());
+        // check that the volume is within the settings available
+        uint8_t maxVolume = state_.headphonesConnected() ? settings_.maxHeadphonesVolume : settings_.maxSpeakerVolume;
+        if (state_.volumeValue() > maxVolume) {
+            state_.setVolumeValue(maxVolume);
+            send(msg::SetVolumeRange{state_.volumeValue(), MAX_VOLUME});
+            LOG("Limited to %u", state_.volumeValue());
+        }
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                if (state_.musicMode() == MusicMode::Radio)
+                    radioUpdateVolume();
+                else if (state_.musicMode() == MusicMode::MP3)
+                    mp3Mode_.volumeTurn();
+                else // both MP3 and disco use i2s
+                    setI2SVolume(state_.volumeValue());
+                break;
+            case Mode::WalkieTalkie:
+            case Mode::Greeting:
+                    setI2SVolume(state_.volumeValue());
+                break;
+            default:
+                break;
+        }
+        send(msg::LightsBar{static_cast<uint16_t>(state_.volumeValue() + 1), 16, DEFAULT_COLOR});
+    }
+
+    /** Turns wifi on/off, turns the player off. 
+     */
+    static void doubleLongPress() {
+        LOG("Double long press");
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                setMode(Mode::WalkieTalkie);
+                break;
+            case Mode::WalkieTalkie:
+                setMode(Mode::Music);
+                break;
+            case Mode::Alarm:
+                alarmMode_.doubleLongPress();
+                break;
+            case Mode::Greeting:
+                setMode(Mode::Music);
+                break;
+            default:
+                // unreachable
+                break;
+        }
+    }
+
+    //@}
+
+    /** \name Actions
+     
+        Actual things that can happen. These can be triggered by various sources, such as the controls, web interface, or the telegram bot. 
+     */
+    //@{
+
+    /** Sets the music mode. 
+     */
+    static void setMusicMode(MusicMode mode) {
+        LOG("Setting music mode %u", mode);
+        bool resume = ! state_.idle() && state_.mode() == Mode::Music;
+        if (resume)
+            stop();
+        state_.setMusicMode(mode);
+        send(msg::SetMode{state_.mode(), state_.musicMode()});
+        if (resume)
+            play();
+    }    
+
+    static void setMode(Mode mode) {
+        LOG("Setting mode %u", mode);
+        // if we are coming from walkie talkie, disconnect WiFi too and make sure the playback of messages is stopped
+        if (state_.mode() == Mode::WalkieTalkie) {
+            walkieTalkieStop();
+            if (state_.wifiStatus() != WiFiStatus::Off)
+                disconnectWiFi();
+        }
+        switch (mode) {
+            case Mode::Music: {
+                // stop if we are moving from the greeting mode so that we can play proper mp3
+                if (state_.mode() == Mode::Greeting)
+                    stop();
+                // if we are going back from lights and already playing, otherwise resume
+                bool resume = state_.idle() || (state_.mode() != Mode::Lights);
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                if (resume)
+                    play();
+                else switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        mp3Mode_.enter(nullptr);
+                        //setControlRange(ex_.mp3.trackId, playlists_[ex_.mp3.playlistId].numTracks);
+                        break;
+                    case MusicMode::Radio:
+                        setControlRange(ex_.radio.frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
+                break;
+            }
+            case Mode::Lights:
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                setControlRange(ex_.lights.hue, LightsState::HUE_RAINBOW + 1);
+                break;
+            case Mode::WalkieTalkie:
+                stop(); // stop music if any 
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                setControlRange(0, numMessages_);
+                // connect to WiFi, if not already connected
+                if (state_.wifiStatus() != WiFiStatus::Connected)
+                    connectWiFi();
+                // make sure we are ready to record
+                status_.recordingReady = true;
+                break;
+            case Mode::Alarm:
+                alarmMode_.enter(nullptr);
+                break;
+            case Mode::Greeting:
+                state_.setMode(mode);
+                send(msg::SetMode{state_.mode(), state_.musicMode()});
+                play();
+                break;
+            default:
+                break;
+        }
+    }
+
+    static void play() {
+        LOG("Play");
+        state_.setIdle(false);
+        send(msg::SetIdle{false, timeoutPlay_});
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        mp3Mode_.play();
+                        // if we are resuming from pause, just setting idle to false above did the trick
+                        //if (! mp3_.isRunning())
+                        //    mp3Play();
+                        break;
+                    case MusicMode::Radio:
+                        radioPlay();
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
+                break;
+            case Mode::WalkieTalkie: 
+                if (! wav_.isRunning())
+                    walkieTalkiePlay();
+                break;
+            case Mode::Alarm:
+                alarmMode_.play();
+                break;
+            // don't do anything - the playback will start later as we don't know the filename at this point
+            case Mode::Greeting:
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** Pauses the playback so that it can be resumed later on. 
+     
+        At this point it has only meaning for mp3 playback, for all else it is equivalent to a full stop.
+     */
+    static void pause() {
+        LOG("Pause");
+        state_.setIdle(true);
+        send(msg::SetIdle{true, timeoutIdle_});
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        break;
+                    case MusicMode::Radio:
+                        radioStop();
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** Stops the playback. 
+     */
+    static void stop() {
+        LOG("Stop");
+        state_.setIdle(true);
+        send(msg::SetIdle{true, timeoutIdle_});
+        switch (state_.mode()) {
+            case Mode::Music:
+            case Mode::Lights:
+                switch (state_.musicMode()) {
+                    case MusicMode::MP3:
+                        mp3Mode_.stop();
+                        //mp3Stop();
+                        break;
+                    case MusicMode::Radio:
+                        radioStop();
+                        break;
+                    case MusicMode::Disco:
+                        break;
+                }
+                break;
+            case Mode::WalkieTalkie:
+                walkieTalkieStop();
+            case Mode::Alarm:
+                alarmMode_.stop();
+            case Mode::Greeting:
+                stopMP3();
+                break;
+            default:
+                break;
+        }
+    }
+
+    //@}
+
+    /** \name Walkie-Talkie Mode
+     
+        The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
+
+        
+
+        https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
+        https://core.telegram.org/bots/api#sending-files
+
+     */
+    //@{
+
+        /*
+    static void initializeWalkieTalkie() {
+        File f = SD.open(WALKIE_TALKIE_SETTINGS_FILE, FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                int64_t id = json["id"].as<int64_t>();
+                String token = json["token"];
+                telegramAdminId_ = json["adminId"].as<int64_t>();
+                telegramChatId_ = json["chatId"].as<int64_t>();
+                LOG("Walkie-Talkie:\n  Bot %lli\n  Chat %lli\n  Token: %s\n  AdminId: %lli", id, telegramChatId_, token.c_str(), telegramAdminId_);
+                File cf = SD.open(WALKIE_TALKIE_CERT_FILE, FILE_READ);
+                if (cf && cf.size() < 2048) {
+                    String cert = cf.readString();
+                    // TODO security is hard, the certificate only works if time is proper...
+                    bot_.initialize(id, std::move(token), nullptr /*, cert.c_str() */);
+                } else {
+                    bot_.initialize(std::move(id), std::move(token), nullptr);
+                    LOG("No certificate found, telegram bot will be INSECURE!!!");
+                }
+                cf.close();
+            } else {
+                LOG("Deserialization error");
+            }
+            f.close();
+        }
+        // determine the number of messages in the buffer 
+        for (numMessages_ = 0; numMessages_ < MAX_WALKIE_TALKIE_MESSAGES; ++numMessages_) {
+            char filename[16];
+            snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), numMessages_);
+            if (! SD.exists(filename))
+                break;
+        }
+        LOG("WT messages found: %u", numMessages_);
+    }*/
+
+    /*
+    static void startRecording() {
+        walkieTalkieStop();
+        if (!status_.recordingReady || !recording_.begin("/rec.wav")) {
+            LOG("Unable to open recording target file or recording not ready");
+            send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
+        } else {
+            LOG("Recording...");
+            status_.recording = true;
+            send(msg::StartRecording());
+            status_.recordingReady = false;
+            messageStart_ = millis();
+        }        
+    }*/
+
+    /*   
+    static void stopRecording(bool cancel = false) {
+        if (status_.recording) {
+            // tell avr to return to normal state & stop own recording
+            send(msg::StopRecording{});
+            recording_.end();
+            status_.recording = false;
+            cancel = cancel || ((millis() - messageStart_) < MIN_WALKIE_TALKIE_RECORDING);
+            if (cancel) {
+                LOG("Recording cancelled");
+                send(msg::LightsFill{Color::Red().withBrightness(settings_.maxBrightness)});
+                status_.recordingReady = true;
+            } else {
+                LOG("Recording done");
+                File f = SD.open("/rec.wav", FILE_READ);
+                send(msg::SetESPBusy{true});
+                bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
+                    send(msg::LightsBar(v, m, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
+                });
+                send(msg::LightsBar(255, 255, MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 32));
+                send(msg::SetESPBusy{false});
+                f.close();
+                status_.recordingReady = true;
+            }
+        }
+    }*/
+
+    /*
+    static void record() {
+        status_.irq = false;
+        size_t n = Wire.requestFrom(AVR_I2C_ADDRESS, 33); // 32 for recorded audio + 1 for state's first byte
+        if (n == 33) {
+            // add data to the output file
+            for (uint8_t i = 0; i < 32; ++i)
+                recording_.add(Wire.read());
+            // get the first bit of state (we can update our state with it)
+            ((uint8_t*)(& state_))[0] = Wire.read();
+            // if the volume button has been released or the message is too long, stop recording
+            if (! state_.volumeButtonDown() || (millis() - messageStart_) > MAX_WALKIE_TALKIE_RECORDING)
+                stopRecording();
+            // otherwise if the control button has been pressed, cancel the recorded sound
+            else if (state_.controlButtonDown())
+                stopRecording(/* cancel */ true);
+        } else {
+            ERROR("Incomplete transaction while recording audio, %u bytes received", n);
+            // clear the incomplete transaction from the wire buffer
+            while (n-- > 0) 
+                Wire.read();
+        }
+    }*/
+
+    /** Plays stored messages. 
+     
+        If there are unplayed messages, plays these and then stops. Otherwise pl
+     */
+    /*
+    static void walkieTalkiePlay() {
+        if (!ex_.walkieTalkie.isEmpty())
+            playMessage((ex_.walkieTalkie.writeId - ex_.walkieTalkie.readId - 1) % MAX_WALKIE_TALKIE_MESSAGES);
+        else if (numMessages_ > 0) 
+            playMessage(static_cast<uint8_t>(state_.controlValue()));
+    }
+    */
+
+    /*
+    static void walkieTalkieStop() {
+        if (wav_.isRunning()) {
+            wav_.stop();
+            i2s_.stop();
+            audioFile_.close();
+        }
+    }
+    */
+
+    /** Plays the n-th latest message.
+     */
+    /*
+    static void playMessage(uint8_t offset) {
+        playingMessage_ = offset;
+        char filename[32];
+        uint8_t id = static_cast<uint8_t>(ex_.walkieTalkie.writeId - 1 - offset) %         
+MAX_WALKIE_TALKIE_MESSAGES;
+        LOG("Playing message offset %u, id %u", offset, id);
+        snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), id);
+        audioFile_.open(filename);
+        i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
+        wav_.begin(& audioFile_, & i2s_);
+    }
+
+    static void playNextMessage() {
+        // if we were playing unread message, advance the buffer
+        if (! ex_.walkieTalkie.isEmpty()) {
+            ++ex_.walkieTalkie.readId;
+            setExtendedState(ex_.walkieTalkie);
+        }
+        if (playingMessage_ > 0) {
+            playMessage(playingMessage_ - 1);
+        } else {
+            walkieTalkieStop();
+            pause();
+        }
+    } */
+
+    /** Checks the telegram bot messages. 
+     
+        Start always with update id 0 and then get message by message so that we always fit in the static json document moving the update id accordingly so that the received messages are confirmed and will not repeat next time. 
+     */
+    /*
+    static void checkBotMessages() {
+        LOG("Checking telegram bot updates...");
+        send(msg::SetESPBusy{true});
+        int64_t updateId = 0;
+        StaticJsonDocument<1024> json;
+        while (bot_.getUpdate(json, updateId)) {
+            if (json["ok"] != true || ! json["result"].is<JsonArray>()) {
+                LOG("Bot update failure");
+                break;
+            }
+            JsonArray const & result = json["result"];
+            if (result.size() == 0) {
+                LOG("Bot update done.");
+                break;
+            }
+            JsonObject const & update = result[0];
+            updateId = update["update_id"].as<int64_t>() + 1;
+            LOG("bot update id: %lli", updateId);
+            // if the message cannot be currently processed, stop the update so that we can try again            
+            if (update.containsKey("message")) {
+                if (! processBotMessage(update["message"], json))
+                    break; 
+            } else if (update.containsKey("channel_post")) {
+                if (! processBotMessage(update["channel_post"], json))
+                    break;
+            } else {
+                LOG("Skipping unsuppoerted mesage type");
+            }
+        }
+        send(msg::SetESPBusy{false});
+    } */
+
+    /** Deal with parsed telegram bot message. 
+     
+        This can either be text command from the admin, in which case we do as instructed, it can be a text message in the assigned chat, which is printed for debug purposes, or it can be an audio message in general chat which is downloadeded and queued for playing. 
+
+        All other messagfe types are ignored.
+     */
+    /*
+    static bool processBotMessage(JsonObject const & msg, JsonDocument & json) {
+        int64_t chatId = msg["chat"]["id"];
+        if (chatId == telegramAdminId_ && msg.containsKey("text")) {
+            if (msg["text"] == "ip") {
+                bot_.sendMessage(chatId, WiFi.localIP().toString().c_str());
+            } else {
+                LOG("unknown command: %s", msg["text"].as<char const *>());
+            }
+        } else if (chatId == telegramChatId_) {
+            if (msg.containsKey("audio")) {
+                JsonObject const & audio = msg["audio"];
+                if (audio["mime_type"] == WAV_MIME) {
+                    // if we can't get new message, don't process the message
+                    if (ex_.walkieTalkie.isFull()) {
+                        LOG("Buffer full, cannot process");
+                        return false;
+                    }
+                    LOG("Downloading audio message...");
+                    char filename[32];
+                    snprintf_P(filename, sizeof(filename), PSTR("/wt/%u.wav"), ex_.walkieTalkie.writeId);
+                    SD.remove(filename);
+                    File f = SD.open(filename, FILE_WRITE);
+                    LOG("filename: %s", filename);
+                    if (bot_.getFile(audio["file_id"], json, f, [](uint32_t transferred, uint32_t size){
+                        // enough for ~60MB
+                        send(msg::LightsBar(static_cast<uint16_t>(transferred / 1024), static_cast<uint16_t>(size / 1024), MODE_COLOR_WALKIE_TALKIE.withBrightness(settings_.maxBrightness), 255));    
+                    })) {
+                        LOG("Done, %u bytes.", f.size());
+                        ex_.walkieTalkie.nextWrite();
+                        // update the extended state to flag the info
+                        setExtendedState(ex_.walkieTalkie);
+                        // update the number of available messages and the control range, if applicable
+                        if (numMessages_ < MAX_WALKIE_TALKIE_MESSAGES) {
+                            ++numMessages_;
+                            if (state_.mode() == Mode::WalkieTalkie)
+                                setControlRange(0, numMessages_);
+                        }
+                    } else {
+                        LOG("Error");
+                    }
+                    f.close();
+                } else {
+                    LOG("Unsupported audio mime-type: %s", audio["mime_type"].as<char const *>());
+                }
+            } else if (msg.containsKey("text")) {
+                LOG("text: %s", msg["text"].as<char const *>());
+            }
+        } else {
+            LOG("Ignoring message from chat %llu", chatId);
+        }
+        LOG("message processed");
+        return true;
+    } */
+
+
+
+    /** The telegram bot that handles the communication. 
+     */
+    //static inline TelegramBot bot_;
+
+    //static inline AudioGeneratorWAV wav_;
+
+    //static inline int64_t telegramChatId_;
+    //static inline int64_t telegramAdminId_;
+    //static inline uint8_t numMessages_;
+    //static inline uint8_t playingMessage_ = 0;
+    /** Start of the message. 
+     */
+    //static inline uint32_t messageStart_;
+
+    //@}
+
+    /** \name Night Lights mode
+     */
+    //@{
+
+    /*
+    static void setLightsEffect(LightsEffect effect) {
+        LOG("Lights effect: %u", static_cast<uint8_t>(effect));
+        ex_.lights.effect = effect;
+        setExtendedState(ex_.lights);
+    }
+
+    static void setNightLightHue(uint8_t hue) {
+        LOG("Light hue: %u", hue);
+        ex_.lights.hue = hue;
+        setExtendedState(ex_.lights);
+    }
+    */
+
+    //@}
+
+    //@{
+
+
+    /** \name Player modes and selection. 
+     */
+    //@{
+
+
+    //@}
+
+    /** Stops all playback. 
+     */
+
+
+
+    /*
+    static void initializeAlarm() {
+        LOG("Setting alarm from SD card");
+        File f = SD.open(ALARM_SETTINGS_FILE, FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                bool enabled = json["enabled"].as<bool>();
+                uint8_t h = json["h"].as<uint8_t>();
+                uint8_t m = json["m"].as<uint8_t>();
+                bool mon = json["mon"].as<bool>();
+                bool tue = json["tue"].as<bool>();
+                bool wed = json["wed"].as<bool>();
+                bool thu = json["thu"].as<bool>();
+                bool fri = json["fri"].as<bool>();
+                bool sat = json["sat"].as<bool>();
+                bool sun = json["sun"].as<bool>();
+                ex_.alarm.setHour(h).setMinute(m).enable(enabled, mon, tue, wed, thu, fri, sat, sun);
+                char buf[256];
+                alarmToJson(buf, sizeof(buf));
+                LOG("Alarm set to: %s", buf);
+            } else {
+                LOG("Invalid alarm settings");
+            }
+            f.close();
+        } else {
+            LOG("No alarm found");
+        }
+    }
+
+    static int getAlarmMP3(char * buffer, int bufLen) {
+        File f = SD.open(ALARM_SETTINGS_FILE, FILE_READ);
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                char const * filename = json["file"].as<char const *>();
+                if (filename != nullptr)
+                    return snprintf_P(buffer, bufLen, PSTR("%s"), filename);
+            }
+                
+            f.close();
+        }
+        buffer[0] = 0;
+        return 0;
+    }
+
+    static int alarmToJson(char * buffer, int bufLen) {
+        char filename[32];
+        getAlarmMP3(filename, sizeof(filename));
+        return snprintf_P(buffer, bufLen, PSTR("{"
+        "enabled:%u,"
+        "h:%u,"
+        "m:%u,"
+        "mon:%u,"
+        "tue:%u,"
+        "wed:%u,"
+        "thu:%u,"
+        "fri:%u,"
+        "sat:%u,"
+        "sun:%u,"
+        "file:\"%s\""
+        "}"),
+        ex_.alarm.enabled(),
+        ex_.alarm.hour(),
+        ex_.alarm.minute(),
+        ex_.alarm.activeDay(0), 
+        ex_.alarm.activeDay(1), 
+        ex_.alarm.activeDay(2), 
+        ex_.alarm.activeDay(3), 
+        ex_.alarm.activeDay(4), 
+        ex_.alarm.activeDay(5), 
+        ex_.alarm.activeDay(6),
+        filename
+        );
+    }
+
+    static void alarmPlay() {
+        char filename[32];
+        getAlarmMP3(filename, sizeof(filename));
+        audioFile_.open(filename);
+        i2s_.SetGain(static_cast<float>(alarmVolume_ + 1) / 16);
+        mp3_.begin(& audioFile_, & i2s_);
+        LOG("Alarm!!!");
+    }
+
+    static void snooze() {
+        LOG("Snooze");
+        stop();
+        ex_.alarm.snooze();
+        LOG("Alarm set to %u:%u", ex_.alarm.hour(), ex_.alarm.minute());
+        setExtendedState(ex_.alarm);
+        if (alarmReturnMode_ != Mode::Alarm) {
+            setMode(alarmReturnMode_);
+            if (alarmResume_)
+                play();
+        } else {
+            send(msg::Sleep{});
+        }
+    }
+
+    static void alarmDone() {
+        LOG("Alarm done");
+        stop();
+        // load the alarm from SD card to get rid of any snoozing...
+        initializeAlarm();
+        if (alarmReturnMode_ != Mode::Alarm) {
+            setMode(alarmReturnMode_);
+            if (alarmResume_)
+                play();
+        } else {
+            send(msg::Sleep{});
+        }
+    }
+
+    static inline Mode alarmReturnMode_;
+    static inline bool alarmResume_;
+    static inline uint8_t alarmVolume_ = DEFAULT_ALARM_VOLUME;
+
+    */
+
+    //@}
+
+    /** \name Birthday Greeting mode
+     
+        The greeting mode is really simple as no persistent configuration or even ESP memory is needed. At each start we just check whether any of the stored dates apply and if they do play the appropriate greeting. 
+
+        To read/update the greeting information use the sd download and sd upload routines.
+     */
+    //@{
+
+    /** Checks if a greeting should be played and plays if true. 
+     
+        Returns true if a greeting is played, false otherwise.
+     */
+    static bool checkGreeting() {
+        LOG("Checking greeting...");
+        File f = SD.open(GREETING_SETTINGS_FILE, FILE_READ);
+        bool result = false;
+        if (f) {
+            StaticJsonDocument<1024> json;
+            if (deserializeJson(json, f) == DeserializationError::Ok) {
+                for (JsonVariant greeting : json.as<JsonArray>()) {
+                    bool enabled = greeting["enabled"].as<bool>();
+                    uint8_t m = greeting["m"].as<uint8_t>();
+                    uint8_t d = greeting["d"].as<uint8_t>();
+                    LOG("Greeting date %u/%u, enabled : %u", d, m, enabled ? 1 : 0);
+                    if (enabled && m == ex_.time.month() && d == ex_.time.day()) {
+                        char const * filename = greeting["file"].as<char const *>();
+                        if (filename != nullptr) {
+                            result = true;
+                            setMode(Mode::Greeting);
+                            audioFile_.open(filename);
+                            i2s_.SetGain(static_cast<float>(alarmMode_.alarmVolume_ + 1) / 16);
+                            mp3_.begin(& audioFile_, & i2s_);
+                            LOG("Greeting!!!");
+                            break;
+                        }
+                    }
+                }
+            }
+            f.close();
+        }
+        return result;
+    }
+
+
+    //@}
+
+    /** \name WiFi Connection
+     
+     */
+    //@{
+
+
+
+
+    //@}
+
+    /** \name Web Server & Remote Control
+       
+     */
+    //@{
+
 
     //@}
 
@@ -2073,7 +2423,794 @@ MAX_WALKIE_TALKIE_MESSAGES;
     static inline uint8_t timeoutIdle_ = DEFAULT_IDLE_TIMEOUT;
     static inline uint8_t timeoutPlay_ = DEFAULT_PLAY_TIMEOUT;
 
+    template<typename T>
+    friend void SendExtendedState(T);
+
 }; // Player
+
+#endif
+
+/*
+template<typename T>
+inline void SendExtendedState(T const & part) {
+    Wire.beginTransmission(AVR_I2C_ADDRESS);
+    uint8_t offset = static_cast<uint8_t>((uint8_t*)(& part) - (uint8_t *)(& Player::ex_));
+    msg::SetExtendedState msg{
+        offset,
+        sizeof(T)
+    };
+    Wire.write(pointer_cast<uint8_t const *>(& msg), sizeof(msg::SetExtendedState));
+    Wire.write(pointer_cast<unsigned char const *>(& part), sizeof(T));
+    uint8_t status = Wire.endTransmission();
+    if (status != 0)
+        ERROR("I2C set extended state failed: %u, sending %u bytes", status, sizeof(T));
+} */
+
+
+
+void ESPMode::controlLongPress() {
+    Player::setIdle(false);
+    MusicMode nextMode = getNextMusicMode(
+        Player::state_.mode(),
+        Player::state_.musicMode(),
+        Player::status_.radioEnabled,
+        Player::status_.discoEnabled
+    );
+    switch (nextMode) {
+        case MusicMode::MP3:
+            Player::setMode(Player::mp3Mode_);
+            break;
+        case MusicMode::Radio:
+            Player::setMode(Player::radioMode_);
+            break;
+        case MusicMode::Disco:
+            Player::setMode(Player::discoMode_);
+            break;
+    }
+}
+
+void ESPMode::volumeLongPress() {
+    if (Player::currentMode_ != & Player::lightsMode_) {
+        Player::setIdle(false);
+        Player::setMode(Player::lightsMode_);
+    } else {
+        ESPMode::controlLongPress();
+    }
+}
+
+void ESPMode::volumeTurn() {
+    Player::setIdle(false);
+    Player::setI2SVolume(Player::state_.volumeValue());
+    Player::send(msg::LightsBar{static_cast<uint16_t>(Player::state_.volumeValue() + 1), 16, adjustBrightness(DEFAULT_COLOR)});
+}
+
+void ESPMode::doubleLongPress() {
+    if (Player::currentMode_ != & Player::walkieTalkieMode_) {
+        Player::setIdle(false);
+        Player::setMode(Player::walkieTalkieMode_);
+    } else {
+        ESPMode::controlLongPress();
+    }
+}
+
+Color ESPMode::adjustBrightness(Color const & color) {
+    return Player::adjustBrightness(color);
+}
+
+// MP3Mode -----------------------------------------------------------------------------------------------------------
+
+ESPMode * MP3Mode::enter(ESPMode * prev) {
+    Player::state_.setMusicMode(MusicMode::MP3);
+    Player::setControlRange(state().trackId, playlists_[state().playlistId].numTracks);
+    if (prev != & Player::lightsMode_) {
+        Player::setIdle(false);
+        setPlaylist(state().playlistId);
+    }
+    return this;
+}
+
+void MP3Mode::leave(ESPMode * next) {
+    if (next != & Player::lightsMode_)
+        Player::stopMP3();
+}
+
+void MP3Mode::playbackFinished() {
+    if (state().trackId + 1 < playlists_[state().playlistId].numTracks) {
+        setTrack(state().trackId + 1);
+    } else {
+        Player::stopMP3();
+        Player::setIdle(true);
+    }
+}
+
+void MP3Mode::controlPress() {
+    uint8_t i = (state().playlistId + 1) % numPlaylists_;
+    setPlaylist(i);
+    Player::setIdle(false);
+    Player::send(msg::LightsPoint{i, static_cast<uint16_t>(numPlaylists_ - 1), adjustBrightness(MODE_COLOR_MP3)});
+}
+
+void MP3Mode::controlTurn() {
+    uint8_t trackId = Player::state_.controlValue();
+    Player::send(msg::LightsPoint{trackId, static_cast<uint16_t>(playlists_[state().playlistId].numTracks - 1), adjustBrightness(MODE_COLOR_MP3)});
+    setTrack(trackId);
+    Player::setIdle(false);
+}
+
+void MP3Mode::volumePress() {
+    if (Player::idle()) {
+        Player::setIdle(false);
+        setPlaylist(state().playlistId);
+    } else {
+        Player::setIdle(true);
+    }
+}
+
+void MP3Mode::initialize() {
+    LOG("Initializing MP3 Playlists...");
+    File f = SD.open(SETTINGS_FILE, FILE_READ);
+    if (f) {
+        StaticJsonDocument<1024> json;
+        if (deserializeJson(json, f) == DeserializationError::Ok) {
+            numPlaylists_ = 0;
+            uint8_t id = 0;
+            for (JsonVariant playlist : json.as<JsonArray>()) {
+                ++id; // so that we start at one
+                if (! playlist["enabled"].as<bool>()) // skip disabled playlists
+                    continue;
+                uint16_t numTracks = initializePlaylist(id);
+                if (numTracks > 0) {
+                    playlists_[numPlaylists_++] = PlaylistInfo{id, numTracks};
+                    LOG("  %u: %s (%u tracks)",id, playlist["name"].as<char const *>(), numTracks);
+                } else {
+                    LOG("  %u: %s (no tracks found, skipping)", id, playlist["name"].as<char const *>());
+                }
+            }
+        } else {
+            LOG("%s is not valid JSON file", SETTINGS_FILE);
+        }
+        f.close();
+    } else {
+        LOG("%s not found", SETTINGS_FILE);
+    }
+}
+
+MP3State & MP3Mode::state() {
+    return Player::ex_.mp3;
+}
+
+/** Searches the playlist to determine the number of tracks it contains. 
+ 
+    A track is any file ending in `.mp3`. Up to 1023 tracks per playlist are supported in theory, but much smaller numbers should be used. 
+ */
+uint16_t MP3Mode::initializePlaylist(uint8_t playlistId) {
+        uint16_t result = 0;
+        char playlistFolder[8];
+        snprintf_P(playlistFolder, sizeof(playlistFolder), PSTR("%u"), playlistId);
+        File d = SD.open(pointer_cast<char const *>(& playlistFolder));
+        while (true) {
+            File f = d.openNextFile();
+            if (!f)
+                break;
+            // this should not happen, but let's be sure
+            if (f.isDirectory())
+                continue;
+            if (EndsWith(f.name(), ".mp3"))
+                ++result;
+        }
+        if (result > 1023) {
+            LOG("Error: Playlist %u has %u tracks where only 1023 is allowed", playlistId, result);
+            result = 1023;
+        }
+        d.close();
+        return result;
+}
+
+void MP3Mode::setPlaylist(uint8_t index) {
+    LOG("Playlist %u (folder %u)", index, playlists_[index].id);
+    currentPlaylist_.close();
+    char playlistDir[8];
+    snprintf_P(playlistDir, sizeof(playlistDir), PSTR("%u"), playlists_[index].id);
+    currentPlaylist_ = SD.open(playlistDir);
+    state().playlistId = index;
+    state().trackId = 0;
+    Player::setControlRange(0, playlists_[index].numTracks);
+    setTrack(0);
+}
+
+void MP3Mode::setTrack(uint16_t index) {
+        // pause current playback if any
+        Player::stopMP3();
+        // determune whether we have to start from the beginning, or can go forward from current track
+        uint16_t nextTrack = state().trackId + 1;
+        if (index < nextTrack) {
+            currentPlaylist_.rewindDirectory();
+            nextTrack = 0;
+        }
+        while (true) {
+            File f = currentPlaylist_.openNextFile();
+            if (!f)
+                break;
+            LOG("Checking file %s, index %u, nexttrack %u", f.name(), index, nextTrack);
+            if (EndsWith(f.name(), ".mp3")) {
+                if (index == nextTrack) {
+                    char filename[32]; // this should be plenty for 8.3 filename
+                    snprintf_P(filename, sizeof(filename), PSTR("%u/%s"), playlists_[state().playlistId].id, f.name());
+                    f.close();
+                    LOG("Track %u, file: %s", index, filename);
+                    Player::playMP3(filename);
+                    //audioFile_.open(filename);
+                    //i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
+                    //mp3_.begin(& audioFile_, & i2s_);
+                    state().trackId = index;
+                    Player::sendExtendedState(state());
+                    return;
+                } else {
+                    ++nextTrack;
+                }
+            } 
+            f.close();
+        }
+        LOG("No file found");
+}
+
+// RadioMode -------------------------------------------------------------------------------------------------------
+
+ESPMode * RadioMode::enter(ESPMode * prev) {
+    Player::state_.setMusicMode(MusicMode::Radio);
+    if (prev != & Player::lightsMode_)
+        play();
+    return this;
+}
+
+void RadioMode::leave(ESPMode * next) {
+    if (next != & Player::lightsMode_)
+        radio_.term();
+}
+
+void RadioMode::controlPress() {
+    uint8_t i = state().stationId + 1;
+    if (i >= numRadioStations_)
+        i = 0;
+    setRadioStation(i);
+    Player::send(msg::LightsPoint{i, static_cast<uint16_t>(numRadioStations_ - 1), adjustBrightness(MODE_COLOR_RADIO)});
+}
+
+void RadioMode::controlTurn() {
+    if (Player::idle())
+        play();
+
+    Player::send(msg::LightsPoint{Player::state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, adjustBrightness(MODE_COLOR_RADIO)});
+    setRadioFrequency(Player::state_.controlValue() + RADIO_FREQUENCY_MIN);
+}
+
+void RadioMode::volumePress() {
+    if (Player::idle()) {
+        Player::setIdle(false);
+        play();
+    } else {
+        Player::setIdle(true);
+        pause();
+    }
+}
+
+void RadioMode::volumeTurn() {
+    radio_.setVolume(Player::state_.volumeValue());
+    Player::send(msg::LightsBar{static_cast<uint16_t>(Player::state_.volumeValue() + 1), 16, adjustBrightness(DEFAULT_COLOR)});
+}
+
+void RadioMode::initialize() {
+    LOG("Initializing radio stations...");
+    numRadioStations_ = 0;
+    File f = SD.open(SETTINGS_FILE, FILE_READ);
+    if (f) {
+        StaticJsonDocument<1024> json;
+        if (deserializeJson(json, f) == DeserializationError::Ok) {
+            for (JsonVariant station : json["stations"].as<JsonArray>()) {
+                radioStations_[numRadioStations_++] = station["freq"];
+                LOG("  %s: %u", station["name"].as<char const *>(), station["freq"].as<unsigned>());
+            }
+            forceMono_ = json["forceMono"].as<bool>();
+            manualTuning_ = json["manualTuning"].as<bool>();
+        } else {
+            //LOG("  radio/stations.json file not found");
+        }
+        f.close();
+    } else {
+        LOG("  %s file not found", SETTINGS_FILE);
+    }
+    // if the current frequency is out of bounds, set it to the frequency of the first station, which just means that when invalid state, default to the first station
+    if (state().stationId == RadioState::POWER_ON_STATION_ID) {
+        state().stationId = 0;
+        state().frequency = radioStations_[0];
+    }
+}
+
+RadioState & RadioMode::state() {
+    return Player::ex_.radio;
+}
+
+void RadioMode::play() {
+    radio_.init();
+    radio_.setMono(forceMono_ || ! Player::state_.headphonesConnected());
+    radio_.setVolume(Player::state_.volumeValue());
+    setRadioFrequency(state().frequency);
+    Player::setControlRange(state().frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+    // for reasons unknown to me, the RDA does not always work immediately after power on/wakeup unless we set the frequency again after a while
+    delay(100);
+    setRadioFrequency(state().frequency);
+    Player::setIdle(false);
+}
+
+void RadioMode::pause() {
+    radio_.term();
+    Player::setIdle(true);
+}
+
+void RadioMode::setRadioFrequency(uint16_t mhzx10) {
+    LOG("Radio frequency: %u", mhzx10);
+    state().frequency = mhzx10;
+    radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
+    Player::sendExtendedState(state());
+}
+
+void RadioMode::setRadioStation(uint8_t index) {
+    LOG("Radio station: %u", index);
+    state().stationId = index;
+    state().frequency = radioStations_[index];
+    radio_.setBandFrequency(RADIO_BAND_FM, state().frequency * 10);
+    Player::sendExtendedState(state());
+    Player::setControlRange(state().frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+}
+
+// DiscoMode -----------------------------------------------------------------------------------------------------------
+
+ESPMode * DiscoMode::enter(ESPMode * prev) {
+    Player::state_.setMusicMode(MusicMode::Disco);
+    return this;
+}
+
+
+
+// LightsMode -------------------------------------------------------------------------------------------------------
+
+ESPMode * LightsMode::enter(ESPMode * prev) {
+    Player::setControlRange(state().hue, LightsState::HUE_RAINBOW + 1);
+    return this;
+}
+
+void LightsMode::controlPress() {
+    uint8_t i = (static_cast<uint8_t>(state().effect) + 1) % 8;
+    LOG("Lights effect: %u", i);
+    state().effect = static_cast<LightsEffect>(i);
+    Player::sendExtendedState(state());
+    Player::send(msg::LightsPoint{i, 7, adjustBrightness(MODE_COLOR_LIGHTS)});
+}
+
+void LightsMode::controlTurn() {
+    uint8_t hue = Player::state_.controlValue();
+    LOG("Light hue: %u", hue);
+    state().hue = hue;
+    Player::sendExtendedState(state());
+    if (hue == LightsState::HUE_RAINBOW)
+        Player::send(msg::LightsColors{
+            Color::HSV(0 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(1 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(2 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(3 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(4 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(5 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(6 << 13, 255, Player::status_.maxBrightness),
+            Color::HSV(7 << 13, 255, Player::status_.maxBrightness)
+        });
+    else
+        Player::send(msg::LightsBar{8, 8, Color::HSV(state().colorHue(), 255, Player::status_.maxBrightness)});
+}
+
+void LightsMode::volumePress() {
+    switch (Player::state_.musicMode()) {
+        case MusicMode::MP3:
+            Player::mp3Mode_.volumePress();
+            break;
+        case MusicMode::Radio:
+            Player::radioMode_.volumePress();
+            break;
+        case MusicMode::Disco:
+            Player::discoMode_.volumePress();
+            break;
+    }
+}
+
+void LightsMode::volumeTurn() {
+    switch (Player::state_.musicMode()) {
+        case MusicMode::MP3:
+            Player::mp3Mode_.volumeTurn();
+            break;
+        case MusicMode::Radio:
+            Player::radioMode_.volumeTurn();
+            break;
+        case MusicMode::Disco:
+            Player::discoMode_.volumeTurn();
+            break;
+    }
+}
+
+LightsState & LightsMode::state() {
+    return Player::ex_.lights;
+}
+
+
+// WalkieTalkieMode -------------------------------------------------------------------------------------------------------
+
+ESPMode * WalkieTalkieMode::enter(ESPMode * prev) {
+    Player::setControlRange(0, numMessages_);
+    Player::connectWiFi();
+    Player::setIdle(true);
+    return this;
+}
+
+void WalkieTalkieMode::leave(ESPMode * next) {
+    Player::stopPlayback();
+}
+
+void WalkieTalkieMode::loop(bool secondTick) {
+    if (enabled()) {
+        if (! recording() && secondTick && Player::ex_.time.second() == 0)
+            Player::status_.updateMessages = true;
+        if (Player::idle() && Player::status_.updateMessages && (Player::state_.wifiStatus() == WiFiStatus::Connected)) {
+            Player::status_.updateMessages = false;
+            checkBotMessages();
+        }
+    }
+}
+
+void WalkieTalkieMode::playbackFinished() {
+    // if we were playing unread message, advance the buffer
+    if (! state().isEmpty()) {
+        ++state().readId;
+        Player::sendExtendedState(state());
+    }
+    if (playingMessage_ > 0) {
+        playMessage(playingMessage_ - 1);
+    } else {
+        Player::stopWAV();
+        Player::setIdle(true);
+    }
+}
+
+void WalkieTalkieMode::recordingFinished(uint32_t durationMs) {
+    if (durationMs < MIN_WALKIE_TALKIE_RECORDING) {
+        LOG("Recording cancelled - too short");
+        return;
+    }
+    File f = SD.open(RECORDING_FILE, FILE_READ);
+    Player::setBusy(true);
+    bot_.sendAudio(telegramChatId_, f, "audio.wav", "audio/wav", [](uint16_t v, uint16_t m){
+        Player::send(msg::LightsBar{v, m, adjustBrightness(MODE_COLOR_WALKIE_TALKIE), 255});    
+    });
+    Player::send(msg::LightsBar{255, 255, adjustBrightness(MODE_COLOR_WALKIE_TALKIE), 32});
+    Player::setBusy(false);
+    f.close();
+}
+
+void WalkieTalkieMode::controlDown() {
+    if (Player::status_.recording)
+        Player::stopRecording(/* cancel */ true);
+}
+
+void WalkieTalkieMode::controlPress() {
+    if (enabled()) {
+        Player::setIdle(false);
+        play();
+    }
+}
+
+void WalkieTalkieMode::controlTurn() {
+    // if not empty, then the new messages must be played first via normal CTRL press
+    if (enabled() && state().isEmpty()) {
+        Player::send(msg::LightsPoint{Player::state_.controlValue(), static_cast<uint16_t>(numMessages_) - 1, adjustBrightness(MODE_COLOR_WALKIE_TALKIE)});
+        // play from the updated value
+        Player::setIdle(false);
+        play();
+    }
+}
+
+void WalkieTalkieMode::volumeDown() {
+    if (enabled()) {
+        Player::setIdle(false);
+        Player::startRecording(RECORDING_FILE);
+    }
+}
+
+void WalkieTalkieMode::volumeUp() {
+    if (enabled() && recording())
+        Player::stopRecording();
+}
+
+void WalkieTalkieMode::initialize() {
+    File f = SD.open(SETTINGS_FILE, FILE_READ);
+    if (f) {
+        StaticJsonDocument<1024> json;
+        if (deserializeJson(json, f) == DeserializationError::Ok) {
+            int64_t id = json["id"].as<int64_t>();
+            String token = json["token"];
+            telegramAdminId_ = json["adminId"].as<int64_t>();
+            telegramChatId_ = json["chatId"].as<int64_t>();
+            LOG("Walkie-Talkie:\n  Bot %lli\n  Chat %lli\n  Token: %s\n  AdminId: %lli", id, telegramChatId_, token.c_str(), telegramAdminId_);
+            File cf = SD.open(CERT_FILE, FILE_READ);
+            if (cf && cf.size() < 2048) {
+                String cert = cf.readString();
+                // TODO security is hard, the certificate only works if time is proper...
+                bot_.initialize(id, std::move(token), nullptr /*, cert.c_str() */);
+            } else {
+                bot_.initialize(std::move(id), std::move(token), nullptr);
+                LOG("No certificate found, telegram bot will be INSECURE!!!");
+            }
+            cf.close();
+        } else {
+            LOG("Deserialization error");
+        }
+        f.close();
+    }
+    // determine the number of messages in the buffer 
+    for (numMessages_ = 0; numMessages_ < MAX_WALKIE_TALKIE_MESSAGES; ++numMessages_) {
+        char filename[16];
+        snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), numMessages_);
+        if (! SD.exists(filename))
+            break;
+    }
+    LOG("WT messages found: %u", numMessages_);
+    // if this is the initail power on, update the settings accordingly 
+    if (state().readId == WalkieTalkieState::POWER_ON_MESSAGE_ID) {
+        state().readId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
+        state().writeId = numMessages_ % MAX_WALKIE_TALKIE_MESSAGES;
+    }
+    LOG("read: %u, write: %u", state().readId, state().writeId);
+}
+
+WalkieTalkieState & WalkieTalkieMode::state() {
+    return Player::ex_.walkieTalkie;
+}
+
+bool WalkieTalkieMode::enabled() {
+    return Player::status_.walkieTalkieEnabled;
+}
+
+bool WalkieTalkieMode::recording() {
+    return Player::status_.recording;
+}
+
+void WalkieTalkieMode::startRecording() {
+    Player::stopPlayback();
+    Player::startRecording(RECORDING_FILE);
+}
+
+void WalkieTalkieMode::playMessage(uint8_t offset) {
+    playingMessage_ = offset;
+    char filename[32];
+    uint8_t id = static_cast<uint8_t>(state().writeId - 1 - offset) %         
+MAX_WALKIE_TALKIE_MESSAGES;
+    LOG("Playing message offset %u, id %u", offset, id);
+    snprintf_P(filename, sizeof(filename), PSTR("wt/%u.wav"), id);
+    Player::playWAV(filename);
+}
+
+void WalkieTalkieMode::play() {
+    if (!state().isEmpty())
+        playMessage((state().writeId - state().readId - 1) % MAX_WALKIE_TALKIE_MESSAGES);
+    else if (numMessages_ > 0) 
+        playMessage(static_cast<uint8_t>(Player::state_.controlValue()));
+    else 
+        return;
+}
+
+void WalkieTalkieMode::checkBotMessages() {
+    LOG("Checking telegram bot updates...");
+    Player::setBusy(true);
+    int64_t updateId = 0;
+    StaticJsonDocument<1024> json;
+    while (bot_.getUpdate(json, updateId)) {
+        if (json["ok"] != true || ! json["result"].is<JsonArray>()) {
+            LOG("Bot update failure");
+            break;
+        }
+        JsonArray const & result = json["result"];
+        if (result.size() == 0) {
+            LOG("Bot update done.");
+            break;
+        }
+        JsonObject const & update = result[0];
+        updateId = update["update_id"].as<int64_t>() + 1;
+        LOG("bot update id: %lli", updateId);
+        // if the message cannot be currently processed, stop the update so that we can try again            
+        if (update.containsKey("message")) {
+            if (! processBotMessage(update["message"], json))
+                break; 
+        } else if (update.containsKey("channel_post")) {
+            if (! processBotMessage(update["channel_post"], json))
+                break;
+        } else {
+            LOG("Skipping unsuppoerted mesage type");
+        }
+    }
+    Player::setBusy(false);
+}
+
+bool WalkieTalkieMode::processBotMessage(JsonObject const & msg, JsonDocument & json) {
+    int64_t chatId = msg["chat"]["id"];
+    if (chatId == telegramAdminId_ && msg.containsKey("text")) {
+        if (msg["text"] == "ip") {
+            bot_.sendMessage(chatId, WiFi.localIP().toString().c_str());
+        } else {
+            LOG("unknown command: %s", msg["text"].as<char const *>());
+        }
+    } else if (chatId == telegramChatId_) {
+        if (msg.containsKey("audio")) {
+            JsonObject const & audio = msg["audio"];
+            if (audio["mime_type"] == Player::WAV_MIME) {
+                // if we can't get new message, don't process the message
+                if (state().isFull()) {
+                    LOG("Buffer full, cannot process");
+                    return false;
+                }
+                LOG("Downloading audio message...");
+                char filename[32];
+                snprintf_P(filename, sizeof(filename), PSTR("/wt/%u.wav"), state().writeId);
+                SD.remove(filename);
+                File f = SD.open(filename, FILE_WRITE);
+                LOG("filename: %s", filename);
+                if (bot_.getFile(audio["file_id"], json, f, [](uint32_t transferred, uint32_t size){
+                    // enough for ~60MB
+                    Player::send(msg::LightsBar{static_cast<uint16_t>(transferred / 1024), static_cast<uint16_t>(size / 1024), Player::adjustBrightness(MODE_COLOR_WALKIE_TALKIE), 255});    
+                })) {
+                    LOG("Done, %u bytes.", f.size());
+                    state().nextWrite();
+                    // update the extended state to flag the info
+                    Player::sendExtendedState(state());
+                    // update the number of available messages and the control range, if applicable
+                    if (numMessages_ < MAX_WALKIE_TALKIE_MESSAGES) {
+                        ++numMessages_;
+                        if (Player::currentMode_ == this)
+                            Player::setControlRange(0, numMessages_);
+                    }
+                } else {
+                    LOG("Error");
+                }
+                f.close();
+            } else {
+                LOG("Unsupported audio mime-type: %s", audio["mime_type"].as<char const *>());
+            }
+        } else if (msg.containsKey("text")) {
+            LOG("text: %s", msg["text"].as<char const *>());
+        }
+    } else {
+        LOG("Ignoring message from chat %llu", chatId);
+    }
+    LOG("message processed");
+    return true;
+}
+
+// AlarmMode -------------------------------------------------------------------------------------------------------
+
+ESPMode * AlarmMode::enter(ESPMode * prev) {
+    returnMode_ = Player::currentMode_;
+    char filename[32];
+    getAlarmMP3(filename, sizeof(filename));
+    LOG("Alarm!!!");
+    Player::playMP3(filename, volume_);
+    return this;
+}
+
+void AlarmMode::leave(ESPMode * next) {
+    Player::stopPlayback();
+}
+
+void AlarmMode::initialize() {
+    LOG("Setting alarm from SD card");
+    File f = SD.open(SETTINGS_FILE, FILE_READ);
+    if (f) {
+        StaticJsonDocument<1024> json;
+        if (deserializeJson(json, f) == DeserializationError::Ok) {
+            bool enabled = json["enabled"].as<bool>();
+            uint8_t h = json["h"].as<uint8_t>();
+            uint8_t m = json["m"].as<uint8_t>();
+            bool mon = json["mon"].as<bool>();
+            bool tue = json["tue"].as<bool>();
+            bool wed = json["wed"].as<bool>();
+            bool thu = json["thu"].as<bool>();
+            bool fri = json["fri"].as<bool>();
+            bool sat = json["sat"].as<bool>();
+            bool sun = json["sun"].as<bool>();
+            Player::ex_.alarm.setHour(h).setMinute(m).enable(enabled, mon, tue, wed, thu, fri, sat, sun);
+            char buf[256];
+            alarmToJson(buf, sizeof(buf));
+            LOG("Alarm set to: %s", buf);
+        } else {
+            LOG("Invalid alarm settings");
+        }
+        f.close();
+    } else {
+        LOG("No alarm found");
+    }
+}
+
+int AlarmMode::alarmToJson(char * buffer, int bufLen) {
+    char filename[32];
+    getAlarmMP3(filename, sizeof(filename));
+    return snprintf_P(buffer, bufLen, PSTR("{"
+        "enabled:%u,"
+        "h:%u,"
+        "m:%u,"
+        "mon:%u,"
+        "tue:%u,"
+        "wed:%u,"
+        "thu:%u,"
+        "fri:%u,"
+        "sat:%u,"
+        "sun:%u,"
+        "file:\"%s\""
+        "}"),
+        alarm().enabled(),
+        alarm().hour(),
+        alarm().minute(),
+        alarm().activeDay(0), 
+        alarm().activeDay(1), 
+        alarm().activeDay(2), 
+        alarm().activeDay(3), 
+        alarm().activeDay(4), 
+        alarm().activeDay(5), 
+        alarm().activeDay(6),
+        filename
+    );
+}
+
+Alarm & AlarmMode::alarm() {
+    return Player::ex_.alarm;
+}
+
+
+int AlarmMode::getAlarmMP3(char * buffer, int bufLen) {
+    File f = SD.open(SETTINGS_FILE, FILE_READ);
+    if (f) {
+        StaticJsonDocument<1024> json;
+        if (deserializeJson(json, f) == DeserializationError::Ok) {
+            char const * filename = json["file"].as<char const *>();
+            if (filename != nullptr)
+                return snprintf_P(buffer, bufLen, PSTR("%s"), filename);
+        }
+        f.close();
+    }
+    buffer[0] = 0;
+    return 0;
+}
+
+void AlarmMode::snooze() {
+    LOG("Snooze");
+    alarm().snooze();
+    LOG("Alarm set to %u:%u", alarm().hour(), alarm().minute());
+    Player::sendExtendedState(alarm());
+    if (returnMode_ == this) 
+        Player::sleep();
+    else
+        Player::setMode(returnMode_);
+}
+
+void AlarmMode::done() {
+    LOG("Alarm done");
+    // load the alarm from SD card to get rid of any snoozing...
+    initialize();
+    if (returnMode_ == this) 
+        Player::sleep();
+    else
+        Player::setMode(returnMode_);
+}
+
+
+// GreetingMode -------------------------------------------------------------------------------------------------------
+
+void GreetingMode::checkGreeting() {
+
+}
 
 /** Disable wifi at startup. 
  
