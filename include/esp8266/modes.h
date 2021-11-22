@@ -146,8 +146,21 @@ private:
 
 class DiscoMode : public ESPMode {
     friend class Player;
+    static inline char const * RECORDING_FILE = "disco.wav";
 public:
     ESPMode * enter(ESPMode * prev) override;
+
+    void playbackFinished() override;
+    void recordingFinished(uint32_t durationMs) override;
+
+    //void controlDown() override;
+    //void controlPress() override;
+    //void controlTurn() override;
+    void volumeDown() override;
+    void volumeUp() override;
+    // volume press and long press don't do anything as volume button only controls recording
+    void volumePress() override {}
+    void volumeLongPress() override {}
 
     DiscoMode(): ESPMode{Mode::Music} {}
 
@@ -201,6 +214,7 @@ public:
     void controlTurn() override;
     void volumeDown() override;
     void volumeUp() override;
+    // volume press and long press don't do anything as volume button only controls recording
     void volumePress() override {}
     void volumeLongPress() override {}
 
@@ -213,8 +227,6 @@ private:
     WalkieTalkieState & state();
 
     bool enabled();
-
-    bool recording();
 
     void startRecording();
 

@@ -473,7 +473,8 @@ private:
             }
             if (state_.volumeTurn()) {
                 LOG("vol: %u", state_.volumeValue());
-                currentMode_->volumeTurn();
+                // this will check the volume value wrt max volume settings and call the current mode's volume turn event
+                updateVolume();
             }
             if (state_.doubleButtonLongPress()) {
                 LOG("double long press");
@@ -481,8 +482,8 @@ private:
             }
             // if there is change in headphones, simulate change in volume to cap the volume value if necessary
             if (state_.headphonesConnected() != old.headphonesConnected()) {
-                LOG("headphones: ", state_.headphonesConnected());
-                currentMode_->volumeTurn();
+                LOG("headphones: %u", state_.headphonesConnected());
+                updateVolume();
             }
             // clear the events so that they can be triggered again (ATTiny did so after the transmission as well)
             state_.clearEvents();
@@ -574,6 +575,12 @@ private:
         mp3_.begin(& audioFile_, & i2s_);
     }        
 
+    /** Returns true if the MP3 playback is currently active.
+     */
+    static bool mp3Playback() {
+        return mp3_.isRunning();
+    }
+
     static void stopMP3() {
         if (mp3_.isRunning()) {
             LOG("MP3 stop");
@@ -621,6 +628,18 @@ private:
             LOG("WAV playback done");
             currentMode_->playbackFinished();
         }
+    }
+
+    /** Adjusts the volume value depending on max volume settings and whether speaker or headphones are connected. 
+     */
+    static void updateVolume() {
+        uint8_t maxVolume = state_.headphonesConnected() ? status_.maxHeadphonesVolume : status_.maxSpeakerVolume;
+        if (state_.volumeValue() > maxVolume) {
+            state_.setVolumeValue(maxVolume);
+            send(msg::SetVolumeRange{state_.volumeValue(), MAX_VOLUME});
+            LOG("vol limited to %u", state_.volumeValue());
+        }
+        currentMode_->volumeTurn();
     }
 
     static void setI2SVolume(uint8_t volume) {
@@ -680,6 +699,10 @@ private:
             while (n-- > 0) 
                 Wire.read();
         }
+    }
+
+    static bool recording() {
+        return status_.recording;
     }
 
     /** The WAV 8kHz recorder to an SD card file
@@ -1072,45 +1095,6 @@ private:
 
 }; // Player
 
-#ifdef HAHA_BUBU
-
-    /** Changes volume. 
-     
-        Updates the volume of the underlying music provider (i2s/radio). 
-     */
-    static void volumeTurn() {
-        LOG("Volume: %u", state_.volumeValue());
-        // check that the volume is within the settings available
-        uint8_t maxVolume = state_.headphonesConnected() ? settings_.maxHeadphonesVolume : settings_.maxSpeakerVolume;
-        if (state_.volumeValue() > maxVolume) {
-            state_.setVolumeValue(maxVolume);
-            send(msg::SetVolumeRange{state_.volumeValue(), MAX_VOLUME});
-            LOG("Limited to %u", state_.volumeValue());
-        }
-        switch (state_.mode()) {
-            case Mode::Music:
-            case Mode::Lights:
-                if (state_.musicMode() == MusicMode::Radio)
-                    radioUpdateVolume();
-                else if (state_.musicMode() == MusicMode::MP3)
-                    mp3Mode_.volumeTurn();
-                else // both MP3 and disco use i2s
-                    setI2SVolume(state_.volumeValue());
-                break;
-            case Mode::WalkieTalkie:
-            case Mode::Greeting:
-                    setI2SVolume(state_.volumeValue());
-                break;
-            default:
-                break;
-        }
-        send(msg::LightsBar{static_cast<uint16_t>(state_.volumeValue() + 1), 16, DEFAULT_COLOR});
-    }
-
-
-
-#endif
-
 // ESPMode --------------------------------------------------------------------------------------------------------
 
 void ESPMode::controlLongPress() {
@@ -1144,7 +1128,8 @@ void ESPMode::volumeLongPress() {
 }
 
 void ESPMode::volumeTurn() {
-    Player::setIdle(false);
+    // volume turn does not reset idle timer as it does not resume playback
+    //Player::setIdle(false);
     Player::setI2SVolume(Player::state_.volumeValue());
     Player::send(msg::LightsBar{static_cast<uint16_t>(Player::state_.volumeValue() + 1), 16, adjustBrightness(DEFAULT_COLOR)});
 }
@@ -1205,7 +1190,8 @@ void MP3Mode::controlTurn() {
 void MP3Mode::volumePress() {
     if (Player::idle()) {
         Player::setIdle(false);
-        setPlaylist(state().playlistId);
+        if (!Player::mp3Playback())
+            setPlaylist(state().playlistId);
     } else {
         Player::setIdle(true);
     }
@@ -1435,7 +1421,30 @@ ESPMode * DiscoMode::enter(ESPMode * prev) {
     return this;
 }
 
+void DiscoMode::playbackFinished() {
+    Player::stopWAV();
+    Player::setIdle(true);
+}
 
+void DiscoMode::recordingFinished(uint32_t durationMs) {
+    if (durationMs < MIN_WALKIE_TALKIE_RECORDING) {
+        LOG("Recording cancelled - too short");
+        return;
+    }
+    Player::setIdle(false);
+    Player::playWAV(RECORDING_FILE);
+}
+
+void DiscoMode::volumeDown() {
+    Player::stopPlayback();
+    Player::setIdle(false);
+    Player::startRecording(RECORDING_FILE);
+}
+
+void DiscoMode::volumeUp() {
+    if (Player::recording())
+        Player::stopRecording();
+}
 
 // LightsMode -------------------------------------------------------------------------------------------------------
 
@@ -1504,7 +1513,6 @@ LightsState & LightsMode::state() {
     return Player::ex_.lights;
 }
 
-
 // WalkieTalkieMode -------------------------------------------------------------------------------------------------------
 
 ESPMode * WalkieTalkieMode::enter(ESPMode * prev) {
@@ -1520,7 +1528,7 @@ void WalkieTalkieMode::leave(ESPMode * next) {
 
 void WalkieTalkieMode::loop(bool secondTick) {
     if (enabled()) {
-        if (! recording() && secondTick && Player::ex_.time.second() == 0)
+        if (! Player::recording() && secondTick && Player::ex_.time.second() == 0)
             Player::status_.updateMessages = true;
         if (Player::idle() && Player::status_.updateMessages && (Player::state_.wifiStatus() == WiFiStatus::Connected)) {
             Player::status_.updateMessages = false;
@@ -1559,7 +1567,7 @@ void WalkieTalkieMode::recordingFinished(uint32_t durationMs) {
 }
 
 void WalkieTalkieMode::controlDown() {
-    if (Player::status_.recording)
+    if (Player::recording())
         Player::stopRecording(/* cancel */ true);
 }
 
@@ -1582,13 +1590,14 @@ void WalkieTalkieMode::controlTurn() {
 
 void WalkieTalkieMode::volumeDown() {
     if (enabled()) {
+        Player::stopPlayback();
         Player::setIdle(false);
         Player::startRecording(RECORDING_FILE);
     }
 }
 
 void WalkieTalkieMode::volumeUp() {
-    if (enabled() && recording())
+    if (enabled() && Player::recording())
         Player::stopRecording();
 }
 
@@ -1639,10 +1648,6 @@ WalkieTalkieState & WalkieTalkieMode::state() {
 
 bool WalkieTalkieMode::enabled() {
     return Player::status_.walkieTalkieEnabled;
-}
-
-bool WalkieTalkieMode::recording() {
-    return Player::status_.recording;
 }
 
 void WalkieTalkieMode::startRecording() {
