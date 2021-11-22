@@ -23,6 +23,7 @@
 #include "esp8266/wav_writer.h"
 #include "esp8266/telegram_bot.h"
 #include "esp8266/modes.h"
+#include "esp8266/wav_mixer.h"
 
 /* ESP8266 PINOUT
 
@@ -160,33 +161,6 @@ public:
         // enter the desired mode
         setMode(currentMode_);
         currentMode_->volumeTurn();
-        /*
-        switch (state_.mode()) {
-            case Mode::Music:
-                
-            case Mode::Lights:
-            case Mode::WalkieTalkie:
-            case Mode::Alarm:
-            case Mode::Sync:
-            default:
-                LOG("unexpected mode: %u", static_cast<uint8_t>(state_.mode()));
-        }
-
-        
-
-        send(msg::SetESPBusy{false}); // just to be sure we have no leftovers from resets
-        switch (state_.mode()) {
-            case Mode::Sync:
-                sync();
-                break;
-            default:
-                // checkGreeting enters the greeting state if its active, so that we save a few bytes of global state where we do not have to remember the greeting parameters if successful. If there's no greeting we have to set the state ourselves later on. Only check the greeting is this is not a reset situation, in which case proceed immediately to the latest known mode
-                if (espReset || ! checkGreeting())
-                    setMode(state_.mode());
-        }
-        // check the volume is within max range
-        volumeTurn();
-        */
     }
 
 
@@ -201,6 +175,7 @@ private:
         LOG("  mac address:  %s", WiFi.macAddress().c_str());
         LOG("  wifi mode:    %u", WiFi.getMode());
         LOG("Free heap: %u", ESP.getFreeHeap());
+
     }
 
     static void initializeLittleFS() {
@@ -602,12 +577,24 @@ private:
         wav_.begin(& audioFile_, & i2s_);
     }
 
+    static void playWAV(char const * filename1, char const * filename2, uint8_t volume) {
+        LOG("WAV2: %s, %s (vol %u)", filename1, filename2, volume);
+        stopPlayback();
+        mixer_.open(filename1);
+        mixer_.openOverlay(filename2);
+        i2s_.SetGain(static_cast<float>(volume + 1) / 16);
+        wav_.begin(& mixer_, & i2s_);
+    }
+
     static void stopWAV() {
         if (wav_.isRunning()) {
             LOG("WAV stop");
             wav_.stop();
             i2s_.stop();
-            audioFile_.close();
+            if (audioFile_.isOpen())
+                audioFile_.close();
+            if (mixer_.isOpen())
+                mixer_.close();
         }
     }
 
@@ -620,11 +607,12 @@ private:
 
     static void playbackLoop() {
         if (mp3_.isRunning() && ! mp3_.loop()) {
-            mp3_.stop();
+            stopMP3();
+            //mp3_.stop();
             LOG("MP3 playback done");
             currentMode_->playbackFinished();
         } else if (wav_.isRunning() && ! wav_.loop()) {
-            wav_.stop();
+            stopWAV();
             LOG("WAV playback done");
             currentMode_->playbackFinished();
         }
@@ -650,6 +638,8 @@ private:
     static inline AudioGeneratorWAV wav_;
     static inline AudioOutputI2S i2s_;
     static inline AudioFileSourceSD audioFile_;
+
+    static inline WavMixer mixer_;
 
     //@}
 
@@ -1088,6 +1078,7 @@ private:
         bool lightsEnabled : 1;
         bool walkieTalkieEnabled : 1;
         
+        bool dualPlayback : 1;
         bool recording : 1;
         bool updateMessages : 1;
 
@@ -1432,7 +1423,7 @@ void DiscoMode::recordingFinished(uint32_t durationMs) {
         return;
     }
     Player::setIdle(false);
-    Player::playWAV(RECORDING_FILE);
+    Player::playWAV("aha.wav", RECORDING_FILE, 1);
 }
 
 void DiscoMode::volumeDown() {

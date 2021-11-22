@@ -13,9 +13,10 @@
 - format SD card if necessary (keep default basic settings in LittleFS)
 - check time
 - don't show volume bar when powering on / headphones change
-- maybe add a silence reduction as well (i.e values close to center are center). 
+- add a silence reduction as well (i.e values close to center are center)
+- add amplification to recorded sounds
 
 # Disco Mode
 
 - get WAV files for the background music
-- record & replay
+- selectable and replayable recording
