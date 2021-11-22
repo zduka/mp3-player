@@ -171,12 +171,21 @@ private:
 
 }; // LightsMode
 
+/** Walkie-Talkie Mode
+ 
+    The walkie talkie uses a telegram-bot to support a walkie-talkie like communication between various radios and telegram phones. Each player can be assigned a telegram bot and a chat id that it responds to. Recording a message will send the recorded audio to the specified chat room. When a new voice message in the chat room is detected, it is played.
+   
+
+    https://maakbaas.com/esp8266-iot-framework/logs/https-requests/
+    https://core.telegram.org/bots/api#sending-files
+
+ */
 class WalkieTalkieMode : public ESPMode {
     friend class Player;
+    friend class SyncMode;
     static inline char const * SETTINGS_FILE = "player/bot.json";
     static inline char const * CERT_FILE = "player/cert.txt";
     static inline char const * RECORDING_FILE = "rec.wav";
-
 public:
     ESPMode * enter(ESPMode * prev) override;
     void leave(ESPMode * next) override;
@@ -287,16 +296,55 @@ private:
 
 }; // AlarmMode
 
+/** Birthday Greeting mode
+ 
+    The greeting mode is really simple as no persistent configuration or even ESP memory is needed. At each start we just check whether any of the stored dates apply and if they do play the appropriate greeting. 
+
+    To read/update the greeting information use the sd download and sd upload routines.
+ */
 class GreetingMode : public ESPMode {
     friend class Player;
+    static constexpr char const * SETTINGS_FILE = "player/greeting.json";
 public:
 
-    void checkGreeting();
+    ESPMode * enter(ESPMode * prev) override;
+
+    void playbackFinished() override { dismiss(); }
+    void controlPress() override { dismiss(); }
+    void controlLongPress() override { dismiss(); }
+    void volumePress() override { dismiss(); }
+    void volumeLongPress() override { dismiss(); }
+    void doubleLongPress() override { dismiss(); }
 
     GreetingMode(): ESPMode{Mode::Greeting} {}
 private:
+
     void dismiss();
 
 }; // GreetingMode
+
+/** Synchronizes the player with the rest of the world. 
+ 
+    Attempts to connect to the WiFi and update time from NTP servers. If the walkie-talkie mode is enabled also checks any new telegram messages. The synchronization happens every day at the predefined hour *and* immediately after power on. 
+ */
+class SyncMode : public ESPMode {
+    friend class Player;
+public:
+    ESPMode * enter(ESPMode * prev) override;
+
+    SyncMode(): ESPMode{Mode::Sync} {}
+private:
+
+}; // SyncMode
+
+class ESPOffMode : public ESPMode {
+    friend class Player;
+public:
+    ESPMode * enter(ESPMode * prev) override;
+
+    ESPOffMode(): ESPMode{Mode::Sync} {}
+private:
+
+}; // ESPOffMode
 
 
