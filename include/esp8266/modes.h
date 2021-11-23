@@ -24,7 +24,7 @@ public:
 
     virtual void playbackFinished() {};
 
-    virtual void recordingFinished(uint32_t durationMs) {};
+    virtual void recordingFinished(uint32_t durationMs, uint8_t amplitude) {};
 
     virtual void controlDown() {};
     virtual void controlUp() {};
@@ -151,7 +151,7 @@ public:
     ESPMode * enter(ESPMode * prev) override;
 
     void playbackFinished() override;
-    void recordingFinished(uint32_t durationMs) override;
+    void recordingFinished(uint32_t durationMs, uint8_t amplitude) override;
 
     //void controlDown() override;
     //void controlPress() override;
@@ -207,7 +207,7 @@ public:
 
     void playbackFinished() override;
 
-    void recordingFinished(uint32_t durationMs) override;
+    void recordingFinished(uint32_t durationMs, uint8_t amplitude) override;
 
     void controlDown() override;
     void controlPress() override;

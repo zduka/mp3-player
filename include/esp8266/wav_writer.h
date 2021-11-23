@@ -8,7 +8,6 @@
  */
 class WavWriter {
 
-
 public:
     /** Opens given file on the SD card and prepares it for writing the pcm data. 
      
@@ -20,6 +19,9 @@ public:
         f_ = SD.open(filename, FILE_WRITE);
         if (f_) {
             f_.write(pointer_cast<uint8_t const*>(& Header_), sizeof(Header_));
+            min_ = 0xff;
+            max_ = 0;
+            d_ = 0; // TODO or start at delay?
             return true;
         } else {
             return false;
@@ -48,10 +50,40 @@ public:
     /** Adds given pcm byte to the file. 
      */
     void add(uint8_t pcm) {
+        if (min_ > pcm)
+            min_ = pcm;
+        if (max_ < pcm)
+            max_ = pcm;
+        if (pcm >= (CENTER + NOISE_FILTER_THRESHOLD) || pcm <= (CENTER - NOISE_FILTER_THRESHOLD)) 
+            d_ = NOISE_FILTER_DELAY;
+        else if (d_ == 0 || --d_ == 0)
+            pcm = CENTER;
         f_.write(pcm);
     }
 
+    uint8_t min() const {
+        return min_;
+    }
+
+    uint8_t max() const {
+        return max_;
+    }
+
+    uint8_t amplitude() const {
+        return max_ - min_;
+    }
+
 private:
+
+    /** The center value of the recording, i.e. the sound of absolute silence. 
+     */
+    static constexpr uint8_t CENTER = 128;
+
+    /** The minimal amplitude (distance between center and signal) to trigger actual recording. 
+     */
+    static constexpr uint8_t NOISE_FILTER_THRESHOLD = 5;
+
+    static constexpr uint8_t NOISE_FILTER_DELAY = 20;
 
     static inline uint8_t const Header_[] PROGMEM = { 
         0x52, 0x49, 0x46, 0x46, // RIFF
@@ -70,5 +102,8 @@ private:
     };
 
     File f_;
+    uint8_t min_;
+    uint8_t max_;
+    uint8_t d_;
 
 }; // WawWriter

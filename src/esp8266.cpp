@@ -660,11 +660,11 @@ private:
 
     static void stopRecording(bool cancel = false) {
         if (status_.recording) {
-            LOG("Recording %s", cancel ? "cancelled" : "done");
+            LOG("Recording %s, amplitude: %u", cancel ? "cancelled" : "done", recording_.amplitude());
             send(msg::StopRecording{});
             recording_.end();
             status_.recording = false;
-            currentMode_->recordingFinished(millis() - recordingStart_);
+            currentMode_->recordingFinished(millis() - recordingStart_, recording_.amplitude());
         }
     }
 
@@ -1417,7 +1417,7 @@ void DiscoMode::playbackFinished() {
     Player::setIdle(true);
 }
 
-void DiscoMode::recordingFinished(uint32_t durationMs) {
+void DiscoMode::recordingFinished(uint32_t durationMs, uint8_t amplitude) {
     if (durationMs < MIN_WALKIE_TALKIE_RECORDING) {
         LOG("Recording cancelled - too short");
         return;
@@ -1542,7 +1542,7 @@ void WalkieTalkieMode::playbackFinished() {
     }
 }
 
-void WalkieTalkieMode::recordingFinished(uint32_t durationMs) {
+void WalkieTalkieMode::recordingFinished(uint32_t durationMs, uint8_t amplitude) {
     if (durationMs < MIN_WALKIE_TALKIE_RECORDING) {
         LOG("Recording cancelled - too short");
         return;
