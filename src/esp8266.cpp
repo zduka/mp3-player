@@ -161,6 +161,8 @@ public:
         // enter the desired mode
         setMode(currentMode_);
         currentMode_->volumeTurn();
+        // greet the user with a battery gauge
+        send(msg::LightsBar{min(ex_.measurements.vcc, static_cast<uint16_t>(420)) - 340, 80, adjustBrightness(BINARY_CLOCK_BATTERY)});
     }
 
 
@@ -230,6 +232,7 @@ private:
         status_.radioEnabled = true;
         status_.discoEnabled = true;
         status_.lightsEnabled = true; 
+        status_.walkieTalkieEnabled = true;
         StaticJsonDocument<1024> json;
         File f = SD.open(SETTINGS_FILE, FILE_READ);
         if (f && deserializeJson(json, f) == DeserializationError::Ok) {
@@ -350,6 +353,7 @@ private:
     }
 
     static void sleep() {
+        LOG("sleep...");
         setBusy(true); // disable user controls
         send(msg::Sleep{});
     }
@@ -480,6 +484,8 @@ private:
     static inline WalkieTalkieMode walkieTalkieMode_;
     static inline AlarmMode alarmMode_;
     static inline GreetingMode greetingMode_;
+    static inline SyncMode syncMode_;
+    static inline ESPOffMode espOffMode_;
 
     /** The current mode. 
      */
@@ -522,6 +528,10 @@ private:
                 return & walkieTalkieMode_;
             case Mode::Alarm:
                 return & alarmMode_;
+            case Mode::Sync:
+                return & syncMode_;
+            case Mode::ESPOff:
+                return & espOffMode_;
             // as a fallback, always go to the mp3 mode
             default:
                 return & mp3Mode_;
@@ -586,6 +596,10 @@ private:
         wav_.begin(& mixer_, & i2s_);
     }
 
+    static bool wavPlayback() {
+        return wav_.isRunning();
+    }
+
     static void stopWAV() {
         if (wav_.isRunning()) {
             LOG("WAV stop");
@@ -647,13 +661,13 @@ private:
      */
     //@{
 
-    static void startRecording(char const * filename) {
+    static void startRecording(char const * filename, Color const & color) {
         if (status_.recording || ! recording_.begin(filename)) {
             ERROR("Unable to open recording target file (or already recording");
         } else {
             LOG("Recording...");
             status_.recording = true;
-            send(msg::StartRecording{});
+            send(msg::StartRecording{color});
             recordingStart_ = millis();
         }
     }
@@ -674,7 +688,7 @@ private:
         if (n == 33) {
             // add data to the output file
             for (uint8_t i = 0; i < 32; ++i)
-                recording_.add(Wire.read());
+                recording_.add((Wire.read() - 128) * RECORDING_GAIN + 128);
             // get the first bit of state (we can update our state with it)
             ((uint8_t*)(& state_))[0] = Wire.read();
             // if the volume button has been released or the message is too long, stop recording
@@ -1174,7 +1188,8 @@ void MP3Mode::controlPress() {
 void MP3Mode::controlTurn() {
     uint8_t trackId = Player::state_.controlValue();
     Player::send(msg::LightsPoint{trackId, static_cast<uint16_t>(playlists_[state().playlistId].numTracks - 1), adjustBrightness(MODE_COLOR_MP3)});
-    setTrack(trackId);
+    if (trackId != state().trackId)
+        setTrack(trackId);
     Player::setIdle(false);
 }
 
@@ -1409,12 +1424,13 @@ void RadioMode::setRadioStation(uint8_t index) {
 
 ESPMode * DiscoMode::enter(ESPMode * prev) {
     Player::state_.setMusicMode(MusicMode::Disco);
+    Player::setIdle(true, DEFAULT_PLAY_TIMEOUT); 
     return this;
 }
 
 void DiscoMode::playbackFinished() {
     Player::stopWAV();
-    Player::setIdle(true);
+    Player::setIdle(true, DEFAULT_PLAY_TIMEOUT); 
 }
 
 void DiscoMode::recordingFinished(uint32_t durationMs, uint8_t amplitude) {
@@ -1422,14 +1438,28 @@ void DiscoMode::recordingFinished(uint32_t durationMs, uint8_t amplitude) {
         LOG("Recording cancelled - too short");
         return;
     }
-    Player::setIdle(false);
-    Player::playWAV("aha.wav", RECORDING_FILE, 1);
+    // let's disco immediately
+    controlPress();
+}
+
+void DiscoMode::controlPress() {
+    if (Player::wavPlayback()) {
+        Player::stopWAV();
+        Player::setIdle(true, DEFAULT_PLAY_TIMEOUT);
+    } else {
+        Player::setIdle(false);
+        Player::playWAV("aha.wav", RECORDING_FILE, 1);
+    }
+}
+
+void DiscoMode::controlTurn() {
+    // TODO select background melody and play
 }
 
 void DiscoMode::volumeDown() {
     Player::stopPlayback();
     Player::setIdle(false);
-    Player::startRecording(RECORDING_FILE);
+    Player::startRecording(RECORDING_FILE, adjustBrightness(MODE_COLOR_DISCO));
 }
 
 void DiscoMode::volumeUp() {
@@ -1509,12 +1539,13 @@ LightsState & LightsMode::state() {
 ESPMode * WalkieTalkieMode::enter(ESPMode * prev) {
     Player::setControlRange(0, numMessages_);
     Player::connectWiFi();
-    Player::setIdle(true);
+    Player::setIdle(true, DEFAULT_PLAY_TIMEOUT); 
     return this;
 }
 
 void WalkieTalkieMode::leave(ESPMode * next) {
     Player::stopPlayback();
+    Player::disconnectWiFi();
 }
 
 void WalkieTalkieMode::loop(bool secondTick) {
@@ -1538,7 +1569,7 @@ void WalkieTalkieMode::playbackFinished() {
         playMessage(playingMessage_ - 1);
     } else {
         Player::stopWAV();
-        Player::setIdle(true);
+        Player::setIdle(true, DEFAULT_PLAY_TIMEOUT); 
     }
 }
 
@@ -1583,7 +1614,7 @@ void WalkieTalkieMode::volumeDown() {
     if (enabled()) {
         Player::stopPlayback();
         Player::setIdle(false);
-        Player::startRecording(RECORDING_FILE);
+        Player::startRecording(RECORDING_FILE, adjustBrightness(MODE_COLOR_WALKIE_TALKIE));
     }
 }
 
@@ -1639,11 +1670,6 @@ WalkieTalkieState & WalkieTalkieMode::state() {
 
 bool WalkieTalkieMode::enabled() {
     return Player::status_.walkieTalkieEnabled;
-}
-
-void WalkieTalkieMode::startRecording() {
-    Player::stopPlayback();
-    Player::startRecording(RECORDING_FILE);
 }
 
 void WalkieTalkieMode::playMessage(uint8_t offset) {

@@ -81,9 +81,9 @@ private:
 
     /** The minimal amplitude (distance between center and signal) to trigger actual recording. 
      */
-    static constexpr uint8_t NOISE_FILTER_THRESHOLD = 5;
+    static constexpr uint8_t NOISE_FILTER_THRESHOLD = 2;
 
-    static constexpr uint8_t NOISE_FILTER_DELAY = 20;
+    static constexpr uint8_t NOISE_FILTER_DELAY = 100;
 
     static inline uint8_t const Header_[] PROGMEM = { 
         0x52, 0x49, 0x46, 0x46, // RIFF

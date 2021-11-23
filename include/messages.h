@@ -186,7 +186,12 @@ namespace msg {
     /** \name Audio recording & monitoring
      */
     //@{
-    MESSAGE(StartRecording);
+    MESSAGE(StartRecording,
+        Color color;
+        StartRecording(Color const & color):
+            color{color} {
+        }
+    );
 
     MESSAGE(StopRecording);
     //@}

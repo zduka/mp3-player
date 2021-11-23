@@ -44,13 +44,15 @@ public:
 
 private:
 
+    static constexpr uint32_t WAV_HEADER_SIZE = 44;
+
     /** Applies the overlay to the data. 
      */
     void applyOverlay(uint8_t * data, uint32_t len) {
         while (true) {
             uint32_t avail = std::min(len, overlay_.size() - overlay_.position());
             for (uint32_t i = 0; i < avail; ++i) {
-                *data = static_cast<uint8_t>(((*data - 128) + (overlay_.read() - 128)) / 2);
+                *data = *data / 2 + (overlay_.read() / 2);
                 ++data;
             }
             len -= avail;
@@ -60,6 +62,5 @@ private:
         }
     }
 
-    static constexpr uint32_t WAV_HEADER_SIZE = 44;
     File overlay_;
 }; 

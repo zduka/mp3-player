@@ -153,9 +153,8 @@ public:
     void playbackFinished() override;
     void recordingFinished(uint32_t durationMs, uint8_t amplitude) override;
 
-    //void controlDown() override;
-    //void controlPress() override;
-    //void controlTurn() override;
+    void controlPress() override;
+    void controlTurn() override;
     void volumeDown() override;
     void volumeUp() override;
     // volume press and long press don't do anything as volume button only controls recording
@@ -227,8 +226,6 @@ private:
     WalkieTalkieState & state();
 
     bool enabled();
-
-    void startRecording();
 
     /** Plays the n-th latest message.
      */

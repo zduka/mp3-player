@@ -328,6 +328,7 @@ private:
             // turn off neopixels and esp
             peripheralPowerOff();
             // disable idle mode when sleeping, set mode to music, which is the default after waking up
+            status_.espBusy = false;
             state_.state.setIdle(false);
             state_.state.setMode(Mode::Music); 
             state_.state.setWiFiStatus(WiFiStatus::Off);
@@ -765,11 +766,7 @@ private:
                 return;
             // 
             case LightsEffect::AudioLights: {
-                if (! state_.state.idle()) {
-                    audioLightsTick(step);
-                } else {
-                    strip_.fill(Color::Black());
-                }
+                audioLightsTick(step);
                 return;
             }
             case LightsEffect::BinaryClock: {
@@ -1103,7 +1100,8 @@ private:
                 LOG("cmd SetIdle, timeout: %u", m->timeout);
                 state_.state.setIdle(m->idle);
                 if (state_.state.idle())
-                    stopAudioCapture();
+                    startAudioCapture(AudioADCSource::Mic);
+                    //stopAudioCapture();
                 else
                     startAudioCapture(AudioADCSource::Audio);
                 // reset the timeout countdown (argument in minutes, we are converting to seconds)
@@ -1164,17 +1162,17 @@ private:
                 break;
             }
             case msg::StartRecording::Id: {
+                auto m = pointer_cast<msg::StartRecording*>(& i2cRxBuffer_);
                 LOG("cmd StartRecording");
                 status_.recording = true;
                 startAudioCapture(AudioADCSource::Mic);
-                // set the effect color to mode color for the lights bar from microphone
-                effectColor_ = MODE_COLOR_WALKIE_TALKIE.withBrightness(maxBrightness_);
+                effectColor_ = m->color;
                 break;            
             }
             case msg::StopRecording::Id: {
                 LOG("cmd StopRecording");
                 status_.recording = false;
-                state_.state.setVolumeButtonDown(false);
+                //state_.state.setVolumeButtonDown(false);
                 stopAudioCapture();
                 break;
             }

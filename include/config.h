@@ -7,8 +7,8 @@
 
 /** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 
  */
-#define DEFAULT_IDLE_TIMEOUT 30
-#define DEFAULT_PLAY_TIMEOUT 60
+#define DEFAULT_IDLE_TIMEOUT 5
+#define DEFAULT_PLAY_TIMEOUT 30
 
 #define AVR_I2C_ADDRESS 67
 #define IRQ_RESPONSE_TIMEOUT 64
@@ -48,6 +48,8 @@
 /** If the walkie-talkie recording will be longer than this number of milliseconds, it will be automatically stopped and sent.
  */
 #define MAX_RECORDING_LENGTH 1000 * 30
+
+#define RECORDING_GAIN 8
 
 /** Timeout for connection in the sync mode in milliseconds. 
  */

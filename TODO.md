@@ -1,21 +1,20 @@
 # HW
 
-- check that I h ave all HW I need
+- check that I have all HW I need
 - buy stuff at GM (battery holder, extra speaker and extra card holder)
+
+# SW
+
+- check the default amplification on real settings
 
 # ATTiny
 
-- when idle, switch audio lights to microphone
-- add recording color selection
 - should notification light do stuff if we are in non music mode? 
 
 # ESP
 
 - format SD card if necessary (keep default basic settings in LittleFS)
-- check time
-- don't show volume bar when powering on / headphones change
-- check silence reduction for recording
-- add amplification to recorded sounds to both replay & bot
+- check time, greeting, stuff
 
 # Disco Mode
 
