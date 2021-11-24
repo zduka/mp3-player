@@ -321,8 +321,8 @@ public:
      
         Values from 0 to 63 (inclusive) are supported.
      */
-    uint16_t volumeValue() const {
-        return (knobValues_ & VOLUME_KNOB_MASK) >> 10;
+    uint8_t volumeValue() const {
+        return static_cast<uint8_t>((knobValues_ & VOLUME_KNOB_MASK) >> 10);
     }
 
     void setVolumeValue(uint16_t value) volatile {

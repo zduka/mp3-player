@@ -856,6 +856,7 @@ private:
             neopixels_.showBarCentered(tickCountdown_ % 128, 128, Color::Blue().withBrightness(maxBrightness_));
         } else {
             bool draw = state_.state.charging() 
+                       || (state_.state.mode() == Mode::Lights)
                        || (state_.ex.measurements.vcc < BATTERY_LOW_VCC)
                        || (state_.state.wifiStatus() != WiFiStatus::Off)
                        || (! state_.ex.walkieTalkie.isEmpty());
@@ -875,6 +876,9 @@ private:
                 case 16:
                 case 17:
                 case 18:
+                    if (state_.state.mode() == Mode::Lights)
+                        neopixels_[0] = MODE_COLOR_LIGHTS.withBrightness(maxBrightness_);
+                    break;
                 case 48:
                 case 49:
                 case 50:

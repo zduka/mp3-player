@@ -9,7 +9,8 @@
 
 # ATTiny
 
-- should notification light do stuff if we are in non music mode? 
+- stars effect
+- better clock? (bars instead of binary?)
 
 # ESP
 

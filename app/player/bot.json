@@ -1,6 +1,6 @@
 {
   id: 0
-  token: "WRITE_YOUR_OWN",
+  token: "",
   adminId: 0,
   chatId: 0,
   fingerprint: ""

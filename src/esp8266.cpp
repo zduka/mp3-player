@@ -162,7 +162,7 @@ public:
         setMode(currentMode_);
         currentMode_->volumeTurn();
         // greet the user with a battery gauge
-        send(msg::LightsBar{min(ex_.measurements.vcc, static_cast<uint16_t>(420)) - 340, 80, adjustBrightness(BINARY_CLOCK_BATTERY)});
+        send(msg::LightsBar{static_cast<uint16_t>(min(ex_.measurements.vcc, static_cast<uint16_t>(420)) - 340), 80, adjustBrightness(BINARY_CLOCK_BATTERY)});
     }
 
 
@@ -246,6 +246,51 @@ private:
             status_.syncHour = json["syncHour"];
             f.close();
         }
+    }
+
+    static void formatCard(bool force = false) {
+        setBusy(true);
+        SD.mkdir("1");
+        SD.mkdir("2");
+        SD.mkdir("3");
+        SD.mkdir("4");
+        SD.mkdir("5");
+        SD.mkdir("6");
+        SD.mkdir("7");
+        SD.mkdir("8");
+        SD.mkdir("player");
+        SD.mkdir("wt");
+        littleFsToSD("player/alarm.json", "player/alarm.json", force);
+        littleFsToSD("player/bot.json", "player/bot.json", force);
+        littleFsToSD("player/cert.txt", "player/cert.txt", force);
+        littleFsToSD("player/greeting.json", "player/greeting.json", force);
+        littleFsToSD("player/playlists.json", "player/playlists.json", force);
+        littleFsToSD("player/radio.json", "player/radio.json", force);
+        littleFsToSD("player/settings.json", "player/settings.json", force);
+        littleFsToSD("player/wifi.json", "player/wifi.json", force);
+        setBusy(false);
+    }
+
+    /** Copies a single file from littlefs to SD card. 
+     */
+    static void littleFsToSD(char const * source, char const * dest, bool force = false) {
+        if (SD.exists(dest)) {
+            if (force)
+                SD.remove(dest);
+            else
+                return;
+        }
+        File src = LittleFS.open(source, "r");
+        File dst = SD.open(dest, FILE_WRITE);
+        uint8_t buffer[256];
+        while (true) {
+            int n = src.read(buffer, sizeof(buffer));
+            if (n == 0)
+                break;
+            dst.write(buffer, n);
+        }
+        src.close();
+        dst.close();
     }
 
     /** \name Main loop and timekeeping. 
@@ -414,7 +459,7 @@ private:
                 LOG("mode: %u", static_cast<uint8_t>(state_.mode()));
                 setMode(getModeFor(state_.mode(), state_.musicMode()));
             }
-            if (state_.controlButtonDown() != old.controlButtonDown())
+            if (state_.controlButtonDown() != old.controlButtonDown()) {
                 if (state_.controlButtonDown()) {
                     LOG("ctrl down");
                     currentMode_->controlDown();
@@ -422,6 +467,7 @@ private:
                     LOG("ctrl up");
                     currentMode_->controlUp();
                 }
+            }
             if (state_.controlButtonPress()) {
                 LOG("ctrl press");
                 currentMode_->controlPress();
@@ -434,7 +480,7 @@ private:
                 LOG("ctrl: %u", state_.controlValue());
                 currentMode_->controlTurn();
             }
-            if (state_.volumeButtonDown() != old.volumeButtonDown())
+            if (state_.volumeButtonDown() != old.volumeButtonDown()) {
                 if (state_.volumeButtonDown()) {
                     LOG("vol down");
                     currentMode_->volumeDown();
@@ -442,6 +488,7 @@ private:
                     LOG("vol up");
                     currentMode_->volumeUp();
                 }
+            }
             if (state_.volumeButtonPress()) {
                 LOG("vol press");
                 currentMode_->volumePress();
@@ -494,7 +541,6 @@ private:
     /** Sets the new mode. 
      */
     static void setMode(ESPMode * newMode) {
-        MusicMode old = state_.musicMode();
         do {
             if (currentMode_ != nullptr)
                 currentMode_->leave(newMode);
@@ -936,6 +982,9 @@ private:
             alarmMode_.initialize();
             sendExtendedState(ex_.alarm);
             return httpAlarm();
+        } else if (cmd == "format") {
+            LOG("formatting the sd card");
+            formatCard(server_.hasArg("force"));
         } else {
             LOG("http invalid command: %s", cmd.c_str());
             return server_.send(404, GENERIC_MIME, "{response: 404}");
@@ -1296,9 +1345,6 @@ void MP3Mode::setTrack(uint16_t index) {
                     f.close();
                     LOG("Track %u, file: %s", index, filename);
                     Player::playMP3(filename);
-                    //audioFile_.open(filename);
-                    //i2s_.SetGain(static_cast<float>(state_.volumeValue() + 1) / 16);
-                    //mp3_.begin(& audioFile_, & i2s_);
                     state().trackId = index;
                     Player::sendExtendedState(state());
                     return;
@@ -1603,7 +1649,7 @@ void WalkieTalkieMode::controlPress() {
 void WalkieTalkieMode::controlTurn() {
     // if not empty, then the new messages must be played first via normal CTRL press
     if (enabled() && state().isEmpty()) {
-        Player::send(msg::LightsPoint{Player::state_.controlValue(), static_cast<uint16_t>(numMessages_) - 1, adjustBrightness(MODE_COLOR_WALKIE_TALKIE)});
+        Player::send(msg::LightsPoint{Player::state_.controlValue(), static_cast<uint16_t>(numMessages_ - 1), adjustBrightness(MODE_COLOR_WALKIE_TALKIE)});
         // play from the updated value
         Player::setIdle(false);
         play();
