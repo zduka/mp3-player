@@ -28,6 +28,28 @@ function showSuccess(message) {
     showMessage(message, "success");
 }
 
+// Status update
+
+/** Reads the status from the player and displays it 
+ */
+function getStatus() {
+    $('#panel-status').show();
+    $('#panel-status-updating').text("updating");
+    $('#panel-status-updating').show();
+    // vcc temp mem charging batt headphones maxLoopTime ssid rssi ap
+    /*
+    $.getJSON("status", function(data) {
+        $('#panel-status-updating').hide();
+
+    });
+    */
+}
+
+/** Reads the settinsg from the player and displays them.
+ */
+function getSettings() {
+
+}
 
 
 
@@ -52,8 +74,13 @@ function mp3Upload() {
     reader.readAsArrayBuffer(f);    
 }
 
+/** Called when the whole page has been loaded from ESP. Note that this may take some time.
+ */
 $( document ).ready(function() {
-    $('#mp3-uploader').change(mp3Upload)
-    console.log( "ready!" );
+    $('#alertsSpace').empty(); // clear the please wait message
+    getStatus();
+        //showMessage("Ready");
+    //$('#mp3-uploader').change(mp3Upload)
+    //console.log( "ready!" );
 });
 

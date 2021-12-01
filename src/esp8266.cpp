@@ -1004,7 +1004,10 @@ private:
         "charging:%u,"
         "batt:%u,"
         "headphones:%u,"
-        "maxLoopTime:%u"
+        "maxLoopTime:%u,"
+        "ssid:\"%s\","
+        "rssi:%i,"
+        "ap:%u"
         "}"),
         ex_.measurements.vcc,
         ex_.measurements.temp,
@@ -1012,7 +1015,10 @@ private:
         state_.charging() ? 1 : 0,
         state_.batteryMode() ? 1 : 0,
         state_.headphonesConnected() ? 1 : 0,
-        maxLoopTime_
+        maxLoopTime_,
+        // TODO
+        WiFi.RSSI(),
+        state_.wifiStatus() == WiFiStatus::AP ? 1 : 0
         );
         server_.send(200, JSON_MIME, buf, len);
     }

@@ -23,6 +23,14 @@
             display:inline-block;
         }
 
+        .status-value {
+            font-weight: normal;
+        }
+
+        .btn-right {
+            text-align:right;
+        }
+
     </style>
   </head>
 
@@ -60,24 +68,36 @@
         <!-- The generated alerts go here -->
 
         <div id="alertsSpace">
+            <p style="text-align:center">Please wait...</p>
         </div>
 
         <!-- The default page that shows the status information, volume and general settings information with commands -->
 
-        <div class="panel panel-default">
+        <div id="panel-status" class="panel panel-default" style="display:none">
             <div class="panel-heading">
-                <h3 class="panel-title">Status</h3>
+                <h3 class="panel-title">Status <div id="panel-status-updating" class="badge">updating</div></h3>
             </div>
             <div class="panel-body">
-                Battery level: 56% (3.56V) <br/>
-                WiFi: network name, rssi: 56 <span class="badge">AP</span><br/>
-                Play: 1/foobar.mp3 <span class="badge">mp3</span>
+                <form class="form-horizontal">
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Battery</label>
+                        <label class="control-label status-value"> 56% (3.56V) </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">WiFi</label>
+                        <label class="control-label status-value"> network name, rssi : 56, AP</label>
+                    </div>
+                </form>
             </div>
         </div>
 
         <div class="panel panel-default">
-            <div class="panel-heading">
-                <h3 class="panel-title">Settings</h3>
+            <div class="panel-heading clearfix bg-secondary">
+                <h3 class="panel-title col-sm-11">
+                    Settings
+                    <button type="button" class="btn" style="visibility:hidden">&nbsp;</button>
+                </h3>
+                <button type="button" class="btn btn-danger col-sm-1">Save</button>
             </div>
             <div class="panel-body">
                 <form class="form-horizontal">

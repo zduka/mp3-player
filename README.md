@@ -2,172 +2,65 @@
 
 A simple and pretty low quality mp3 player, fm radio and a walkie-talkie with some extra features. With stereo headphones (where supported) and a single even lower quality speaker in the box. MP3 files are stored on an SD card, powered by a single Li-Ion 18650 cell, with USB-C port for charging (power only). 
 
-The player can be controlled via two push-button knobs and more advanced settings can be specified via either the player's webpage, or the telegram bot used for the walkie-talkie mode. 
+The player can be controlled via two push-button knobs and more advanced settings can be specified via either the player's webpage.
 
-# Hardware
+For a "user manual" see the documentation, this readme is for technical information only. 
+
+# Software
+
+The player uses 2 MCUs - ATTiny and ESP8266. ESP acts as the main controller, while ATTiny takes care of power management and peripherals. Communication between the chips is done via I2C bus. ATTiny and the LED strip runs directly off the battery voltage, while a SMPS to 3v3 provides power for the audio output and the ESP8266. 
+
+In sleep mode, only the ATTiny and input buttons circuitry is powered and ATTiny is in sleep mode, waking up each second for timekeeping. 
+
+> When flashing the ESP chip, make sure power won't be terminated by ATTiny in the middle of the transaction by shorting the 3V3 jumper wire on the pcb. To perform a full reflash of both chips, start with ESP8266, when done don't reset it and flash AtTiny immediately. When AtTiny is done, it will reset (power on) the ESP as well. 
+
+# Hardware & Assembly Guide
+
+
+## Assembly Guide
+
+> This is also heavily dependent on how tight you are with the parts and how great your soldering skills are. I was tight with parts and my soldering skills are very limited:)
+
+### Enclosure
+
+Glue together the upper part and the bottom corners. Make sure to insert the screw nuts in the appropriate places and glue them. Glue the bottom, left and right plates. Sand and paint the finished middle frame. 
+
+Glue the bottom part of the front plate. Then glue in the translucent plastic strip with epoxy and the top front plate.
 
 ### USB-C Li-Ion charger
 
-Desolder both LEDs and then put a 10k resistor (1206 is fine) instead of the charging LED (red, closer to the USB connector). Connect the charging pin to the connector closer to the connector. Desolder R3 and replace it with ??? resistor (through hole) directly from GND to terminal 2 of TP4056 to set charging current to ???.
+Desolder both LEDs and then put a 10k resistor (1206 is fine) instead of the charging LED (red, closer to the USB connector). Connect the charging pin to the connector closer to the connector. Desolder R3 and replace it with 2k7 resistor (through hole) directly from GND to terminal 2 of TP4056 to lower the charging current. Desolder the LEDs and replace the one closer to the USB-C connector with a 10k resistor (this will be a pull-up for the charging sense). 
 
-### Assembly Order
+Attach wires (+5V USB, +, -, charging and long connectors to the battery). When fitted in the enclosure, solder the ends to the battery holder. The battery holder is reversed so that it does not have to be glued and the wires won't obstruct the translucent LED strip below. 
 
+### LED Strip
 
+The LED strip consists of 8 neopixel-style LEDs soldered together. Then glue the strip in place. Make sure the glue does not obstruct the screw mountholes. 
 
-# Controls & Modes
+### Main PCB
 
-## MP3 Player & FM Radio
+Take the 3v3 SMPS a saw off the mounthole bit and lower part of connector holes to make it castellated. Then solder the regulator, all the ICs (w/o radio and ESP8266), the MOSFETs (2x), diode and inductors. Solder the 3v3 enable header and debug header. Power on via the power connector, check first that ATTiny has power and that power levels are good and power consuption is small. Then short the 3v3 header to enable 3v3 via SMPS and check the voltage and current draw. 
 
-CONTROL long press switches between these two. CONTROL short press cycles through playlists (mp3) or preset radio stations (radio). CONTROL turn selects track within a playlist (mp3) or manual frequency selection (radio). VOLUME press is play/pause, VOLUME turn is volume. 
+Solder the capacitor for neopixels strip isolation, attach neopixels, and flash ATTiny with the neopixel test (`-DTEST_NEOPIXEL`). The pixels should flash.
 
-VOLUME long press goes to lights settings. Both keys long press turns on the WiFi and goes to the walkie-talkie mode. 
+Solder the remaining audio path (resistors and caps) and the radio module. Then solder the 3v3 isolation capacitors. Power on and flash ATTiny with `-DTEST_RADIO`. Attach a speaker or headphones and run. Radio should start playing (you might need to change the station frequency if you want to hear stuff). 
 
-## Walkie-Talkie & Webserver
+Solder everything else on the main board, but not the control knobs. Flash ATTiny and ESP8266 with the normal code, add empty SD card and power on. A welcome MP3 should play. 
 
-CONTROL long press or both keys returns to the music mode.  
+Put the knobs in (don't solder yet), and put the whole PCB in the enclosure, attach with screws. Use hard paper strips to center the knobs in the front panel holes properly and when secured, solder the knobs. Check that everything works mechanically.
 
-CONTROL press plays / stops the playback of the last recorded message, while CONTROL turn allows selecting older messages, if any. 
+Solder the microphone board. First the IC, then all SMT parts and finally the microphone. Solder long headers, put these through the holes in pain pcb  board and when the distance is proper, solder them to the main PCB Board as well. 
 
-VOLUME turn is volume, VOLUME down is start recording, VOLUME up then stops recording and sends the audio file. 
+Solder the antenna wire. 
 
-## Lights Settings
+### Final Assembly
 
-CONTROL press switches between light effects, CONTROL turn sets the color of the effect (either hue, or cycle through hues). VOLUME press is play/pause of the underlying mode (mp3 or radio). VOLUME turn is still volume. VOLUME long press or CONTROL long press returns to the previous mode (mp3 or radio). 
+Attach the speaker and slide the PCB with knobs on in the enclosure, attching the neopixels while doing so. Fix with all screws. Secure the power connector. Cover the blue ESP8266 diode. Attach the backplate.
 
+## Main PCB Description
 
-The two rotary encoders are called CONTROL (top) and VOLUME (down).
 
-CONTROL long press switches between mp3 and radio mode. 
 
-VOLUME long press enters the night light settings mode
-
-## Setup & Build
-
-`platform.io` is used by both targets. In visual studio, install the platform.io IDE plugin and then simply open the folder.
-
-To be able to program & use the serial monitor, run the following and then restart:
-
-    sudo adduser YOUR_USER dialout
-
-To be able to upload to ATTiny via UPDI, run the following:
-
-    sudo pip install https://github.com/mraardvark/pyupdi/archive/master.zip
-
-Tested on ubuntu 20.04. 
-
-## SD Card
-
-### Player settings
-
-These exist in the `player` folder and consist of the following files:
-
-`player/networks.txt` 
-
-Contains wifi networks and passwords the player will try to connect to when wifi is on. Each network occupies two lines, first line is network name, second line is network password. Leave the line blank for public networks:
-
-    NetworkName1
-    Passphrase1
-    NetworkName2
-    Passphrase2
-
-When WiFi is activated, the networs are tried in order, first successful network on the list will be used. 
-
-`player/ap.txt`
-
-Contains the SSID and password, each on separate line for the access point the player will create if none of the networks in the `wifi.txt` file can be found:
-
-    PlayerAPSSID
-    PlayerAPPassword
-
-### Playlists
-
-The SD card contains the following files:
-
-
-### Radio Settingss
-
-`radio/stations.txt`
-
-Contains up to 8 predefined radio stations, one station per line. The line always starts with the station's frequency `[Mhzx10]`, followed by optional space and name of the station:
-
-    1021 First Station 102.1 Mhz
-    950 Second Station
-
-### Walkie-Talkie
-
-    \setprivacy
-    bot name
-    disable
-
-The walkie-talkie uses an unique telegram bot that must be assigned to each player. Its configuration files cover the bot identification and a list of telegram chat ids the player will react & send voice to:
-
-`bot/token.txt`
-
-This file contains the telegram bot identification on 2 lines with an optional certificate fingerprint of telegram's servers on line 3. First line contains the bot's id and token separated by `:` as reported by Telegram's bot creation API. The second line contains the chat_id from which commands to the player bot can be sent. The last line may contain the fingerprint for the HTTPS connection, or be left empty for bypassing the check (not secure, use at own risk):
-
-    123456789:AGDHDBDGhsg837498
-    674512
-    CF 05 98 89 CA FF 8E D8 5E 5C E0 C2 E4 F7 E6
-
-`bot/chats.txt`
-
-Contains up to 8 chat ids that the player can communicate with. Each chat has three elements: the chat id, the color used when playing/recording and the textual description for the ui:
-
-    -635437 0000ff The family
-    674512 ff0000 Admin
-
-## Basic Design
-
-The player contains two chips, ATTiny3216 and ESP8266:
-
-- the ATTiny is responsible for power management, user input events, microphone and persisting state
-- esp is responsible for playing music, controlling the radio, web access, and the other higher level functions
-
-### ATTiny
-
-
-### ESP
-
-
-The attiny is responsible for the controls and device status maintenance (rtc, charging, I/O operations, such as switching audio source, detecting headphones, etc.). The ESP is responsible for actual playback (i.e. the mp3 songs from the SD card a)
-
-## Controls
-
-The player uses two rotary encoders with integrated buttons as the only physical controllers. The buttons support a short press and a long press, which is indicated on the led strip.
-
-To turn the player on, a long press of either control, or volume is required.
-
-> TODO should there be a lock mode where this does not work and some less accidental power on sequence will be used for travel, etc.?
-
-The player can be in three modes - mp3 player, fm radio, and web interface. To change between the mp3 and fm radio modes, long press the control button.
-
-> TODO How to enter the web interface mode? just long press both, or something more elaborate?
-
-The volume controller always controls the audio volume and its press toggles play/pause(mute).
-
-The control has different meaning based on the current mode. In the radio mode, short press triggers station presets, or manual tuning (if allowed). Turns then either change frequency, or present station. In the mp3 mode, 
-
-- long volume press turns the lights on/off? adds color, and so on?
-
-Control: controls which mp3 track, or radion station will be played, switches between mp3 and radio modes.
-
-Volume: controls the volume and play/pause. 
-
-A lot more can be configured via the web interface.
-
-
-## TODO
-
-
-- repeat modes for mp3
-- some mp3 files take time to load and make avr reset esp, see why?
-- extra settings, such as time limited volume, radio, 
-
-
-## AVR
-
-- runs off the battery directly, i.e. can go as low as (2.6V), and as high as input (5V)
-- this means that neopixel and rx pin must be level shifted - do they at 3.4V which is the lowest we go? 
 
 ## ESP8266 Core
 
@@ -183,10 +76,6 @@ Use old bootstrap because it is smaller
 
 https://getbootstrap.com/docs/3.4/customize/
 
-
-MP3 encoder - maybe
-
-https://github.com/zhuker/lamejs
 
 Bootstrap code must be updated to look for fonts in "." and then change the filenames so that they are short enouygh for littlefs (glyphicons.woff2)
 

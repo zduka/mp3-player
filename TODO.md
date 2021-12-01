@@ -1,7 +1,8 @@
 # HW
 
-- check that I have all HW I need
-- buy stuff at GM (battery holder, extra speaker and extra card holder)
+- buy 470nF 1206 caps
+- buy flux
+- enlarge bypass capacitor pads
 
 # SW
 
@@ -15,7 +16,9 @@
 # ESP
 
 - format SD card if necessary (keep default basic settings in LittleFS)
+- add an introduction mp3 to be copied to first playlist upon boot
 - check time, greeting, stuff
+- add mp3 repeat mode
 
 # Disco Mode
 
