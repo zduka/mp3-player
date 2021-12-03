@@ -2,7 +2,7 @@
 #include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
+//#include <ESP8266mDNS.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <LittleFS.h>
@@ -155,8 +155,8 @@ public:
         setIdle(false);
         // set the current mode
         currentMode_ = getModeFor(state_.mode(), state_.musicMode());
-        // start with the greering mode, if not resetting the esp
-        if (! state_.espReset())
+        // start with the greering mode, if not resetting the esp, or synchronizing
+        if (! state_.espReset() && currentMode_ != & syncMode_)
             currentMode_ = & greetingMode_;
         // enter the desired mode
         setMode(currentMode_);
@@ -211,7 +211,8 @@ private:
             }
             LOG("  volume type: FAT%u", SD.fatType());
             LOG("  volume size: %u [MB]",  (static_cast<uint32_t>(SD.totalClusters()) * SD.clusterSize() / 1000000));
-            SD.mkdir("wt");
+            if (!SD.exists("player"))
+                formatCard();
             return true;
         } else {
             LOG("Error reading from SD card");
@@ -248,7 +249,10 @@ private:
         }
     }
 
+    /** Does not really format, just creates the necessary structure for the player to work and preloads the I am empty mp3 file. 
+     */
     static void formatCard(bool force = false) {
+        LOG("formatting SD card - all data will be lost!");
         setBusy(true);
         SD.mkdir("1");
         SD.mkdir("2");
@@ -268,12 +272,14 @@ private:
         littleFsToSD("player/radio.json", "player/radio.json", force);
         littleFsToSD("player/settings.json", "player/settings.json", force);
         littleFsToSD("player/wifi.json", "player/wifi.json", force);
+        littleFsToSD("player/empty.mp3", "1/empty.mp3", force);
         setBusy(false);
     }
 
     /** Copies a single file from littlefs to SD card. 
      */
     static void littleFsToSD(char const * source, char const * dest, bool force = false) {
+        LOG("Copying %s to %s", source, dest);
         if (SD.exists(dest)) {
             if (force)
                 SD.remove(dest);
@@ -317,9 +323,8 @@ public:
         // if connected to the internet, handle the server & mcast dns (http://mp3-player.local)
         if (state_.wifiStatus() == WiFiStatus::Connected || state_.wifiStatus() == WiFiStatus::AP) {
             server_.handleClient();
-            MDNS.update();
+            //MDNS.update();
         }
-        // TODO check time every hour
     }
 
     static DateTime const & time() {
@@ -925,8 +930,8 @@ private:
 
     static void initializeServer() {
         LOG("Initializing WebServer...");
-        if (!MDNS.begin("mp3-player"))
-            LOG("  mDNS failed to initialize");
+        //if (!MDNS.begin("mp3-player"))
+        //    LOG("  mDNS failed to initialize");
         server_.onNotFound(http404);
         server_.serveStatic("/", LittleFS, "/index.html");
         server_.serveStatic("/app.js", LittleFS, "/app.js");
@@ -982,6 +987,11 @@ private:
             alarmMode_.initialize();
             sendExtendedState(ex_.alarm);
             return httpAlarm();
+        } else if (cmd == "sync") {
+            LOG("running sync");
+            updateNTPTime();
+            if (walkieTalkieMode_.enabled())
+                walkieTalkieMode_.checkBotMessages();
         } else if (cmd == "format") {
             LOG("formatting the sd card");
             formatCard(server_.hasArg("force"));
@@ -1005,7 +1015,6 @@ private:
         "batt:%u,"
         "headphones:%u,"
         "maxLoopTime:%u,"
-        "ssid:\"%s\","
         "rssi:%i,"
         "ap:%u"
         "}"),
@@ -1016,7 +1025,6 @@ private:
         state_.batteryMode() ? 1 : 0,
         state_.headphonesConnected() ? 1 : 0,
         maxLoopTime_,
-        // TODO
         WiFi.RSSI(),
         state_.wifiStatus() == WiFiStatus::AP ? 1 : 0
         );
@@ -1477,6 +1485,7 @@ void RadioMode::setRadioStation(uint8_t index) {
 ESPMode * DiscoMode::enter(ESPMode * prev) {
     Player::state_.setMusicMode(MusicMode::Disco);
     Player::setIdle(true, DEFAULT_PLAY_TIMEOUT); 
+    Player::setControlRange(state().playbackId, numPlaybacks_);
     return this;
 }
 
@@ -1517,6 +1526,14 @@ void DiscoMode::volumeDown() {
 void DiscoMode::volumeUp() {
     if (Player::recording())
         Player::stopRecording();
+}
+
+void DiscoMode::initialize() {
+    // TODO
+}
+
+DiscoState & DiscoMode::state() {
+    return Player::ex_.disco;
 }
 
 // LightsMode -------------------------------------------------------------------------------------------------------

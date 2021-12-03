@@ -438,6 +438,20 @@ public:
 
 static_assert(sizeof(WalkieTalkieState) == 2);
 
+/** For disco we only need to remember the playback id. 
+ */
+class DiscoState {
+public:
+    uint8_t playbackId = 0;
+
+    void log() const {
+        LOG("DIsco playback id: %u", playbackId);
+    }
+
+} __attribute__((packed)); // DiscoState
+
+static_assert(sizeof(DiscoState) == 1);
+
 /** The various night light effects the player supports. 
  */
 enum class LightsEffect : uint8_t {
@@ -480,6 +494,7 @@ public:
     MP3State mp3;
     RadioState radio;
     WalkieTalkieState walkieTalkie;
+    DiscoState disco;
     LightsState lights;
     DateTime time;
     Alarm alarm;
@@ -488,13 +503,14 @@ public:
         measurements.log();
         mp3.log();
         radio.log();
+        disco.log();
         walkieTalkie.log();
         lights.log();
     }
 
 } __attribute__((packed)); // ExtendedState
 
-static_assert(sizeof(ExtendedState) == 21);
+static_assert(sizeof(ExtendedState) == 22);
 
 /** Returns the next music mode. 
  

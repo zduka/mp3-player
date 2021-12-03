@@ -11,6 +11,10 @@
 
     <title>MP3 Player</title>
 
+    <style>
+        
+    </style>
+
     <link href="bootstrap.min.css" rel="stylesheet">
 
     <style>
@@ -81,11 +85,20 @@
                 <form class="form-horizontal">
                     <div class="form-group">
                         <label class="col-sm-2 control-label">Battery</label>
-                        <label class="control-label status-value"> 56% (3.56V) </label>
+                        <label class="control-label status-value" id="status-battery"> 56% (3.56V) </label>
                     </div>
                     <div class="form-group">
                         <label class="col-sm-2 control-label">WiFi</label>
-                        <label class="control-label status-value"> network name, rssi : 56, AP</label>
+                        <label class="control-label status-value" id="status-wifi"> network name, rssi : 56, AP</label>
+                        <div id="panel-status-ap" class="badge">AP</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Temp</label>
+                        <label class="control-label status-value" id="status-temp"> 27 C </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="col-sm-2 control-label">Utilisation</label>
+                        <label class="control-label status-value" id="status-health"> 4567 free mem, 67 ms max loop time </label>
                     </div>
                 </form>
             </div>

@@ -163,6 +163,15 @@ public:
 
     DiscoMode(): ESPMode{Mode::Music} {}
 
+    /** Look at all files in the disco folder so that we know how many backgrounds we have.
+     */ 
+    void initialize();
+
+private:
+
+    DiscoState & state();
+
+    uint8_t numPlaybacks_ = 0;
 }; // DiscoMode
 
 class LightsMode : public ESPMode {
@@ -176,6 +185,7 @@ public:
     void volumeTurn() override;
 
     LightsMode(): ESPMode{Mode::Lights} {}
+
 
 private:
 

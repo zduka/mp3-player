@@ -106,9 +106,9 @@ uint8_t x = 0;
 
 void setup() {
     pinMode(DCDC_PWR, OUTPUT);
-    digitalWrite(DCDC_PWR, LOW);
+    digitalWrite(DCDC_PWR, DCDC_PWR_ON);
     pinMode(AUDIO_SRC, OUTPUT);
-    digitalWrite(AUDIO_SRC, LOW);
+    digitalWrite(AUDIO_SRC, AUDIO_SRC_RADIO);
     //pinMode(HEADPHONES, OUTPUT);
     //digitalWrite(HEADPHONES, LOW);
     delay(50);
@@ -117,7 +117,7 @@ void setup() {
     delay(50);
     radio.setMono(true);
     delay(50);
-    radio.setVolume(15);
+    radio.setVolume(1);
     delay(50);
     radio.setBandFrequency(RADIO_BAND_FM, 9370);
 }
@@ -306,7 +306,7 @@ private:
 
     static void secondTick() {
         state_.ex.time.secondTick();
-        if (state_.ex.time.hour() == syncHour_ && state_.ex.time.minute() == 50 && state_.ex.time.second() == 0) {
+        if (state_.ex.time.hour() == syncHour_  && state_.ex.time.minute() == 0 && state_.ex.time.second() == 0) {
             status_.sync = true;
             status_.sleeping = false;
         } else if (state_.ex.alarm == state_.ex.time) {

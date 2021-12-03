@@ -32,17 +32,21 @@ function showSuccess(message) {
 
 /** Reads the status from the player and displays it 
  */
-function getStatus() {
+function getStatus(update = false) {
     $('#panel-status').show();
     $('#panel-status-updating').text("updating");
     $('#panel-status-updating').show();
     // vcc temp mem charging batt headphones maxLoopTime ssid rssi ap
-    /*
     $.getJSON("status", function(data) {
         $('#panel-status-updating').hide();
-
+        $('#status-battery').text(data.vcc + "% ("+ data.vcc + "V)");
+        $('#status-wifi').text(data.rssi + " rssi"); // rssi, ap
+        $("#status-temp").text("56 C"); // temp
+        $("#status-health").text("67 free mem, 67 ms max loop time"); // mem, maxLoopTime
+        // update status again in 10 seconds
+        if (update)
+            setTimeout(getStatus, 10000);
     });
-    */
 }
 
 /** Reads the settinsg from the player and displays them.

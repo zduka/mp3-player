@@ -4,6 +4,10 @@
 - buy flux
 - enlarge bypass capacitor pads
 
+# Webserver
+
+Remove bootstrap and other stuff to make it as simple as possible
+
 # SW
 
 - check the default amplification on real settings
@@ -15,10 +19,8 @@
 
 # ESP
 
-- format SD card if necessary (keep default basic settings in LittleFS)
-- add an introduction mp3 to be copied to first playlist upon boot
-- check time, greeting, stuff
-- add mp3 repeat mode
+- time settings seem to be a bit off in sync mode
+- check greeting
 
 # Disco Mode
 
