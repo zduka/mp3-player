@@ -197,13 +197,39 @@ NAV {
 
     </style>
 
-
-
     <script>
+
+/** Returns element of given id. 
+ */
+function e(ident) {
+    return document.getElementById(ident);
+}
+
+/** Returns json obtained from given url. 
+ */
+function getJSON(url, callback) {
+    let req = new XMLHttpRequest();
+    req.open("GET", url);
+    req.setRequestHeader("Accept", "application/json");
+    req.onload = function () {
+        callback(JSON.parse(req.responseText), null);
+    };
+    // TODO error
+    req.send();
+}
+
+function updateStatus(timeout) {
+
+}
+
+function onLoad() {
+    
+}
+
 
     </script>
   </head>
-  <body>
+  <body onload="onLoad()">
     <div class="navbar-spacer"></div>
     <nav>
         <div class="navbar">
