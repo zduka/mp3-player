@@ -6,7 +6,9 @@
 
 # Webserver
 
-Remove bootstrap and other stuff to make it as simple as possible
+- add ls
+- expert mode really
+- add authentication, at least rudimentary
 
 # SW
 
@@ -20,7 +22,9 @@ Remove bootstrap and other stuff to make it as simple as possible
 # ESP
 
 - time settings seem to be a bit off in sync mode
+- timer should be simpler no need to the json nonsense
 - check greeting
+- change SD card defaults to use "" in JSON
 
 # Disco Mode
 

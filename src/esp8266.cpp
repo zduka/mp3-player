@@ -933,13 +933,15 @@ private:
         //if (!MDNS.begin("mp3-player"))
         //    LOG("  mDNS failed to initialize");
         server_.onNotFound(http404);
-        server_.serveStatic("/", LittleFS, "/index.html");
+        server_.serveStatic("/", LittleFS, "/index-dev.html");
+        /*
         server_.serveStatic("/app.js", LittleFS, "/app.js");
         server_.serveStatic("/glyphicons.woff2", LittleFS, "/glyphicons.woff2");
         server_.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
         server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
         server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
         server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
+        */
         server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
         server_.on("/alarm", httpAlarm);
@@ -997,9 +999,9 @@ private:
             formatCard(server_.hasArg("force"));
         } else {
             LOG("http invalid command: %s", cmd.c_str());
-            return server_.send(404, GENERIC_MIME, "{response: 404}");
+            return server_.send(404, GENERIC_MIME, "{\"response\": 404}");
         }
-        server_.send(200, GENERIC_MIME, "{response: 200}");
+        server_.send(200, GENERIC_MIME, "{\"response\": 200}");
     }
 
     /** Returns the status of the player.
@@ -1008,15 +1010,15 @@ private:
         LOG("http status");
         char buf[300];
         int len = snprintf_P(buf, sizeof(buf), PSTR("{"
-        "vcc:%u,"
-        "temp:%i,"
-        "mem:%u,"
-        "charging:%u,"
-        "batt:%u,"
-        "headphones:%u,"
-        "maxLoopTime:%u,"
-        "rssi:%i,"
-        "ap:%u"
+        "\"vcc\":%u,"
+        "\"temp\":%i,"
+        "\"mem\":%u,"
+        "\"charging\":%u,"
+        "\"batt\":%u,"
+        "\"headphones\":%u,"
+        "\"maxLoopTime\":%u,"
+        "\"rssi\":%i,"
+        "\"ap\":%u"
         "}"),
         ex_.measurements.vcc,
         ex_.measurements.temp,
@@ -1109,7 +1111,7 @@ private:
                     uploadFile_.close();
                     //server_.send(200, JSON_MIME, "{ response: 200 }");
                 } else {
-                    server_.send(500, JSON_MIME, "{ response: 500 }");
+                    server_.send(500, JSON_MIME, "{\"response\":500}");
                 }
                 send(msg::SetESPBusy{false});
                 break;
@@ -1894,17 +1896,17 @@ int AlarmMode::alarmToJson(char * buffer, int bufLen) {
     char filename[32];
     getAlarmMP3(filename, sizeof(filename));
     return snprintf_P(buffer, bufLen, PSTR("{"
-        "enabled:%u,"
-        "h:%u,"
-        "m:%u,"
-        "mon:%u,"
-        "tue:%u,"
-        "wed:%u,"
-        "thu:%u,"
-        "fri:%u,"
-        "sat:%u,"
-        "sun:%u,"
-        "file:\"%s\""
+        "\"enabled\":%u,"
+        "\"h\":%u,"
+        "\"m\":%u,"
+        "\"mon\":%u,"
+        "\"tue\":%u,"
+        "\"wed\":%u,"
+        "\"thu\":%u,"
+        "\"fri\":%u,"
+        "\"sat\":%u,"
+        "\"sun\":%u,"
+        "\"file\":\"%s\""
         "}"),
         alarm().enabled(),
         alarm().hour(),
