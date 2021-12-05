@@ -42,6 +42,44 @@ BUTTON {
     box-sizing: border-box;
 }
 
+BUTTON.red {
+    background-color:#dc3545;
+    color:#fff;
+}
+
+BUTTON.orange {
+    background-color:#fd7e14;
+    color:#000;    
+}
+
+BUTTON.green {
+    background-color:#198754;
+    color:#fff;
+}
+
+BUTTON.blue {
+    background-color:#0d6efd;
+}
+
+BUTTON.yellow {
+    background-color:#ffc107;
+}
+
+BUTTON.cyan {
+    background-color:#0dcaf0;
+}
+
+BUTTON.pink {
+    background-color:#d63384;
+}
+
+BUTTON.purple {
+    background-color:#6f42c1;
+}
+
+
+
+
 INPUT {
     height: 3rem;
     padding: 6px 10px; /* The 6px vertically centers text on FF, ignored by Webkit */
@@ -51,7 +89,6 @@ INPUT {
     box-shadow: none;
     box-sizing: border-box; 
 }
-
 
 .container, .panel > FORM {
     clear:both;
@@ -101,8 +138,6 @@ INPUT {
         margin: 0.3rem 0;
     }
 }
-
-
 
 NAV {
     display:block;
@@ -207,23 +242,261 @@ function e(ident) {
 
 /** Returns json obtained from given url. 
  */
-function getJSON(url, callback) {
-    let req = new XMLHttpRequest();
-    req.open("GET", url);
-    req.setRequestHeader("Accept", "application/json");
-    req.onload = function () {
-        callback(JSON.parse(req.responseText), null);
-    };
-    // TODO error
-    req.send();
+async function getJSON(url) {
+    return new Promise(resolve => {
+        let req = new XMLHttpRequest();
+        req.open("GET", url);
+        req.setRequestHeader("Accept", "application/json");
+        req.onload = function () {
+            resolve(JSON.parse(req.responseText));
+        };
+        // TODO error
+        req.onerror = function() {
+            resolve(undefined);
+        }
+        req.send();
+    })
 }
 
-function updateStatus(timeout) {
-
+async function downloadFile(path) {
+    return new Promise(resolve => {
+        let req = new XMLHttpRequest();
+        req.open("GET", `sd?path=${path}`);
+        req.onload = function () {
+            resolve(req.responseText);
+        };
+        // TODO error
+        req.onerror = function() {
+            resolve(undefined);
+        }
+        req.send();
+    });
 }
+
+async function uploadFile(path, contents, mime = "text/plain") {
+    return new Promise(resolve => {
+        let fd = new FormData();
+        let blob = new Blob([contents], { type : mime});
+        fd.append("path", path);
+        fd.append("filename", blob, path);
+
+        let req = new XMLHttpRequest();
+        req.open("POST", "sdUpload", true);
+        req.onload = () => {
+            resolve(true);
+        }
+        req.onerror = () => {
+            resolve(undefined);
+        }
+        req.send(fd);    
+    });
+}
+
+function setToggle(name, value) {
+    let enabled = e(`${name}-enabled`);
+    let disabled = e(`${name}-disabled`);
+    if (! enabled.isSetup) {
+        let f = (event) => {
+            if (enabled.classList.contains("green")) {
+                enabled.classList.remove("green");
+                disabled.classList.add("red");
+            } else {
+                enabled.classList.add("green");
+                disabled.classList.remove("red");
+            }
+            event.preventDefault();
+        };
+        enabled.onclick = f
+        disabled.onclick = f;
+        enabled.isSetup = true;
+    }
+    if (value) {
+        enabled.classList.add("green");
+        disabled.classList.remove("red");
+    } else {
+        enabled.classList.remove("green");
+        disabled.classList.add("red");
+    }
+}
+
+function getToggleValue(name) {
+    let enabled = e(`${name}-enabled`);
+    let disabled = e(`${name}-disabled`);
+    return enabled.classList.contains("green");
+}
+
+function setOnOff(name, value) {
+    let btn = e(name);
+    if (!btn.isSetup) {
+        btn.onclick = (event) => {
+            btn.classList.toggle("green");
+            event.preventDefault();
+        }
+        btn.isSetup = true;
+    }
+    if (value)
+        btn.classList.add("green");
+    else
+        btn.classList.remove("green");
+}
+
+async function getStatus() {
+    let refresh = e("status-refresh");
+    refresh.disabled = true;
+    refresh.innerText = "Updating";
+    let json = await getJSON("status");
+    if (json != undefined) {
+        e("status-battery").innerHTML = `${json["vcc"] / 100}V`;
+        e("status-wifi").innerHTML = `rssi ${json["rssi"]}, ${json["ap"] ? "AP" : ""}`;
+        e("status-temp").innerHTML = `${json["temp"] / 10} C`;
+        e("status-system").innerHTML = `${json["mem"]} mem free, ${json["maxLoopTime"]} ms max loop time`;
+        e("status-form").style.display = "flex";
+    } else {
+        e("status-form").style.display = "none";
+        e("status-battery").innerHTML = "???";
+        e("status-wifi").innerHTML = "???";
+        e("status-temp").innerHTML = "???";
+        e("status-system").innerHTML = "???";
+    }
+    refresh.innerText = "Refresh"
+    refresh.disabled = false;
+}
+
+async function getSettings() {
+    let json = await getJSON("player/settings.json");
+    if (json != undefined) {
+        e("settings-speaker-max").value = json["maxSpeakerVolume"];
+        e("settings-headphones-max").value = json["maxHeadphonesVolume"];
+        e("settings-brightness-max").value = json["maxBrightness"];
+        setToggle("settings-radio", json["radioEnabled"]);
+        setToggle("settings-disco", json["discoEnabled"]);
+        setToggle("settings-lights", json["lightsEnabled"]);
+        setToggle("settings-wt", json["walkieTalkieEnabled"]);
+        e("settings-timezone").value = json["timezone"];
+        e("settings-sync-hour").value = json["syncHour"];
+        e("settings-form").style.display = "flex";
+        e("settings-edit").style.display = "none";
+        e("settings-save").style.display = "inline";
+    } else {
+        e("settings-form").style.display = "none";
+        e("settings-edit").style.display = "inline";
+        e("settings-save").style.display = "none";
+    }
+}
+
+async function saveSettings() {
+    
+}
+
+async function getAlarm() {
+    let json = await getJSON("player/alarm.json");
+    if (json != undefined) {
+        setToggle("alarm", json["enabled"]);
+        e("alarm-h").value = json["h"];
+        e("alarm-m").value = json["m"];
+        setOnOff("alarm-mon", json["mon"]);
+        setOnOff("alarm-tue", json["tue"]);
+        setOnOff("alarm-wed", json["wed"]);
+        setOnOff("alarm-thu", json["thu"]);
+        setOnOff("alarm-fri", json["fri"]);
+        setOnOff("alarm-sat", json["sat"]);
+        setOnOff("alarm-sun", json["sun"]);
+        e("alarm-form").style.display = "flex";
+        e("alarm-edit").style.display = "none";
+        e("alarm-save").style.display = "inline";
+    } else {
+        e("alarm-form").style.display = "none";
+        e("alarm-edit").style.display = "inline";
+        e("alarm-save").style.display = "none";
+    }
+}
+
+async function getGreeting() {
+    let json = await getJSON("player/greeting.json");
+    if (json != undefined) {
+        for (let i = 0; i <= 2; i++) {
+            setToggle(`greeting-${i}`, json[i]["enabled"]);
+            e(`greeting-${i}-d`).value = json[i]["d"];
+            e(`greeting-${i}-m`).value = json[i]["m"];
+            e(`greeting-${i}-file`).value = json[i]["file"];
+        }
+        e("greeting-form").style.display = "flex";
+        e("greeting-edit").style.display = "none";
+        e("greeting-save").style.display = "inline";
+    } else {
+        e("greeting-form").style.display = "none";
+        e("greeting-edit").style.display = "inline";
+        e("greeting-save").style.display = "none";
+    }
+}
+
+async function getRadio() {
+    let json = await getJSON("player/radio.json");
+    if (json != undefined) {
+        setToggle("radio-mono", json["forceMono"]);
+        setToggle("radio-manual", json["manualTuning"]);
+        for (let i = 0; i <= 7; i++) {
+            //setToggle(`greeting-${i}`, json[i]["enabled"]);
+            e(`radio-freq-${i}`).value = json["stations"][i]["freq"] / 10;
+            e(`radio-name-${i}`).value = json["stations"][i]["name"];
+        }
+        e("radio-form").style.display = "flex";
+        e("radio-edit").style.display = "none";
+        e("radio-save").style.display = "inline";
+    } else {
+        e("radio-form").style.display = "none";
+        e("radio-edit").style.display = "inline";
+        e("radio-save").style.display = "none";
+    }
+}
+
+async function sendCommand(cmd) {
+    return new Promise(resolve => {
+        let req = new XMLHttpRequest();
+        req.open("GET", `cmd?cmd=${cmd}`);
+        req.onload = function () {
+            resolve(req.responseText);
+        };
+        // TODO error
+        req.onerror = function() {
+            resolve(undefined);
+        }
+        req.send();
+    });
+}
+
+async function debugLoad() {
+    let path = e("debug-file-path").value;
+    let contents = await downloadFile(path);
+    if (contents != undefined)
+        e("debug-file-contents").value = contents;
+}
+
+async function debugStore() {
+    let path = e("debug-file-path").value;
+    let contents = e("debug-file-contents").value;
+    uploadFile(path, contents);
+}
+
+/* Selects the nav item. 
+
+   It would be nice eventually to get the possibilities from the navbar itself, and only change the relevant ones perhaps.
+ */
+function navSelect(name) {
+    for (const x of ["settings", "playlists", "radio", "wt", "expert"]) {
+        if (name == x) {
+            e(`nav-${x}`).classList.add("selected");
+            e(x).style.display="flex";
+        } else {
+            e(`nav-${x}`).classList.remove("selected");
+            e(x).style.display="none";
+        }
+    }
+}
+
 
 function onLoad() {
-    
+    getStatus();    
 }
 
 
@@ -234,30 +507,31 @@ function onLoad() {
     <nav>
         <div class="navbar">
             <div class="brand">mp3-player</div>
-            <a class="selected">Settings</a>
-            <a>Playlists</a>
-            <a>Radio</a>
-            <a>Walkie-Talkie</a>
+            <a id="nav-settings" onclick="navSelect('settings')" class="selected">Settings</a>
+            <a id="nav-playlists" onclick="navSelect('playlists')">Playlists</a>
+            <a id="nav-radio" onclick="navSelect('radio')">Radio</a>
+            <a id="nav-wt" onclick="navSelect('wt')">Walkie-Talkie</a>
+            <a id="nav-expert" onclick="navSelect('expert')">Expert</a>
         </div>       
     </nav>
 
-    <div class="container">
+    <div class="container" id="settings">
         <div class="panel twelve">
             <div class="header">
                 <h3>Status</h3>
                 <div class="buttons">
-                    <button>Refresh</button>
+                    <button id="status-refresh" onclick="getStatus()">Refresh</button>
                 </div>
             </div>
-            <form>
+            <form id="status-form" style="display:none">
                 <label>Battery:</label>
-                <div>56% (3.56V) Charging</div>
+                <div id="status-battery">56% (3.56V) Charging</div>
                 <label>WiFi:</label>
-                <div>rssi stuff, AP</div>
+                <div id="status-wifi">rssi stuff, AP</div>
                 <label>Temperature:</label>
-                <div>27 C</div>
+                <div id="status-temp">27 C</div>
                 <label>System:</label>
-                <div>3KB mem free, 67ms max loop time</div>        
+                <div id="status-system">3KB mem free, 67ms max loop time</div>        
             </form>
         </div>
 
@@ -265,49 +539,50 @@ function onLoad() {
             <div class="header">
                 <h3>Settings</h3>
                 <div class="buttons">
-                    <button>Save</button>
+                    <button id="settings-edit" onclick="getSettings()">Edit</button>
+                    <button id="settings-save" onclick="saveSettings()" class="red" style="display:none">Save</button>
                 </div>
             </div>
-            <form>
+            <form id = "settings-form" style="display:none">
                 <label>Max volume (speaker):</label>
                 <div>
-                    <input type="text"> (0..15)
+                    <input type="text" id="settings-speaker-max"> (0..15)
                 </div>
                 <label>Max volume (headphones):</label>
                 <div>
-                    <input type="text"> (0..15)
+                    <input type="text" id="settings-headphones-max"> (0..15)
                 </div>
                 <label>Max brightness:</label>
                 <div>
-                    <input type="text"> (0..255)
+                    <input type="text" id="settings-brightness-max"> (0..255)
                 </div>
                 <label>FM Radio:</label>
                 <div>
-                    <button>Enabled</button>
-                    <button>Disabled</button>
+                    <button id="settings-radio-enabled">Enabled</button>
+                    <button id="settings-radio-disabled">Disabled</button>
                 </div>
                 <label>Disco:</label>
                 <div>
-                    <button>Enabled</button>
-                    <button>Disabled</button>
+                    <button id="settings-disco-enabled">Enabled</button>
+                    <button id="settings-disco-disabled">Disabled</button>
                 </div>
                 <label>Light Settings:</label>
                 <div>
-                    <button>Enabled</button>
-                    <button>Disabled</button>
+                    <button id="settings-lights-enabled">Enabled</button>
+                    <button id="settings-lights-disabled">Disabled</button>
                 </div>
                 <label>Walkie-Talkie:</label>
                 <div>
-                    <button>Enabled</button>
-                    <button>Disabled</button>
+                    <button id="settings-wt-enabled">Enabled</button>
+                    <button id="settings-wt-disabled" >Disabled</button>
                 </div>
                 <label>Timezone:</label>
                 <div>
-                    <input type="text"> (UTC offset in hours, -12, + 12)
+                    <input type="text" id="settings-timezone"> (UTC offset in hours, -12, + 12)
                 </div>
                 <label>Sync Hour:</label>
                 <div>
-                    <input type="text"> (0..23)
+                    <input type="text" id="settings-sync-hour"> (0..23)
                 </div>
             </form>
         </div>
@@ -316,31 +591,31 @@ function onLoad() {
             <div class="header">
                 <h3>Alarm Clock</h3>
                 <div class="buttons">
-                    <button>Save</button>
+                    <button id="alarm-edit" onclick="getAlarm()">Edit</button>
+                    <button id="alarm-save" onclick="saveAlarm()" class="red" style="display:none">Save</button>
                 </div>
             </div>
-            <form>
+            <form id="alarm-form" style="display:none">
                 <label></label>
                 <div>
-                    <button>Enabled</button>
-                    <button>Disabled</button>
+                    <button id="alarm-enabled">Enabled</button>
+                    <button id="alarm-disabled">Disabled</button>
                 </div>
                 <label>Alarm:</label>
                 <div>
-                    <input type="text" size=3> :
-                    <input type="text" size=3> (HH : MM, 0..23, 0..60)
+                    <input id="alarm-h" type="text" size=3> :
+                    <input id="alarm-m" type="text" size=3> (HH : MM, 0..23, 0..60)
                 </div>
                 <label>Days:</label>
                 <div>
-                    <button>Mon</button>
-                    <button>Tue</button>
-                    <button>Wed</button>
-                    <button>Thu</button>
-                    <button>Fri</button>
-                    <button>Sat</button>
-                    <button>Sun</button>
+                    <button id="alarm-mon">Mon</button>
+                    <button id="alarm-tue">Tue</button>
+                    <button id="alarm-wed">Wed</button>
+                    <button id="alarm-thu">Thu</button>
+                    <button id="alarm-fri">Fri</button>
+                    <button id="alarm-sat">Sat</button>
+                    <button id="alarm-sun">Sun</button>
                 </div>
-
             </form>
         </div>
 
@@ -348,10 +623,169 @@ function onLoad() {
             <div class="header">
                 <h3>Greetings</h3>
                 <div class="buttons">
-                    <button>Save</button>
+                    <button id="greeting-edit" onclick="getGreeting()">Edit</button>
+                    <button id="greeting-save" onclick="saveGreeting()" class="red" style="display:none">Save</button>
+                </div>
+            </div>
+            <form id="greeting-form" style="display:none">
+                <label>First:</label>
+                <div>
+                    <button id="greeting-0-enabled">Enabled</button>
+                    <button id="greeting-0-disabled">Disabled</button>
+                </div>
+                <label></label>
+                <div>
+                    <input id="greeting-0-d" type="text" size=3> /
+                    <input id="greeting-0-m" type="text" size=3> (DD / MM, 1..31, 1..12)
+                </div>
+                <label></label>
+                <div>
+                    <input type="text" id="greeting-0-file"> (mp3 file on SD card)
+                </div>
+                <label>Second:</label>
+                <div>
+                    <button id="greeting-1-enabled">Enabled</button>
+                    <button id="greeting-1-disabled">Disabled</button>
+                </div>
+                <label></label>
+                <div>
+                    <input id="greeting-1-d" type="text" size=3> /
+                    <input id="greeting-1-m" type="text" size=3> (DD / MM, 1..31, 1..12)
+                </div>
+                <label></label>
+                <div>
+                    <input type="text" id="greeting-1-file"> (mp3 file on SD card)
+                </div>
+                <label>Third:</label>
+                <div>
+                    <button id="greeting-2-enabled">Enabled</button>
+                    <button id="greeting-2-disabled">Disabled</button>
+                </div>
+                <label></label>
+                <div>
+                    <input id="greeting-2-d" type="text" size=3> /
+                    <input id="greeting-2-m" type="text" size=3> (DD / MM, 1..31, 1..12)
+                </div>
+                <label></label>
+                <div>
+                    <input type="text" id="greeting-2-file"> (mp3 file on SD card)
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="container" id="playlists" style="display:none">
+    </div>
+
+    <div class="container" id="radio" style="display:none">
+        <div class="panel twelve" id="radio-settings">
+            <div class="header">
+                <h3>FM Radio</h3>
+                <div class="buttons">
+                    <button id="radio-edit" onclick="getRadio()">Edit</button>
+                    <button id="radio-save" onclick="saveRadio()" class="red" style="display:none">Save</button>
+                </div>
+            </div>
+            <form id="radio-form" style="display:none">
+                <label>Force mono:</label>
+                <div>
+                    <button id="radio-mono-enabled">Enabled</button>
+                    <button id="radio-mono-disabled">Disabled</button>
+                </div>
+                <label>Manual Tuning:</label>
+                <div>
+                    <button id="radio-manual-enabled">Enabled</button>
+                    <button id="radio-manual-disabled">Disabled</button>
+                </div>
+                <label>Stations:</label>
+                <div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-1" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-1">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-2" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-2">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-3" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-3">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-4" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-4">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-5" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-5">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-6" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-6">
+                </div>
+                <label></label>
+                <div>
+                    <input id="radio-freq-7" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-7">
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="container" id="wt" style="display:none">
+    </div>
+
+    <div class="container" id="expert" style="display:none">
+        <!-- The Expert level settings-->
+
+        <div class="panel twelve" id="expert-commands">
+            <div class="header">
+                <h3>Commands</h3>
+            </div>
+            <form>
+                <label>Power:</label>
+                <div>
+                    <button onclick="sendCommand('sleep')">Sleep</button>
+                </div>
+                <label>Maintenance:</label>
+                <div>
+                    <button onclick="sendCommand('sync')">Sync</button>
+                </div>
+                <label>Troubleshooting:</label>
+                <div>
+                    <button onclick="sendCommand('reset')">Reset</button>
+                    <button class="red" onclick="sendCommand('format')">Format</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="panel twelve" id="expert-ls">
+            <div class ="header">
+                <h3>SD Card Contents</h3>
+                <div class="buttons">
+                    <button>Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel twelve">
+            <div class="header">
+                <h3>Debug - FileEdit</h3>
+                <div class="buttons">
+                    <button onclick="debugLoad()">Load</button>
+                    <button onclick="debugStore()" class="orange">Store</button>
                 </div>
             </div>
             <form>
+                <label>File:</label>
+                <div>
+                    <input type="text" id="debug-file-path"> (path of file to edit in server)
+                </div>
+                <label>Contents:</label>
+                <div>
+                    <textarea style="width:95%" rows="20" id="debug-file-contents"></textarea>
+                </div>
             </form>
         </div>
 

@@ -1,13 +1,13 @@
 {
-    enabled: false,
-    h : 00,
-    m : 00,
-    mon : true,
-    tue : true,
-    wed : true,
-    thu : true,
-    fri : true,
-    sat : true,
-    sun : true,
-    file : ""
+    "enabled": false,
+    "h" : 0,
+    "m" : 0,
+    "mon" : true,
+    "tue" : true,
+    "wed" : true,
+    "thu" : true,
+    "fri" : true,
+    "sat" : true,
+    "sun" : true,
+    "file" : ""
 }

@@ -1,8 +1,20 @@
 [
     {
-        enabled: false,
-        m: 1,
-        d: 1,
-        file: ""
+        "enabled": false,
+        "m": 1,
+        "d": 1,
+        "file": ""
+    },
+    {
+        "enabled": false,
+        "m": 2,
+        "d": 2,
+        "file": ""
+    },
+    {
+        "enabled": false,
+        "m": 3,
+        "d": 3,
+        "file": ""
     }
 ]
