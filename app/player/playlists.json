@@ -1,10 +1,10 @@
 [
-    {name : "playlist", enabled : true },
-    {name : "", enabled : false },
-    {name : "", enabled : false },
-    {name : "", enabled : false },
-    {name : "", enabled : false },
-    {name : "", enabled : false },
-    {name : "", enabled : false },
-    {name : "", enabled : false }
+    {"name" : "playlist", "enabled" : true },
+    {"name" : "", "enabled" : false },
+    {"name" : "", "enabled" : false },
+    {"name" : "", "enabled" : false },
+    {"name" : "", "enabled" : false },
+    {"name" : "", "enabled" : false },
+    {"name" : "", "enabled" : false },
+    {"name" : "", "enabled" : false }
 ]

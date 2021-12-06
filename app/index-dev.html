@@ -77,9 +77,6 @@ BUTTON.purple {
     background-color:#6f42c1;
 }
 
-
-
-
 INPUT {
     height: 3rem;
     padding: 6px 10px; /* The 6px vertically centers text on FF, ignored by Webkit */
@@ -90,6 +87,12 @@ INPUT {
     box-sizing: border-box; 
 }
 
+INPUT.red { border: 1px solid #dc3545; }
+
+LABEL {
+    font-weight: bold;
+}
+
 .container, .panel > FORM {
     clear:both;
     position: relative;
@@ -98,19 +101,41 @@ INPUT {
     margin: 0 auto;
     padding: 0 5px;
     box-sizing: border-box;
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:space-between;
+    align-items:center;
 }
 
 .container > DIV {
     margin: 0.3rem 0;
 }
 
+.one    { width: 100%; }
+.two    { width: 100%; }
+.three  { width: 100%; }
+.four   { width: 100%; }
+.five   { width: 100%; }
+.six    { width: 100%; }
+.seven  { width: 100%; }
+.eight  { width: 100%; }
+.nine   { width: 100%; }
+.ten    { width: 100%; }
+.eleven { width: 100%; }
+.twelve { width: 100%; }
+
+.panel > FORM > LABEL {
+    display: block;
+    width: 100%;
+    margin: 0.3rem 0;
+}        
+.panel > FORM > DIV {
+    width: 100%;
+    margin: 0.3rem 0;
+    clear:both;
+}
+
 @media(min-width:550px) {
-    .container, .panel > FORM {
-        display:flex;
-        flex-wrap:wrap;
-        justify-content:space-between;
-        align-items:center;
-    }
     .one    { width: 4.66666666667%; }
     .two    { width: 13.3333333333%; }
     .three  { width: 22%; }
@@ -132,10 +157,12 @@ INPUT {
         width: 22%;
         text-align:right;
         margin: 0.3rem 0;
+
     }        
     .panel > FORM > DIV {
         width: 74%;
         margin: 0.3rem 0;
+        clear:both;
     }
 }
 
@@ -209,10 +236,7 @@ NAV {
     display:flex;
     justify-content:space-between;
     align-items:center;
-}
-
-.panel > .row {
-    padding:0.5rem 1rem;
+    flex-basis: 100%;
 }
 
 .panel > .header > H3 {
@@ -228,6 +252,10 @@ NAV {
 .buttons > BUTTON {
     margin: auto 0;
     padding: 0 1rem;
+}
+
+.even-row {
+    background-color: #eee;
 }
 
     </style>
@@ -340,6 +368,43 @@ function setOnOff(name, value) {
         btn.classList.remove("green");
 }
 
+function getOnOffValue(name) {
+    let btn = e(name);
+    return e.classList.contains("green");
+}
+
+function getAndCheckInputNumber(name, min, max) {
+    let input = e(name);
+    let value = Number(input.value);
+    if (! isNaN(value) && (value >= min) && (value <= max)) {
+        input.classList.remove("red");
+        return value;
+    } else {
+        input.classList.add("red");
+        return Number.NaN;
+    }
+}
+
+async function getAndCheckExistingFile(name, enabled) {
+    // TODO check that the file exists
+    return e(name).value;
+}
+
+function checkJSONIsValid(object) {
+    for (let key in object) {
+        if (typeof(object[key]) == 'number' && isNaN(object[key])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+const SETTINGS_FILE="player/settings.json";
+const ALARM_FILE="player/alarm.json";
+const GRETTING_FILE="player/greeting.json";
+const PLAYLISTS_FILE="player/playlists.json";
+const RADIO_FILE="player/radio.json";
+
 async function getStatus() {
     let refresh = e("status-refresh");
     refresh.disabled = true;
@@ -363,7 +428,7 @@ async function getStatus() {
 }
 
 async function getSettings() {
-    let json = await getJSON("player/settings.json");
+    let json = await getJSON(SETTINGS_FILE);
     if (json != undefined) {
         e("settings-speaker-max").value = json["maxSpeakerVolume"];
         e("settings-headphones-max").value = json["maxHeadphonesVolume"];
@@ -385,11 +450,27 @@ async function getSettings() {
 }
 
 async function saveSettings() {
-    
+    let stuff = {
+        maxSpeakerVolume : getAndCheckInputNumber("settings-speaker-max", 0, 15),
+        maxHeadphonesVolume : getAndCheckInputNumber("settings-headphones-max", 0, 15),
+        maxBrightness : getAndCheckInputNumber("settings-brightness-max", 0, 255),
+        timezone : getAndCheckInputNumber("settings-timezone", -12, 12),
+        syncHour : getAndCheckInputNumber("settings-sync-hour", 0, 23),
+        radioEnabled : getToggleValue("settings-radio"),
+        discoEnabled : getToggleValue("settings-disco"),
+        lightsEnabled : getToggleValue("settings-lights"),
+        walkieTalkieEnabled : getToggleValue("settings-wt")
+    };
+    if (checkJSONIsValid(stuff)) {
+        let json = JSON.stringify(stuff);
+        uploadFile(SETTINGS_FILE, json, "text/json");
+    } else {
+        alert("invalid");
+    }
 }
 
 async function getAlarm() {
-    let json = await getJSON("player/alarm.json");
+    let json = await getJSON(ALARM_FILE);
     if (json != undefined) {
         setToggle("alarm", json["enabled"]);
         e("alarm-h").value = json["h"];
@@ -401,6 +482,7 @@ async function getAlarm() {
         setOnOff("alarm-fri", json["fri"]);
         setOnOff("alarm-sat", json["sat"]);
         setOnOff("alarm-sun", json["sun"]);
+        e("alarm-file").value = json["file"];
         e("alarm-form").style.display = "flex";
         e("alarm-edit").style.display = "none";
         e("alarm-save").style.display = "inline";
@@ -410,6 +492,31 @@ async function getAlarm() {
         e("alarm-save").style.display = "none";
     }
 }
+
+async function saveAlarm() {
+    let stuff = {
+        enabled : getToggleValue("alarm"),
+        h : getAndCheckInputNumber("alarm-h", 0, 23),
+        m : getAndCheckInputNumber("alarm-m", 0, 59),
+        mon : getOnOffValue("alarm-mon"),
+        tue : getOnOffValue("alarm-tue"),
+        wed : getOnOffValue("alarm-wed"),
+        thu : getOnOffValue("alarm-thu"),
+        fri : getOnOffValue("alarm-fri"),
+        sat : getOnOffValue("alarm-sat"),
+        sun : getOnOffValue("alarm-sun"),
+        file : getAndCheckExistingFile("alarm-file", getToggleValue("alarm"))
+    };
+    if (checkJSONIsValid(stuff)) {
+        let json = JSON.stringify(stuff);
+        uploadFile(ALARM_FILE, json, "text/json");
+    } else {
+        alert("invalid");
+    }
+}
+
+/** Greeting settings. 
+ */
 
 async function getGreeting() {
     let json = await getJSON("player/greeting.json");
@@ -430,8 +537,123 @@ async function getGreeting() {
     }
 }
 
+async function saveGreeting() {
+    let stuff = new Array();
+    for (let i = 0; i <= 2; i++) {
+        let alarm = {
+            enabled : getToggleValue(`greeting-${i}`),
+            d : getAndCheckInputValue(`greeting-${i}-d`, 1, 31),
+            m : getAndCheckInputValye(`greeting-${i}-m`, 1, 12),
+            file : getAndCheckExistingFile(`greeting-${i}-file`, getToggleValue(`greeting-${i}`))
+        };
+        stuff.push(alarm);
+    }
+    let json = JSON.stringify(stuff);
+    uploadFile(GREETING_FILE, json, "text/json");
+}
+
+/** MP3 Playlists
+ 
+    List of playlists and 
+ */
+
+ async function getPlaylists() {
+     let json = await getJSON(PLAYLISTS_FILE);
+     let form = e("playlists-form");
+     form.innerHTML = "";
+     if (json != undefined) {
+        for (let i = 0; i <= 7; i++) {
+            {
+                let l = document.createElement("label");
+                l.innerText = `${i + 1}:`
+                form.appendChild(l);
+                let d = document.createElement("div");
+                let input = document.createElement("input");
+                input.id = `playlist-${i}`;
+                input.type = "text";
+                input.value = json[i].name;
+                d.appendChild(input);
+                d.append(" (name)");
+                form.appendChild(d);
+            }
+            {
+                form.appendChild(document.createElement("label"));
+                let d = document.createElement("div");
+                let btnEnabled = document.createElement("button");
+                btnEnabled.id = `playlist-${i}-enabled`;
+                btnEnabled.innerText = "Enabled";
+                let btnEdit = document.createElement("button"); 
+                btnEdit.innerText = "Edit";
+                btnEdit.onclick = async (event) => {
+                    event.preventDefault();
+                    await openDir("playlist-edit", `${i}`, `Playlist ${json[i].name}`);
+                    e("playlists-settings").style.display = "none";
+                }
+                d.appendChild(btnEnabled);
+                d.append(" ");
+                d.appendChild(btnEdit);
+                form.appendChild(d);
+                setOnOff(btnEnabled.id, json[i]["enabled"]);
+            }
+        }
+        e("playlists-form").style.display = "flex";
+        e("playlists-edit").style.display = "none";
+        e("playlists-save").style.display = "inline";
+    } else {
+        e("playlists-form").style.display = "none";
+        e("playlists-edit").style.display = "inline";
+        e("playlists-save").style.display = "none";
+    }
+
+ }
+
+async function openDir(panel, path, title) {
+    let json = await getJSON("sdls"); // TODO fixme to proper path
+    e(`${panel}-title`).innerText = title;
+    let table = e(`${panel}-table`);
+    table.innerHTML = "";
+    let i = 0;
+    for (const entry of json) {
+        let row = document.createElement("div");
+        row.classList.add("container");
+        let l = document.createElement("label");
+        let a = document.createElement("a");
+        a.innerText = entry["name"];
+        l.appendChild(a);
+        if (entry["size"] == "dir") {
+            // TODO onclick opens the folder in the same panel
+        } else {
+            a.target = `sd?path=${path}/${entry["name"]}`;
+        }
+        l.classList.add("three");
+        row.appendChild(l);
+        {
+            let d = document.createElement("div");
+            d.classList.add("three");
+            d.append(entry["size"]);
+            row.appendChild(d);
+        }
+        {
+            let d = document.createElement("div");
+            let btnDelete = document.createElement("button");
+            btnDelete.innerText="Delete";
+            btnDelete.classList.add("red");
+            d.classList.add("three");
+            d.appendChild(btnDelete);
+            row.appendChild(d);
+        }
+        ++i;
+        if (i % 2 == 0)
+            row.classList.add("even-row");
+        table.appendChild(row);
+    }
+    e(panel).style.display = "block";
+}
+
+/** Radio settings. 
+ */
 async function getRadio() {
-    let json = await getJSON("player/radio.json");
+    let json = await getJSON(RADIO_FILE);
     if (json != undefined) {
         setToggle("radio-mono", json["forceMono"]);
         setToggle("radio-manual", json["manualTuning"]);
@@ -449,6 +671,9 @@ async function getRadio() {
         e("radio-save").style.display = "none";
     }
 }
+
+
+
 
 async function sendCommand(cmd) {
     return new Promise(resolve => {
@@ -616,6 +841,10 @@ function onLoad() {
                     <button id="alarm-sat">Sat</button>
                     <button id="alarm-sun">Sun</button>
                 </div>
+                <label>File:</label>
+                <div>
+                    <input type="text" id="alarm-file"> (mp3 file on SD card)
+                </div>
             </form>
         </div>
 
@@ -675,6 +904,30 @@ function onLoad() {
     </div>
 
     <div class="container" id="playlists" style="display:none">
+        <div class="panel twelve" id="playlists-settings">
+            <div class="header">
+                <h3>Playlists</h3>
+                <div class="buttons">
+                    <button id="playlists-edit" onclick="getPlaylists()">Edit</button>
+                    <button id="playlists-save" onclick="savePlaylists()" class="red" style="display:none">Save</button>
+                </div>
+            </div>
+            <form id="playlists-form" style="display:none">
+                <!-- autogenerated -->
+            </form>
+        </div>        
+
+        <div class="panel twelve" id="playlist-edit" style="display:none">
+            <div class="header">
+                <h3 id="playlist-edit-title"></h3>
+                <div class="buttons">
+                    <button onclick="e('playlist-edit').style.display='none'; e('playlists-settings').style.display='block'">Back</button>
+                </div>
+            </div>
+            <div id="playlist-edit-table">
+            </div>
+        </div>
+
     </div>
 
     <div class="container" id="radio" style="display:none">

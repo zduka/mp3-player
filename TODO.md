@@ -6,8 +6,6 @@
 
 # Webserver
 
-- add ls
-- expert mode really
 - add authentication, at least rudimentary
 
 # SW
