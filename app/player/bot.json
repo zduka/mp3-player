@@ -1,7 +1,7 @@
 {
-  id: 0
-  token: "",
-  adminId: 0,
-  chatId: 0,
-  fingerprint: ""
+  "id": 0,
+  "token": "",
+  "adminId": 0,
+  "chatId": 0,
+  "fingerprint": ""
 }

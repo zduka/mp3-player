@@ -19,10 +19,9 @@
 
 # ESP
 
-- time settings seem to be a bit off in sync mode
 - timer should be simpler no need to the json nonsense
 - check greeting
-- change SD card defaults to use "" in JSON
+- don't check the walkie talkie status when webserver is in use
 
 # Disco Mode
 

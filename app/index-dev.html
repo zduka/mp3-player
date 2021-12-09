@@ -24,7 +24,7 @@ UL, OL {
     padding-left: 0;
 }
 
-BUTTON {
+BUTTON, .upload-button {
     display: inline-block;
     padding: 0rem 1rem;
     color: #555;
@@ -42,38 +42,45 @@ BUTTON {
     box-sizing: border-box;
 }
 
-BUTTON.red {
+.red {
     background-color:#dc3545;
     color:#fff;
+    border-color: #800;
 }
 
-BUTTON.orange {
+.orange {
     background-color:#fd7e14;
     color:#000;    
+    border-color:#840;
 }
 
-BUTTON.green {
+.green {
     background-color:#198754;
     color:#fff;
+    border-color: #080;
 }
 
-BUTTON.blue {
+.blue {
     background-color:#0d6efd;
+    color:#fff;
+    border-color:#008;
 }
 
-BUTTON.yellow {
+.yellow {
     background-color:#ffc107;
+    border-color: #860;
 }
 
-BUTTON.cyan {
+.cyan {
     background-color:#0dcaf0;
+    border-color:#068;
 }
 
-BUTTON.pink {
+.pink {
     background-color:#d63384;
 }
 
-BUTTON.purple {
+.purple {
     background-color:#6f42c1;
 }
 
@@ -89,7 +96,7 @@ INPUT {
 
 INPUT.red { border: 1px solid #dc3545; }
 
-LABEL {
+FORM > LABEL {
     font-weight: bold;
 }
 
@@ -209,6 +216,47 @@ NAV {
 
 }
 
+.notifications {
+    background-color:#fff;
+    padding:0.5rem;
+}
+
+.notification {
+    width:100%;
+    max-width:960px;
+    margin: 0 auto;
+    border-width: 1px;
+    border-style: solid;
+    padding:0.5rem;
+    border-radius:5px;    
+    margin-top:5px;
+}
+
+.notification > BUTTON {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.5rem;
+    line-height: 2rem;
+    position:relative;
+    float:right;
+}
+
+.modal {
+    position: absolute;
+    width : 100%;
+    height: 100%;
+    z-index: 999;
+}
+
+.modal > .notification {
+    width : 20%;
+    height: 20%;
+    margin: auto;
+}
+
+.spacer {
+    visibility: hidden;
+}
+
 @media (min-width: 750px) {
     NAV {
         position: fixed;
@@ -216,7 +264,7 @@ NAV {
         width: 100%;
         z-index: 100;
     }
-    .navbar-spacer {
+    .navbar.spacer {
         height: 6rem;
     }
     .navbar > .brand {
@@ -230,9 +278,12 @@ NAV {
     margin-top: 10px;
 }
 
-.panel > .header {
+.header {
     background-color:#ccc;
     padding:0.5rem 1rem; 
+}
+
+.panel > .header {
     display:flex;
     justify-content:space-between;
     align-items:center;
@@ -268,6 +319,50 @@ function e(ident) {
     return document.getElementById(ident);
 }
 
+function element(kind, options) {
+    let result = document.createElement(kind);
+    if (options != undefined)
+        for (let key in options) {
+            if (key == "class") {
+                for (const cls of options[key].split(" "))
+                    result.classList.add(cls);
+            } else {
+                result[key] = options[key];
+            }
+        }
+    return result;
+}
+
+function A(options) { return element("a", options); }
+function BUTTON(options) { return element("button", options); }
+function DIV(options) { return element("div", options); }
+function FORM(options) { return element("form", options); }
+function LABEL(options) { return element("label", options); }
+function INPUT(options) { return element("input", options); }
+
+function notification(text, color) {
+    let nbar = e("notifications");
+    let nbarSpacer = e("notifications-spacer");
+    let npanel = DIV({ class : `notification ${color}`});
+    let npanelSpacer = DIV({ class : `notification ${color}`});
+    npanel.append(text);
+    npanelSpacer.append(text);
+    let close = (event) => {
+        if (npanel.removed == undefined) {
+            nbarSpacer.removeChild(npanelSpacer);
+            nbar.removeChild(npanel);
+            npanel.removed = true;
+        }
+        if (event)
+            event.preventDefault();
+    }
+    npanel.appendChild(BUTTON({ class: color, innerText: "close", onclick : close}));
+    nbar.appendChild(npanel);
+    nbarSpacer.appendChild(npanelSpacer);
+    setTimeout(close, 10000);
+}
+
+
 /** Returns json obtained from given url. 
  */
 async function getJSON(url) {
@@ -289,6 +384,7 @@ async function getJSON(url) {
 async function downloadFile(path) {
     return new Promise(resolve => {
         let req = new XMLHttpRequest();
+        //req.open("GET", path);
         req.open("GET", `sd?path=${path}`);
         req.onload = function () {
             resolve(req.responseText);
@@ -301,12 +397,36 @@ async function downloadFile(path) {
     });
 }
 
-async function uploadFile(path, contents, mime = "text/plain") {
+async function downloadJSON(path) {
+    let result = await downloadFile(path);
+    if (result)
+        return JSON.parse(result);
+}
+
+async function uploadFileContents(path, contents, mime = "text/plain") {
     return new Promise(resolve => {
         let fd = new FormData();
         let blob = new Blob([contents], { type : mime});
         fd.append("path", path);
         fd.append("filename", blob, path);
+
+        let req = new XMLHttpRequest();
+        req.open("POST", "sdUpload", true);
+        req.onload = () => {
+            resolve(true);
+        }
+        req.onerror = () => {
+            resolve(undefined);
+        }
+        req.send(fd);    
+    });
+}
+
+async function uploadFile(path, file) {
+    return new Promise(resolve => {
+        let fd = new FormData();
+        fd.append("path", path);
+        fd.append("filename", file.files[0]);
 
         let req = new XMLHttpRequest();
         req.open("POST", "sdUpload", true);
@@ -428,7 +548,7 @@ async function getStatus() {
 }
 
 async function getSettings() {
-    let json = await getJSON(SETTINGS_FILE);
+    let json = await downloadJSON(SETTINGS_FILE);
     if (json != undefined) {
         e("settings-speaker-max").value = json["maxSpeakerVolume"];
         e("settings-headphones-max").value = json["maxHeadphonesVolume"];
@@ -463,14 +583,14 @@ async function saveSettings() {
     };
     if (checkJSONIsValid(stuff)) {
         let json = JSON.stringify(stuff);
-        uploadFile(SETTINGS_FILE, json, "text/json");
+        uploadFileContents(SETTINGS_FILE, json, "text/json");
     } else {
         alert("invalid");
     }
 }
 
 async function getAlarm() {
-    let json = await getJSON(ALARM_FILE);
+    let json = await downloadJSON(ALARM_FILE);
     if (json != undefined) {
         setToggle("alarm", json["enabled"]);
         e("alarm-h").value = json["h"];
@@ -509,7 +629,7 @@ async function saveAlarm() {
     };
     if (checkJSONIsValid(stuff)) {
         let json = JSON.stringify(stuff);
-        uploadFile(ALARM_FILE, json, "text/json");
+        uploadFileContents(ALARM_FILE, json, "text/json");
     } else {
         alert("invalid");
     }
@@ -519,7 +639,7 @@ async function saveAlarm() {
  */
 
 async function getGreeting() {
-    let json = await getJSON("player/greeting.json");
+    let json = await downloadJSON("player/greeting.json");
     if (json != undefined) {
         for (let i = 0; i <= 2; i++) {
             setToggle(`greeting-${i}`, json[i]["enabled"]);
@@ -549,7 +669,7 @@ async function saveGreeting() {
         stuff.push(alarm);
     }
     let json = JSON.stringify(stuff);
-    uploadFile(GREETING_FILE, json, "text/json");
+    uploadFileContents(GREETING_FILE, json, "text/json");
 }
 
 /** MP3 Playlists
@@ -558,7 +678,7 @@ async function saveGreeting() {
  */
 
  async function getPlaylists() {
-     let json = await getJSON(PLAYLISTS_FILE);
+     let json = await downloadJSON(PLAYLISTS_FILE);
      let form = e("playlists-form");
      form.innerHTML = "";
      if (json != undefined) {
@@ -586,7 +706,7 @@ async function saveGreeting() {
                 btnEdit.innerText = "Edit";
                 btnEdit.onclick = async (event) => {
                     event.preventDefault();
-                    await openDir("playlist-edit", `${i}`, `Playlist ${json[i].name}`);
+                    await openDir("playlist-edit", `${i + 1}`, `Playlist ${json[i].name}`);
                     e("playlists-settings").style.display = "none";
                 }
                 d.appendChild(btnEnabled);
@@ -608,37 +728,31 @@ async function saveGreeting() {
  }
 
 async function openDir(panel, path, title) {
-    let json = await getJSON("sdls"); // TODO fixme to proper path
+    //let json = await getJSON("sdls");
+    let json = await getJSON(`sdls?path=${path}`); 
     e(`${panel}-title`).innerText = title;
     let table = e(`${panel}-table`);
     table.innerHTML = "";
     let i = 0;
     for (const entry of json) {
-        let row = document.createElement("div");
-        row.classList.add("container");
-        let l = document.createElement("label");
-        let a = document.createElement("a");
-        a.innerText = entry["name"];
+        let row = DIV({ class : "container" });
+        let l = LABEL({ class : "three" });
+        let a = A({ innerText : entry["name"] });
         l.appendChild(a);
         if (entry["size"] == "dir") {
             // TODO onclick opens the folder in the same panel
         } else {
-            a.target = `sd?path=${path}/${entry["name"]}`;
+            a.href = `sd?path=${path}/${entry["name"]}`;
         }
-        l.classList.add("three");
         row.appendChild(l);
         {
-            let d = document.createElement("div");
-            d.classList.add("three");
+            let d = DIV({ class : "three" });
             d.append(entry["size"]);
             row.appendChild(d);
         }
         {
-            let d = document.createElement("div");
-            let btnDelete = document.createElement("button");
-            btnDelete.innerText="Delete";
-            btnDelete.classList.add("red");
-            d.classList.add("three");
+            let d = DIV({ class : "three" });
+            let btnDelete = BUTTON({ class : "red", innerText : "Delete" });
             d.appendChild(btnDelete);
             row.appendChild(d);
         }
@@ -647,13 +761,35 @@ async function openDir(panel, path, title) {
             row.classList.add("even-row");
         table.appendChild(row);
     }
+    {
+        let row = DIV({class : "container header" });
+        let l = LABEL({innerText : "Upload file: ", class : "three"});
+        row.appendChild(l);
+        let fname = INPUT({class : "three", type : "text" });
+        row.appendChild(fname);
+        let d = DIV({ class : "three" });
+        let file = INPUT({ type: "file", id :  `${panel}-upload`, name : "filename"});
+        file.style.display = "none";
+        let fileBtn = LABEL({ innerText: "Select File", htmlFor : file.id, class : "upload-button green" });
+        let upload = BUTTON({ class : "blue", innerText: "Upload" });
+        d.appendChild(file);
+        d.appendChild(fileBtn);
+        d.appendChild(upload);
+        row.appendChild(d);
+        table.appendChild(row);
+        upload.onclick = async (event) => {
+            event.preventDefault();
+            await uploadFile(`${path}/${fname.value}`, file);
+            openDir(panel, path, title);
+        }
+    }
     e(panel).style.display = "block";
 }
 
 /** Radio settings. 
  */
 async function getRadio() {
-    let json = await getJSON(RADIO_FILE);
+    let json = await downloadJSON(RADIO_FILE);
     if (json != undefined) {
         setToggle("radio-mono", json["forceMono"]);
         setToggle("radio-manual", json["manualTuning"]);
@@ -700,7 +836,7 @@ async function debugLoad() {
 async function debugStore() {
     let path = e("debug-file-path").value;
     let contents = e("debug-file-contents").value;
-    uploadFile(path, contents);
+    uploadFileContents(path, contents);
 }
 
 /* Selects the nav item. 
@@ -717,18 +853,32 @@ function navSelect(name) {
             e(x).style.display="none";
         }
     }
+    if (name == "playlists") {
+        if (e("playlists-form").style.display == "none")
+            getPlaylists();
+    } else if (name == "radio") {
+        if (e("radio-form").style.display == "none")
+            getRadio();
+    }
 }
 
 
 function onLoad() {
-    getStatus();    
+    getStatus();   
+    notification("This is a cool test", "red"); 
 }
 
 
     </script>
   </head>
   <body onload="onLoad()">
-    <div class="navbar-spacer"></div>
+    <div class="modal" style="display:none">
+        <div class="notification blue">
+            Foobar!
+        </div>       
+    </div>
+    <div class="navbar spacer"></div>
+    <div class="notifications spacer" id="notifications-spacer"></div>
     <nav>
         <div class="navbar">
             <div class="brand">mp3-player</div>
@@ -737,6 +887,8 @@ function onLoad() {
             <a id="nav-radio" onclick="navSelect('radio')">Radio</a>
             <a id="nav-wt" onclick="navSelect('wt')">Walkie-Talkie</a>
             <a id="nav-expert" onclick="navSelect('expert')">Expert</a>
+        </div>
+        <div class="notifications" id="notifications">
         </div>       
     </nav>
 
@@ -1043,5 +1195,6 @@ function onLoad() {
         </div>
 
     </div>
+    <iframe name="dummyframe" id="dummyframe" style="display: none;"></iframe>
   </body>
 </html>
