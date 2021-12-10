@@ -6,7 +6,12 @@
 
 # Webserver
 
+- finish the SD card listing in expert mode
+- add UI stuff to sending a command
+- very alarm setting
+
 - add authentication, at least rudimentary
+- add doctext? 
 
 # SW
 
@@ -20,8 +25,9 @@
 # ESP
 
 - timer should be simpler no need to the json nonsense
-- check greeting
+- check alarm, wrong filename uploaded by the webapp?
 - don't check the walkie talkie status when webserver is in use
+- getting to wt causes problems sometimes
 
 # Disco Mode
 

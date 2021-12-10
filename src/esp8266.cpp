@@ -153,10 +153,10 @@ public:
         ex_.time.log();
         setBusy(false); // just make sure we have no leftovers from resets & stuff
         setIdle(false);
-        // set the current mode
+        // now initialize the mode
         currentMode_ = getModeFor(state_.mode(), state_.musicMode());
         // start with the greering mode, if not resetting the esp, or synchronizing
-        if (! state_.espReset() && currentMode_ != & syncMode_)
+        if (! state_.espReset() && currentMode_ != & syncMode_ && currentMode_ != & alarmMode_)
             currentMode_ = & greetingMode_;
         // enter the desired mode
         setMode(currentMode_);
@@ -933,7 +933,7 @@ private:
         //if (!MDNS.begin("mp3-player"))
         //    LOG("  mDNS failed to initialize");
         server_.onNotFound(http404);
-        server_.serveStatic("/", LittleFS, "/index-dev.html");
+        server_.serveStatic("/", LittleFS, "/index.html");
         /*
         server_.serveStatic("/app.js", LittleFS, "/app.js");
         server_.serveStatic("/glyphicons.woff2", LittleFS, "/glyphicons.woff2");

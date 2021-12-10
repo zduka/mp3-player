@@ -40,6 +40,7 @@ BUTTON, .upload-button {
     border: 1px solid #bbb;
     cursor: pointer;
     box-sizing: border-box;
+    margin-right: 0.5rem;
 }
 
 .red {
@@ -240,21 +241,33 @@ NAV {
     float:right;
 }
 
-.modal {
+#modal {
     position: absolute;
     width : 100%;
     height: 100%;
     z-index: 999;
+    display: none;
+    justify-content:space-between;
+    align-items:center;  
 }
 
-.modal > .notification {
-    width : 20%;
-    height: 20%;
+.blurred {
+    filter: blur(5px);
+}
+
+#modal > .notification {
+    width : 100%;
     margin: auto;
+    text-align: center;
+    padding-bottom: 3rem;
 }
 
 .spacer {
     visibility: hidden;
+}
+
+.hidden {
+    display : none;
 }
 
 @media (min-width: 750px) {
@@ -269,6 +282,10 @@ NAV {
     }
     .navbar > .brand {
         width:unset;
+    }
+
+    .modal > .notification {
+        width : 50%;
     }
 }
 
@@ -337,10 +354,12 @@ function A(options) { return element("a", options); }
 function BUTTON(options) { return element("button", options); }
 function DIV(options) { return element("div", options); }
 function FORM(options) { return element("form", options); }
+function H1(options) { return element("h1", options); }
 function LABEL(options) { return element("label", options); }
 function INPUT(options) { return element("input", options); }
+function P(options) { return element("p", options); }
 
-function notification(text, color) {
+function notification(text, color, timeout) {
     let nbar = e("notifications");
     let nbarSpacer = e("notifications-spacer");
     let npanel = DIV({ class : `notification ${color}`});
@@ -359,23 +378,50 @@ function notification(text, color) {
     npanel.appendChild(BUTTON({ class: color, innerText: "close", onclick : close}));
     nbar.appendChild(npanel);
     nbarSpacer.appendChild(npanelSpacer);
-    setTimeout(close, 10000);
+    if (timeout == undefined)
+        timeout = 10000;
+    if (timeout != 0)
+        setTimeout(close, 10000);
 }
 
+function showModal(heading, text, color) {
+    e("contents").classList.add("blurred");
+    e("modal").style.display = "flex";
+    let d = DIV({ class : `notification ${color}`});
+    d.appendChild(H1({ innerText : heading }));
+    d.appendChild(P({ innerHTML : text }));
+    e("modal").appendChild(d);
+}
 
-/** Returns json obtained from given url. 
+function clearModal() {
+    e("contents").classList.remove("blurred");
+    e("modal").innerHTML = "";
+    e("modal").style.display = "none";
+}
+
+/** Comms
+ */
+
+ /** Returns json obtained from given url. 
  */
 async function getJSON(url) {
     return new Promise(resolve => {
+        showModal("Requesting...", "Please wait, this might take a while...", "blue");
         let req = new XMLHttpRequest();
         req.open("GET", url);
         req.setRequestHeader("Accept", "application/json");
-        req.onload = function () {
-            resolve(JSON.parse(req.responseText));
-        };
-        // TODO error
-        req.onerror = function() {
-            resolve(undefined);
+        req.onreadystatechange = function () {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
+                    resolve(JSON.parse(this.responseText));
+                    // don't notify, we only use this for status...
+                    //notification("Request successful", "green");
+                } else {
+                    resolve(undefined);
+                    notification(`Request for ${url} failed.`, "red");
+                }
+                clearModal();
+            }
         }
         req.send();
     })
@@ -383,15 +429,23 @@ async function getJSON(url) {
 
 async function downloadFile(path) {
     return new Promise(resolve => {
+        showModal("Requesting...", "Please wait, this might take a while...", "blue");
         let req = new XMLHttpRequest();
-        //req.open("GET", path);
-        req.open("GET", `sd?path=${path}`);
-        req.onload = function () {
-            resolve(req.responseText);
-        };
-        // TODO error
-        req.onerror = function() {
-            resolve(undefined);
+        // TODO this is only for local checks
+        req.open("GET", path);
+        //req.open("GET", `sd?path=${path}`);
+        req.onreadystatechange = function () {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
+                    resolve(this.responseText);
+                    // no need to notify really
+                    //notification("Request successful", "green", 1000);
+                } else {
+                    resolve(undefined);
+                    notification(`Request for ${path} failed.`, "red");
+                }
+                clearModal();
+            }
         }
         req.send();
     });
@@ -401,22 +455,30 @@ async function downloadJSON(path) {
     let result = await downloadFile(path);
     if (result)
         return JSON.parse(result);
+    else 
+        return undefined;
 }
 
 async function uploadFileContents(path, contents, mime = "text/plain") {
     return new Promise(resolve => {
+        showModal("Uploading...", "Please wait, this might take a while...", "blue");
         let fd = new FormData();
         let blob = new Blob([contents], { type : mime});
         fd.append("path", path);
         fd.append("filename", blob, path);
-
         let req = new XMLHttpRequest();
         req.open("POST", "sdUpload", true);
-        req.onload = () => {
-            resolve(true);
-        }
-        req.onerror = () => {
-            resolve(undefined);
+        req.onreadystatechange = function () {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
+                    resolve(true);
+                    notification("Upload successful", "green", 1000);
+                } else {
+                    resolve(undefined);
+                    notification(`Upload for ${path} failed.`, "red");
+                }
+                clearModal();
+            }
         }
         req.send(fd);    
     });
@@ -424,22 +486,109 @@ async function uploadFileContents(path, contents, mime = "text/plain") {
 
 async function uploadFile(path, file) {
     return new Promise(resolve => {
+        showModal("Uploading...", "Please wait, this will take a while...", "blue");
         let fd = new FormData();
         fd.append("path", path);
         fd.append("filename", file.files[0]);
-
         let req = new XMLHttpRequest();
         req.open("POST", "sdUpload", true);
-        req.onload = () => {
-            resolve(true);
-        }
-        req.onerror = () => {
-            resolve(undefined);
+        req.onreadystatechange = function () {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
+                    resolve(true);
+                    notification("Upload successful", "green", 1000);
+                } else {
+                    resolve(undefined);
+                    notification(`Upload for ${path} failed.`, "red");
+                }
+                clearModal();
+            }
         }
         req.send(fd);    
     });
 }
 
+/* Helper functions 
+ */
+
+async function openDir(panel, path, title, allowEdit) {
+    // TODO this is only for checking locally
+    let json = await getJSON("sdls");
+    //let json = await getJSON(`sdls?path=${path}`); 
+    e(`${panel}-title`).innerText = title;
+    let table = e(`${panel}-table`);
+    table.innerHTML = "";
+    let i = 0;
+    for (const entry of json) {
+        let row = DIV({ class : "container" });
+        let l = LABEL({ class : "three" });
+        let a = A({ innerText : entry["name"] });
+        l.appendChild(a);
+        if (entry["size"] == "dir") {
+            // TODO onclick opens the folder in the same panel
+        } else {
+            a.href = `sd?path=${path}/${entry["name"]}`;
+        }
+        row.appendChild(l);
+        {
+            let d = DIV({ class : "three" });
+            d.append(entry["size"]);
+            row.appendChild(d);
+        }
+        {
+            let d = DIV({ class : "three" });
+            let btnDelete = BUTTON({ class : "red", innerText : "Delete" });
+            d.appendChild(btnDelete);
+            if (allowEdit && entry["size"] != "dir" && entry["name"].endsWith(".txt")) {
+                let btnEdit = BUTTON({ class : "orange", innerText : "Edit"});
+                d.appendChild(btnEdit);
+            }
+            row.appendChild(d);
+        }
+        ++i;
+        if (i % 2 == 0)
+            row.classList.add("even-row");
+        table.appendChild(row);
+    }
+    {
+        let row = DIV({class : "container header" });
+        let l = LABEL({innerText : "Upload file: ", class : "three"});
+        row.appendChild(l);
+        let fname = INPUT({class : "three", type : "text" });
+        row.appendChild(fname);
+        let d = DIV({ class : "three" });
+        let file = INPUT({ type: "file", id :  `${panel}-upload`, name : "filename"});
+        file.style.display = "none";
+        let fileBtn = LABEL({ innerText: "Select File", htmlFor : file.id, class : "upload-button green" });
+        let upload = BUTTON({ class : "blue", innerText: "Upload" });
+        d.appendChild(file);
+        d.appendChild(fileBtn);
+        d.appendChild(upload);
+        row.appendChild(d);
+        table.appendChild(row);
+        upload.onclick = async (event) => {
+            event.preventDefault();
+            await uploadFile(`${path}/${fname.value}`, file);
+            openDir(panel, path, title);
+        }
+    }
+    if (allowEdit) {
+        let row = DIV({class : "container header" });
+        let l = LABEL({innerText : "New file: ", class : "three"});
+        row.appendChild(l);
+        let fname = INPUT({class : "three", type : "text" });
+        row.appendChild(fname);
+        let d = DIV({ class : "three" });
+        let editBtn = BUTTON({class: "orange", innerText: "Edit"});
+        d.appendChild(editBtn);
+        row.appendChild(d);
+        table.appendChild(row);
+    }
+    e(panel).style.display = "block";
+}
+
+/* Form controls
+ */
 function setToggle(name, value) {
     let enabled = e(`${name}-enabled`);
     let disabled = e(`${name}-disabled`);
@@ -490,7 +639,7 @@ function setOnOff(name, value) {
 
 function getOnOffValue(name) {
     let btn = e(name);
-    return e.classList.contains("green");
+    return btn.classList.contains("green");
 }
 
 function getAndCheckInputNumber(name, min, max) {
@@ -501,7 +650,7 @@ function getAndCheckInputNumber(name, min, max) {
         return value;
     } else {
         input.classList.add("red");
-        return Number.NaN;
+        return INVALID_DATA;
     }
 }
 
@@ -510,20 +659,26 @@ async function getAndCheckExistingFile(name, enabled) {
     return e(name).value;
 }
 
-function checkJSONIsValid(object) {
-    for (let key in object) {
-        if (typeof(object[key]) == 'number' && isNaN(object[key])) {
-            return false;
+function checkFormValidAndSend(json, path) {
+    for (let key in json) {
+        if (json[key] == INVALID_DATA) {
+            notification("Invalid form values detected. Please fix and then try again", "red");
+            return;
         }
     }
-    return true;
+    uploadFileContents(path, JSON.stringify(json), "text/json");
 }
 
 const SETTINGS_FILE="player/settings.json";
 const ALARM_FILE="player/alarm.json";
-const GRETTING_FILE="player/greeting.json";
+const GREETING_FILE="player/greeting.json";
 const PLAYLISTS_FILE="player/playlists.json";
+const NETWORK_FILE="player/wifi.json";
 const RADIO_FILE="player/radio.json";
+const WT_FILE = "player/bot.json";
+
+// invalid data marker
+const INVALID_DATA = { _ : "invalid" };
 
 async function getStatus() {
     let refresh = e("status-refresh");
@@ -547,9 +702,64 @@ async function getStatus() {
     refresh.disabled = false;
 }
 
-async function getSettings() {
+async function expand(name) {
+    let form = e(`${name}-form`);
+    if (! form.initialized) {
+        let x = await window[`get_${name}`]();
+        if (!x)
+            return;
+        form.initialized = true;
+    }
+    form.style.display = "flex";
+    e(`${name}-save`).style.display = "inline";
+    e(`${name}-edit`).style.display = "none";
+    e(`${name}-close`).style.display = "inline";
+}
+
+function collapse(name) {
+    e(`${name}-form`).style.display = "none";
+    e(`${name}-save`).style.display = "none";
+    e(`${name}-close`).style.display = "none";
+    e(`${name}-edit`).style.display = "inline";
+}
+
+async function get_network() {
+    let json = await downloadJSON(NETWORK_FILE);
+    if (json) {
+        e("network-ap-ssid").value = json["ap"]["ssid"];
+        e("network-ap-password").value = json["ap"]["password"];
+        e("network-1-ssid").value = json["networks"][0]["ssid"];
+        e("network-1-password").value = json["networks"][0]["password"];
+        e("network-2-ssid").value = json["networks"][1]["ssid"];
+        e("network-2-password").value = json["networks"][1]["password"];
+        e("network-3-ssid").value = json["networks"][2]["ssid"];
+        e("network-3-password").value = json["networks"][2]["password"];
+        return true;
+    } else {
+        return false;
+    }
+}
+
+async function save_network() {
+    let stuff = {
+        ap : {
+            ssid : e("network-ap-ssid").value,
+            password : e("network-ap-password").value
+        },
+        networks : new Array()
+    }
+    for (let i = 1; i <= 3; i++) {
+        networks.push({
+            ssid : e(`network-${i}-ssid`).value,
+            ssid : e(`network-${i}-password`).value,
+        });
+    }
+    checkFormValidAndSend(stuff, NETWORK_FILE);
+}
+
+async function get_settings() {
     let json = await downloadJSON(SETTINGS_FILE);
-    if (json != undefined) {
+    if (json) {
         e("settings-speaker-max").value = json["maxSpeakerVolume"];
         e("settings-headphones-max").value = json["maxHeadphonesVolume"];
         e("settings-brightness-max").value = json["maxBrightness"];
@@ -559,17 +769,13 @@ async function getSettings() {
         setToggle("settings-wt", json["walkieTalkieEnabled"]);
         e("settings-timezone").value = json["timezone"];
         e("settings-sync-hour").value = json["syncHour"];
-        e("settings-form").style.display = "flex";
-        e("settings-edit").style.display = "none";
-        e("settings-save").style.display = "inline";
+        return true;
     } else {
-        e("settings-form").style.display = "none";
-        e("settings-edit").style.display = "inline";
-        e("settings-save").style.display = "none";
+        return false;
     }
 }
 
-async function saveSettings() {
+async function save_settings() {
     let stuff = {
         maxSpeakerVolume : getAndCheckInputNumber("settings-speaker-max", 0, 15),
         maxHeadphonesVolume : getAndCheckInputNumber("settings-headphones-max", 0, 15),
@@ -581,17 +787,12 @@ async function saveSettings() {
         lightsEnabled : getToggleValue("settings-lights"),
         walkieTalkieEnabled : getToggleValue("settings-wt")
     };
-    if (checkJSONIsValid(stuff)) {
-        let json = JSON.stringify(stuff);
-        uploadFileContents(SETTINGS_FILE, json, "text/json");
-    } else {
-        alert("invalid");
-    }
+    checkFormValidAndSend(stuff, SETTINGS_FILE);
 }
 
-async function getAlarm() {
+async function get_alarm() {
     let json = await downloadJSON(ALARM_FILE);
-    if (json != undefined) {
+    if (json) {
         setToggle("alarm", json["enabled"]);
         e("alarm-h").value = json["h"];
         e("alarm-m").value = json["m"];
@@ -603,17 +804,13 @@ async function getAlarm() {
         setOnOff("alarm-sat", json["sat"]);
         setOnOff("alarm-sun", json["sun"]);
         e("alarm-file").value = json["file"];
-        e("alarm-form").style.display = "flex";
-        e("alarm-edit").style.display = "none";
-        e("alarm-save").style.display = "inline";
+        return true;
     } else {
-        e("alarm-form").style.display = "none";
-        e("alarm-edit").style.display = "inline";
-        e("alarm-save").style.display = "none";
+        return false;
     }
 }
 
-async function saveAlarm() {
+async function save_alarm() {
     let stuff = {
         enabled : getToggleValue("alarm"),
         h : getAndCheckInputNumber("alarm-h", 0, 23),
@@ -625,51 +822,42 @@ async function saveAlarm() {
         fri : getOnOffValue("alarm-fri"),
         sat : getOnOffValue("alarm-sat"),
         sun : getOnOffValue("alarm-sun"),
-        file : getAndCheckExistingFile("alarm-file", getToggleValue("alarm"))
+        file : await getAndCheckExistingFile("alarm-file", getToggleValue("alarm"))
     };
-    if (checkJSONIsValid(stuff)) {
-        let json = JSON.stringify(stuff);
-        uploadFileContents(ALARM_FILE, json, "text/json");
-    } else {
-        alert("invalid");
-    }
+    await checkFormValidAndSend(stuff, ALARM_FILE);
+    sendCommand("reload_alarm");
 }
 
 /** Greeting settings. 
  */
 
-async function getGreeting() {
-    let json = await downloadJSON("player/greeting.json");
-    if (json != undefined) {
+async function get_greeting() {
+    let json = await downloadJSON(GREETING_FILE);
+    if (json) {
         for (let i = 0; i <= 2; i++) {
             setToggle(`greeting-${i}`, json[i]["enabled"]);
             e(`greeting-${i}-d`).value = json[i]["d"];
             e(`greeting-${i}-m`).value = json[i]["m"];
             e(`greeting-${i}-file`).value = json[i]["file"];
         }
-        e("greeting-form").style.display = "flex";
-        e("greeting-edit").style.display = "none";
-        e("greeting-save").style.display = "inline";
+        return true;
     } else {
-        e("greeting-form").style.display = "none";
-        e("greeting-edit").style.display = "inline";
-        e("greeting-save").style.display = "none";
+        return false;
     }
 }
 
-async function saveGreeting() {
+async function save_greeting() {
     let stuff = new Array();
-    for (let i = 0; i <= 2; i++) {
+    for (let i = 0; i < 3; i++) {
         let alarm = {
             enabled : getToggleValue(`greeting-${i}`),
-            d : getAndCheckInputValue(`greeting-${i}-d`, 1, 31),
-            m : getAndCheckInputValye(`greeting-${i}-m`, 1, 12),
-            file : getAndCheckExistingFile(`greeting-${i}-file`, getToggleValue(`greeting-${i}`))
+            d : getAndCheckInputNumber(`greeting-${i}-d`, 1, 31),
+            m : getAndCheckInputNumber(`greeting-${i}-m`, 1, 12),
+            file : await getAndCheckExistingFile(`greeting-${i}-file`, getToggleValue(`greeting-${i}`))
         };
         stuff.push(alarm);
     }
-    let json = JSON.stringify(stuff);
-    uploadFileContents(GREETING_FILE, json, "text/json");
+    checkFormValidAndSend(stuff, GREETING_FILE);
 }
 
 /** MP3 Playlists
@@ -677,32 +865,26 @@ async function saveGreeting() {
     List of playlists and 
  */
 
- async function getPlaylists() {
+ async function get_playlists() {
      let json = await downloadJSON(PLAYLISTS_FILE);
      let form = e("playlists-form");
      form.innerHTML = "";
-     if (json != undefined) {
+     if (json) {
         for (let i = 0; i <= 7; i++) {
             {
-                let l = document.createElement("label");
-                l.innerText = `${i + 1}:`
+                let l = LABEL({ innerText : `${i + 1}`});
                 form.appendChild(l);
-                let d = document.createElement("div");
-                let input = document.createElement("input");
-                input.id = `playlist-${i}`;
-                input.type = "text";
-                input.value = json[i].name;
+                let d = DIV();
+                let input = INPUT({ id :  `playlist-${i}`, type : "text",  value : json[i].name});
                 d.appendChild(input);
                 d.append(" (name)");
                 form.appendChild(d);
             }
             {
-                form.appendChild(document.createElement("label"));
-                let d = document.createElement("div");
-                let btnEnabled = document.createElement("button");
-                btnEnabled.id = `playlist-${i}-enabled`;
-                btnEnabled.innerText = "Enabled";
-                let btnEdit = document.createElement("button"); 
+                form.appendChild(LABEL());
+                let d = DIV();
+                let btnEnabled = BUTTON({ id : `playlist-${i}-enabled`, innerText : "Enabled"});
+                let btnEdit = BUTTON({ innerText : "Edit" });
                 btnEdit.innerText = "Edit";
                 btnEdit.onclick = async (event) => {
                     event.preventDefault();
@@ -716,100 +898,96 @@ async function saveGreeting() {
                 setOnOff(btnEnabled.id, json[i]["enabled"]);
             }
         }
-        e("playlists-form").style.display = "flex";
-        e("playlists-edit").style.display = "none";
-        e("playlists-save").style.display = "inline";
+        return true;
     } else {
-        e("playlists-form").style.display = "none";
-        e("playlists-edit").style.display = "inline";
-        e("playlists-save").style.display = "none";
+        return false;
     }
-
- }
-
-async function openDir(panel, path, title) {
-    //let json = await getJSON("sdls");
-    let json = await getJSON(`sdls?path=${path}`); 
-    e(`${panel}-title`).innerText = title;
-    let table = e(`${panel}-table`);
-    table.innerHTML = "";
-    let i = 0;
-    for (const entry of json) {
-        let row = DIV({ class : "container" });
-        let l = LABEL({ class : "three" });
-        let a = A({ innerText : entry["name"] });
-        l.appendChild(a);
-        if (entry["size"] == "dir") {
-            // TODO onclick opens the folder in the same panel
-        } else {
-            a.href = `sd?path=${path}/${entry["name"]}`;
-        }
-        row.appendChild(l);
-        {
-            let d = DIV({ class : "three" });
-            d.append(entry["size"]);
-            row.appendChild(d);
-        }
-        {
-            let d = DIV({ class : "three" });
-            let btnDelete = BUTTON({ class : "red", innerText : "Delete" });
-            d.appendChild(btnDelete);
-            row.appendChild(d);
-        }
-        ++i;
-        if (i % 2 == 0)
-            row.classList.add("even-row");
-        table.appendChild(row);
-    }
-    {
-        let row = DIV({class : "container header" });
-        let l = LABEL({innerText : "Upload file: ", class : "three"});
-        row.appendChild(l);
-        let fname = INPUT({class : "three", type : "text" });
-        row.appendChild(fname);
-        let d = DIV({ class : "three" });
-        let file = INPUT({ type: "file", id :  `${panel}-upload`, name : "filename"});
-        file.style.display = "none";
-        let fileBtn = LABEL({ innerText: "Select File", htmlFor : file.id, class : "upload-button green" });
-        let upload = BUTTON({ class : "blue", innerText: "Upload" });
-        d.appendChild(file);
-        d.appendChild(fileBtn);
-        d.appendChild(upload);
-        row.appendChild(d);
-        table.appendChild(row);
-        upload.onclick = async (event) => {
-            event.preventDefault();
-            await uploadFile(`${path}/${fname.value}`, file);
-            openDir(panel, path, title);
-        }
-    }
-    e(panel).style.display = "block";
 }
+
+async function save_playlists() {
+    let stuff = new Array();
+    for (let i = 0; i < 8; i++) {
+        let playlist = {
+            enabled : getToggleValue(`playlist-${i}-enabled`),
+            name : e(`playlist-${id}`).value
+        };
+        stuff.push(playlist);
+    }
+    checkFormValidAndSend(stuff, PLAYLISTS_FILE);
+}
+
 
 /** Radio settings. 
  */
-async function getRadio() {
+async function get_radio() {
     let json = await downloadJSON(RADIO_FILE);
-    if (json != undefined) {
+    if (json) {
         setToggle("radio-mono", json["forceMono"]);
         setToggle("radio-manual", json["manualTuning"]);
-        for (let i = 0; i <= 7; i++) {
-            //setToggle(`greeting-${i}`, json[i]["enabled"]);
+        for (let i = 0; i < 8; i++) {
+            if (! e(`radio-freq-${i}`)) {
+                let d = DIV();
+                d.appendChild(INPUT({id : `radio-freq-${i}`, type : "text", size : "5"}));
+                d.append(" (76.0 - 108.0 MHz), name: ");
+                d.appendChild(INPUT({id : `radio-name-${i}`, type : "text" }));
+                form.appendChild(LABEL());
+                form.appendChild(d);
+            }
             e(`radio-freq-${i}`).value = json["stations"][i]["freq"] / 10;
             e(`radio-name-${i}`).value = json["stations"][i]["name"];
         }
-        e("radio-form").style.display = "flex";
-        e("radio-edit").style.display = "none";
-        e("radio-save").style.display = "inline";
+        return true;
     } else {
-        e("radio-form").style.display = "none";
-        e("radio-edit").style.display = "inline";
-        e("radio-save").style.display = "none";
+        return false;
     }
 }
 
+async function save_radio() {
+    let stuff = {
+        forceMono : getToggleValue("radio-mono"),
+        manualTuning : getToggleValur("radio-manual"),
+        stations : new Array()
+    }
+    for (let i = 0; i < 8; ++i) {
+        stuff.stations.push({
+            freq : getAndCheckInputNumber(`radio-freq-${i}`, 76, 108),
+            name : e(`radio-name-${i}`).value
+        })
+    }
+    checkFormValidAndSend(stuff, RADIO_FILE);
+}
+
+/** Walkie-talkie
+ */
+
+ async function get_wt() {
+    let json = await downloadJSON(WT_FILE);
+    if (json) {
+        e("wt-bot-id").value = json["id"];
+        e("wt-bot-token").value = json["token"];
+        e("wt-admin-id").value = json["adminId"];
+        e("wt-chat-id").value = json["chatId"];
+        e("wt-fingerprint").value = json["fingerprint"];
+        return true;
+    } else {
+        return false;
+    }
+ }
+
+ async function save_wt() {
+    let stuff = {
+        id : e("wt-bot-id").value,
+        token : e("wt-bot-token").value,
+        adminId : e("wt-admin-id").value,
+        chatId : e("wt-chat-id").value,
+        fingerprint : e("wt-fingerprint").value
+    };
+    checkFormValidAndSend(stuff, WT_FILE);
+ }
 
 
+/** Extras
+ */
 
 async function sendCommand(cmd) {
     return new Promise(resolve => {
@@ -853,30 +1031,20 @@ function navSelect(name) {
             e(x).style.display="none";
         }
     }
-    if (name == "playlists") {
-        if (e("playlists-form").style.display == "none")
-            getPlaylists();
-    } else if (name == "radio") {
-        if (e("radio-form").style.display == "none")
-            getRadio();
-    }
+    if (name == "playlists" || name == "radio" || name == "wt")
+        expand(name);
 }
 
 
 function onLoad() {
     getStatus();   
-    notification("This is a cool test", "red"); 
 }
 
 
     </script>
   </head>
   <body onload="onLoad()">
-    <div class="modal" style="display:none">
-        <div class="notification blue">
-            Foobar!
-        </div>       
-    </div>
+    <div id="modal"></div>
     <div class="navbar spacer"></div>
     <div class="notifications spacer" id="notifications-spacer"></div>
     <nav>
@@ -891,6 +1059,8 @@ function onLoad() {
         <div class="notifications" id="notifications">
         </div>       
     </nav>
+
+<div id="contents">
 
     <div class="container" id="settings">
         <div class="panel twelve">
@@ -914,10 +1084,56 @@ function onLoad() {
 
         <div class="panel twelve">
             <div class="header">
+                <h3>Network</h3>
+                <div class="buttons">
+                    <button id="network-save" class="hidden red" onclick="save_network()">Save</button>
+                    <button id="network-edit" onclick="expand('network')">Edit</button>
+                    <button id="network-close" class="hidden" onclick="collapse('network')">Close</button>
+                </div>
+            </div>
+            <form id="network-form" style="display:none">
+                <label>AP:</label>
+                <div>
+                    <input id="network-ap-ssid" type="text"> (name)
+                </div>
+                <label></label>
+                <div>
+                    <input id="network-ap-password" type="text"> (password)
+                </div>
+                <label>Network 1:</label>
+                <div>
+                    <input id="network-1-ssid" type="text"> (name)
+                </div>
+                <label></label>
+                <div>
+                    <input id="network-1-password" type="password"> (password)
+                </div>
+                <label>Network 2:</label>
+                <div>
+                    <input id="network-2-ssid" type="text"> (name)
+                </div>
+                <label></label>
+                <div>
+                    <input id="network-2-password" type="password"> (password)
+                </div>
+                <label>Network 3:</label>
+                <div>
+                    <input id="network-3-ssid" type="text"> (name)
+                </div>
+                <label></label>
+                <div>
+                    <input id="network-3-password" type="password"> (password)
+                </div>
+            </form>
+        </div>
+
+        <div class="panel twelve">
+            <div class="header">
                 <h3>Settings</h3>
                 <div class="buttons">
-                    <button id="settings-edit" onclick="getSettings()">Edit</button>
-                    <button id="settings-save" onclick="saveSettings()" class="red" style="display:none">Save</button>
+                    <button id="settings-save" class="hidden red" onclick="save_settings()">Save</button>
+                    <button id="settings-edit" onclick="expand('settings')">Edit</button>
+                    <button id="settings-close" class="hidden" onclick="collapse('settings')">Close</button>
                 </div>
             </div>
             <form id = "settings-form" style="display:none">
@@ -968,8 +1184,9 @@ function onLoad() {
             <div class="header">
                 <h3>Alarm Clock</h3>
                 <div class="buttons">
-                    <button id="alarm-edit" onclick="getAlarm()">Edit</button>
-                    <button id="alarm-save" onclick="saveAlarm()" class="red" style="display:none">Save</button>
+                    <button id="alarm-save" class="hidden red" onclick="save_alarm()">Save</button>
+                    <button id="alarm-edit" onclick="expand('alarm')">Edit</button>
+                    <button id="alarm-close" class="hidden" onclick="collapse('alarm')">Close</button>
                 </div>
             </div>
             <form id="alarm-form" style="display:none">
@@ -1004,8 +1221,9 @@ function onLoad() {
             <div class="header">
                 <h3>Greetings</h3>
                 <div class="buttons">
-                    <button id="greeting-edit" onclick="getGreeting()">Edit</button>
-                    <button id="greeting-save" onclick="saveGreeting()" class="red" style="display:none">Save</button>
+                    <button id="greeting-save" class="hidden red" onclick="save_greeting()">Save</button>
+                    <button id="greeting-edit" onclick="expand('greeting')">Edit</button>
+                    <button id="greeting-close" class="hidden" onclick="collapse('greeting')">Close</button>
                 </div>
             </div>
             <form id="greeting-form" style="display:none">
@@ -1060,8 +1278,9 @@ function onLoad() {
             <div class="header">
                 <h3>Playlists</h3>
                 <div class="buttons">
-                    <button id="playlists-edit" onclick="getPlaylists()">Edit</button>
-                    <button id="playlists-save" onclick="savePlaylists()" class="red" style="display:none">Save</button>
+                    <button id="playlists-save" class="hidden red" onclick="save_playlists()">Save</button>
+                    <button id="playlists-edit" onclick="expand('playlists')">Edit</button>
+                    <button id="playlists-close" class="hidden" onclick="collapse('playlists')">Close</button>
                 </div>
             </div>
             <form id="playlists-form" style="display:none">
@@ -1087,8 +1306,9 @@ function onLoad() {
             <div class="header">
                 <h3>FM Radio</h3>
                 <div class="buttons">
-                    <button id="radio-edit" onclick="getRadio()">Edit</button>
-                    <button id="radio-save" onclick="saveRadio()" class="red" style="display:none">Save</button>
+                    <button id="radio-save" class="hidden red" onclick="save_radio()">Save</button>
+                    <button id="radio-edit" onclick="expand('radio')">Edit</button>
+                    <button id="radio-close" class="hidden" onclick="collapse('radio')">Close</button>
                 </div>
             </div>
             <form id="radio-form" style="display:none">
@@ -1106,39 +1326,51 @@ function onLoad() {
                 <div>
                     <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
                 </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-1" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-1">
-                </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-2" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-2">
-                </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-3" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-3">
-                </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-4" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-4">
-                </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-5" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-5">
-                </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-6" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-6">
-                </div>
-                <label></label>
-                <div>
-                    <input id="radio-freq-7" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-7">
-                </div>
             </form>
         </div>
     </div>
 
     <div class="container" id="wt" style="display:none">
+        <div class="panel twelve" id="wt-settings">
+            <div class="header">
+                <h3>Walkie Talkie Settings</h3>
+                <div class="buttons">
+                    <button id="wt-save" class="hidden red" onclick="save_wt()">Save</button>
+                    <button id="wt-edit" onclick="expand('wt')">Edit</button>
+                    <button id="wt-close" class="hidden" onclick="collapse('wt')">Close</button>
+                </div>
+            </div>
+            <form id="wt-form" style="display:none">
+                <label>Bot ID:</label>
+                <div>
+                    <input id="wt-bot-id" type="text">
+                </div>
+                <label>Bot token:</label>
+                <div>
+                    <input id="wt-bot-token" type="text">
+                </div>
+                <label>Admin ID:</label>
+                <div>
+                    <input id="wt-admin-id" type="text">
+                </div>
+                <label>Chat ID:</label>
+                <div>
+                    <input id="wt-chat-id" type="text">
+                </div>
+                <label>Fingerprint:</label>
+                <div>
+                    <input id="wt-fingerprint" type="text">
+                </div>
+                <label>Certificate:</label>
+                <div>
+                    <button>Download</button>
+                    <input style="display:none" type="file" id="wt-cert" name="wt-cert">
+                    <label for="wt-cert" class="upload-button green">Select file</label>
+                    <button class="red">Upload</button>
+                </div>
+            </form>
+        </div>
+
     </div>
 
     <div class="container" id="expert" style="display:none">
@@ -1167,11 +1399,13 @@ function onLoad() {
 
         <div class="panel twelve" id="expert-ls">
             <div class ="header">
-                <h3>SD Card Contents</h3>
+                <h3 id="expert-ls-title">SD Card Contents</h3>
                 <div class="buttons">
-                    <button>Refresh</button>
+                    <button onclick="openDir('expert-ls', '/', 'SD - /', true)">Open</button>
                 </div>
             </div>
+            <div id="expert-ls-table">
+            </div>            
         </div>
 
         <div class="panel twelve">
@@ -1195,6 +1429,9 @@ function onLoad() {
         </div>
 
     </div>
+
+</div>
+
     <iframe name="dummyframe" id="dummyframe" style="display: none;"></iframe>
   </body>
 </html>
