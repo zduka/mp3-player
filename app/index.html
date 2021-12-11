@@ -382,6 +382,8 @@ function notification(text, color, timeout) {
         timeout = 10000;
     if (timeout != 0)
         setTimeout(close, 10000);
+    // return the notification close action
+    return close;
 }
 
 function showModal(heading, text, color) {
@@ -406,7 +408,7 @@ function clearModal() {
  */
 async function getJSON(url) {
     return new Promise(resolve => {
-        showModal("Requesting...", "Please wait, this might take a while...", "blue");
+        let nClose = notification("Requesting...", "blue");
         let req = new XMLHttpRequest();
         req.open("GET", url);
         req.setRequestHeader("Accept", "application/json");
@@ -420,7 +422,7 @@ async function getJSON(url) {
                     resolve(undefined);
                     notification(`Request for ${url} failed.`, "red");
                 }
-                clearModal();
+                nClose();
             }
         }
         req.send();
@@ -432,8 +434,8 @@ async function downloadFile(path) {
         showModal("Requesting...", "Please wait, this might take a while...", "blue");
         let req = new XMLHttpRequest();
         // TODO this is only for local checks
-        req.open("GET", path);
-        //req.open("GET", `sd?path=${path}`);
+        //req.open("GET", path);
+        req.open("GET", `sd?path=${path}`);
         req.onreadystatechange = function () {
             if (this.readyState == 4) {
                 if (this.status == 200) {
@@ -508,16 +510,58 @@ async function uploadFile(path, file) {
     });
 }
 
-/* Helper functions 
- */
-
-async function openDir(panel, path, title, allowEdit) {
-    // TODO this is only for checking locally
-    let json = await getJSON("sdls");
-    //let json = await getJSON(`sdls?path=${path}`); 
-    e(`${panel}-title`).innerText = title;
+async function openDirBack(panel, title, allowEdit) {
     let table = e(`${panel}-table`);
     table.innerHTML = "";
+    let path = table.path;
+    if (path.length > 1) {
+        path.pop();
+        openDir(panel, path, title, allowEdit);
+    }
+}
+
+async function collapseDir(panel, title) {
+    let table = e(`${panel}-table`);
+    table.innerHTML = "";
+    table.path = undefined;
+    e(`${panel}-title`).innerText = title;    
+    let btnBack = e(`${panel}-back`);
+    let btnOpen = e(`${panel}-open`);
+    let btnClose = e(`${panel}-close`);
+    if (btnOpen)
+        btnOpen.style.display = "inline";
+    if (btnClose)
+        btnClose.style.display = "none";
+    if (btnBack) 
+        btnBack.style.display = "none";
+}
+
+function joinPath(dir, file) {
+    if (dir == "/")
+        return `${dir}${file}`;
+    else
+        return `${dir}/${file}`;
+    
+}
+
+/* Opens the given directory in a selected panel.
+
+   Sets the panel's table path attribute to the currently viewed path. 
+ */
+async function openDir(panel, path, title, allowEdit) {
+    pathStr = path.join("/");
+    if (pathStr.startsWith("//"))
+        pathStr = pathStr.substr(1);
+    // TODO this is only for checking locally
+    //let json = await getJSON("sdls");
+    let json = await getJSON(`sdls?path=${pathStr}`); 
+    if (title) 
+        e(`${panel}-title`).innerText = title;
+    else 
+        e(`${panel}-title`).innerText = `SD - ${pathStr}`;
+    let table = e(`${panel}-table`);
+    table.innerHTML = "";
+    table.path = path;
     let i = 0;
     for (const entry of json) {
         let row = DIV({ class : "container" });
@@ -525,9 +569,14 @@ async function openDir(panel, path, title, allowEdit) {
         let a = A({ innerText : entry["name"] });
         l.appendChild(a);
         if (entry["size"] == "dir") {
-            // TODO onclick opens the folder in the same panel
+            a.onclick = () => {
+                let p = path;
+                p.push(entry["name"]);
+                openDir(panel, p, title, allowEdit);
+            }
+            a.href="#";
         } else {
-            a.href = `sd?path=${path}/${entry["name"]}`;
+            a.href = `sd?path=${joinPath(path,entry["name"])}`;
         }
         row.appendChild(l);
         {
@@ -539,8 +588,11 @@ async function openDir(panel, path, title, allowEdit) {
             let d = DIV({ class : "three" });
             let btnDelete = BUTTON({ class : "red", innerText : "Delete" });
             d.appendChild(btnDelete);
-            if (allowEdit && entry["size"] != "dir" && entry["name"].endsWith(".txt")) {
+            if (allowEdit && entry["size"] != "dir" && ! entry["name"].endsWith(".mp3") && ! entry["name"].endsWith(".wav")) {
                 let btnEdit = BUTTON({ class : "orange", innerText : "Edit"});
+                btnEdit.onclick = function() {
+                    editFile(joinPath(pathStr,entry["name"]));
+                }
                 d.appendChild(btnEdit);
             }
             row.appendChild(d);
@@ -580,47 +632,29 @@ async function openDir(panel, path, title, allowEdit) {
         row.appendChild(fname);
         let d = DIV({ class : "three" });
         let editBtn = BUTTON({class: "orange", innerText: "Edit"});
+        editBtn.onclick = function () {
+            if (fname.value == "")
+                notification("Filename must be specified", "red");
+            else
+                newFile(joinPath(pathStr, fname.value));
+        }
         d.appendChild(editBtn);
         row.appendChild(d);
         table.appendChild(row);
     }
     e(panel).style.display = "block";
+    let btnBack = e(`${panel}-back`);
+    let btnOpen = e(`${panel}-open`);
+    let btnClose = e(`${panel}-close`);
+    if (btnOpen)
+        btnOpen.style.display = "none";
+    if (btnClose)
+        btnClose.style.display = "inline";
+    if (btnBack) 
+        btnBack.style.display = path.length == 1 ? "none" : "inline";
 }
-
 /* Form controls
  */
-function setToggle(name, value) {
-    let enabled = e(`${name}-enabled`);
-    let disabled = e(`${name}-disabled`);
-    if (! enabled.isSetup) {
-        let f = (event) => {
-            if (enabled.classList.contains("green")) {
-                enabled.classList.remove("green");
-                disabled.classList.add("red");
-            } else {
-                enabled.classList.add("green");
-                disabled.classList.remove("red");
-            }
-            event.preventDefault();
-        };
-        enabled.onclick = f
-        disabled.onclick = f;
-        enabled.isSetup = true;
-    }
-    if (value) {
-        enabled.classList.add("green");
-        disabled.classList.remove("red");
-    } else {
-        enabled.classList.remove("green");
-        disabled.classList.add("red");
-    }
-}
-
-function getToggleValue(name) {
-    let enabled = e(`${name}-enabled`);
-    let disabled = e(`${name}-disabled`);
-    return enabled.classList.contains("green");
-}
 
 function setOnOff(name, value) {
     let btn = e(name);
@@ -700,6 +734,8 @@ async function getStatus() {
     }
     refresh.innerText = "Refresh"
     refresh.disabled = false;
+    // update status every minute
+    setTimeout(getStatus, 60000);
 }
 
 async function expand(name) {
@@ -763,10 +799,10 @@ async function get_settings() {
         e("settings-speaker-max").value = json["maxSpeakerVolume"];
         e("settings-headphones-max").value = json["maxHeadphonesVolume"];
         e("settings-brightness-max").value = json["maxBrightness"];
-        setToggle("settings-radio", json["radioEnabled"]);
-        setToggle("settings-disco", json["discoEnabled"]);
-        setToggle("settings-lights", json["lightsEnabled"]);
-        setToggle("settings-wt", json["walkieTalkieEnabled"]);
+        setOnOff("settings-radio-enabled", json["radioEnabled"]);
+        setOnOff("settings-disco-enabled", json["discoEnabled"]);
+        setOnOff("settings-lights-enabled", json["lightsEnabled"]);
+        setOnOff("settings-wt-enabled", json["walkieTalkieEnabled"]);
         e("settings-timezone").value = json["timezone"];
         e("settings-sync-hour").value = json["syncHour"];
         return true;
@@ -782,10 +818,10 @@ async function save_settings() {
         maxBrightness : getAndCheckInputNumber("settings-brightness-max", 0, 255),
         timezone : getAndCheckInputNumber("settings-timezone", -12, 12),
         syncHour : getAndCheckInputNumber("settings-sync-hour", 0, 23),
-        radioEnabled : getToggleValue("settings-radio"),
-        discoEnabled : getToggleValue("settings-disco"),
-        lightsEnabled : getToggleValue("settings-lights"),
-        walkieTalkieEnabled : getToggleValue("settings-wt")
+        radioEnabled : getOnOffValue("settings-radio-enabled"),
+        discoEnabled : getOnOffValue("settings-disco-enabled"),
+        lightsEnabled : getOnOffValue("settings-lights-enabled"),
+        walkieTalkieEnabled : getOnOffValue("settings-wt-enabled")
     };
     checkFormValidAndSend(stuff, SETTINGS_FILE);
 }
@@ -793,7 +829,7 @@ async function save_settings() {
 async function get_alarm() {
     let json = await downloadJSON(ALARM_FILE);
     if (json) {
-        setToggle("alarm", json["enabled"]);
+        setOnOff("alarm-enabled", json["enabled"]);
         e("alarm-h").value = json["h"];
         e("alarm-m").value = json["m"];
         setOnOff("alarm-mon", json["mon"]);
@@ -812,7 +848,7 @@ async function get_alarm() {
 
 async function save_alarm() {
     let stuff = {
-        enabled : getToggleValue("alarm"),
+        enabled : getOnOffValue("alarm-enabled"),
         h : getAndCheckInputNumber("alarm-h", 0, 23),
         m : getAndCheckInputNumber("alarm-m", 0, 59),
         mon : getOnOffValue("alarm-mon"),
@@ -835,7 +871,7 @@ async function get_greeting() {
     let json = await downloadJSON(GREETING_FILE);
     if (json) {
         for (let i = 0; i <= 2; i++) {
-            setToggle(`greeting-${i}`, json[i]["enabled"]);
+            setOnOff(`greeting-${i}-enabled`, json[i]["enabled"]);
             e(`greeting-${i}-d`).value = json[i]["d"];
             e(`greeting-${i}-m`).value = json[i]["m"];
             e(`greeting-${i}-file`).value = json[i]["file"];
@@ -850,7 +886,7 @@ async function save_greeting() {
     let stuff = new Array();
     for (let i = 0; i < 3; i++) {
         let alarm = {
-            enabled : getToggleValue(`greeting-${i}`),
+            enabled : getOnOffValue(`greeting-${i}-enabled`),
             d : getAndCheckInputNumber(`greeting-${i}-d`, 1, 31),
             m : getAndCheckInputNumber(`greeting-${i}-m`, 1, 12),
             file : await getAndCheckExistingFile(`greeting-${i}-file`, getToggleValue(`greeting-${i}`))
@@ -870,25 +906,20 @@ async function save_greeting() {
      let form = e("playlists-form");
      form.innerHTML = "";
      if (json) {
-        for (let i = 0; i <= 7; i++) {
+        for (let i = 0; i < 8; i++) {
             {
                 let l = LABEL({ innerText : `${i + 1}`});
                 form.appendChild(l);
                 let d = DIV();
                 let input = INPUT({ id :  `playlist-${i}`, type : "text",  value : json[i].name});
                 d.appendChild(input);
-                d.append(" (name)");
-                form.appendChild(d);
-            }
-            {
-                form.appendChild(LABEL());
-                let d = DIV();
+                d.append(" (name) ");
                 let btnEnabled = BUTTON({ id : `playlist-${i}-enabled`, innerText : "Enabled"});
                 let btnEdit = BUTTON({ innerText : "Edit" });
                 btnEdit.innerText = "Edit";
                 btnEdit.onclick = async (event) => {
                     event.preventDefault();
-                    await openDir("playlist-edit", `${i + 1}`, `Playlist ${json[i].name}`);
+                    await openDir("playlist-edit", ["/", `${i + 1}`], `Playlist ${json[i].name}`);
                     e("playlists-settings").style.display = "none";
                 }
                 d.appendChild(btnEnabled);
@@ -908,8 +939,8 @@ async function save_playlists() {
     let stuff = new Array();
     for (let i = 0; i < 8; i++) {
         let playlist = {
-            enabled : getToggleValue(`playlist-${i}-enabled`),
-            name : e(`playlist-${id}`).value
+            enabled : getOnOffValue(`playlist-${i}-enabled`),
+            name : e(`playlist-${i}`).value
         };
         stuff.push(playlist);
     }
@@ -921,9 +952,10 @@ async function save_playlists() {
  */
 async function get_radio() {
     let json = await downloadJSON(RADIO_FILE);
+    let form = e("radio-form");
     if (json) {
-        setToggle("radio-mono", json["forceMono"]);
-        setToggle("radio-manual", json["manualTuning"]);
+        setOnOff("radio-mono-enabled", json["forceMono"]);
+        setOnOff("radio-manual-enabled", json["manualTuning"]);
         for (let i = 0; i < 8; i++) {
             if (! e(`radio-freq-${i}`)) {
                 let d = DIV();
@@ -944,8 +976,8 @@ async function get_radio() {
 
 async function save_radio() {
     let stuff = {
-        forceMono : getToggleValue("radio-mono"),
-        manualTuning : getToggleValur("radio-manual"),
+        forceMono : getOnOffValue("radio-mono-enabled"),
+        manualTuning : getOnOffValue("radio-manual-enabled"),
         stations : new Array()
     }
     for (let i = 0; i < 8; ++i) {
@@ -1004,17 +1036,36 @@ async function sendCommand(cmd) {
     });
 }
 
-async function debugLoad() {
-    let path = e("debug-file-path").value;
-    let contents = await downloadFile(path);
-    if (contents != undefined)
-        e("debug-file-contents").value = contents;
+
+async function editFile(filename) {
+    let contents = await downloadFile(filename);
+    if (contents != undefined) {
+        e("expert-ls").style.display = "none";
+        e("expert-edit-filename").innerText = filename;
+        e("expert-edit").style.display = "block";
+        e("expert-edit-contents").value = contents;
+    }
 }
 
-async function debugStore() {
-    let path = e("debug-file-path").value;
-    let contents = e("debug-file-contents").value;
-    uploadFileContents(path, contents);
+async function newFile(filename) {
+    e("expert-ls").style.display = "none";
+    e("expert-edit-filename").innerText = filename;
+    e("expert-edit").style.display = "block";
+    e("expert-edit-contents").value = "";
+}
+
+async function saveFile() {
+    let path = e("expert-edit-filename").innerText;
+    let contents = e("expert-edit-contents").value;
+    if (await uploadFileContents(path, contents)) {
+        e("expert-ls").style.display = "block";
+        e("expert-edit").style.display = "none";
+    }
+}
+
+async function closeFile() {
+    e("expert-ls").style.display = "block";
+    e("expert-edit").style.display = "none";
 }
 
 /* Selects the nav item. 
@@ -1149,25 +1200,12 @@ function onLoad() {
                 <div>
                     <input type="text" id="settings-brightness-max"> (0..255)
                 </div>
-                <label>FM Radio:</label>
+                <label>Features:</label>
                 <div>
-                    <button id="settings-radio-enabled">Enabled</button>
-                    <button id="settings-radio-disabled">Disabled</button>
-                </div>
-                <label>Disco:</label>
-                <div>
-                    <button id="settings-disco-enabled">Enabled</button>
-                    <button id="settings-disco-disabled">Disabled</button>
-                </div>
-                <label>Light Settings:</label>
-                <div>
-                    <button id="settings-lights-enabled">Enabled</button>
-                    <button id="settings-lights-disabled">Disabled</button>
-                </div>
-                <label>Walkie-Talkie:</label>
-                <div>
-                    <button id="settings-wt-enabled">Enabled</button>
-                    <button id="settings-wt-disabled" >Disabled</button>
+                    <button id="settings-radio-enabled">FM Radio</button>
+                    <button id="settings-disco-enabled">Disco</button>
+                    <button id="settings-lights-enabled">Lights Control</button>
+                    <button id="settings-wt-enabled">Walkie-Talkie</button>
                 </div>
                 <label>Timezone:</label>
                 <div>
@@ -1190,13 +1228,9 @@ function onLoad() {
                 </div>
             </div>
             <form id="alarm-form" style="display:none">
-                <label></label>
-                <div>
-                    <button id="alarm-enabled">Enabled</button>
-                    <button id="alarm-disabled">Disabled</button>
-                </div>
                 <label>Alarm:</label>
                 <div>
+                    <button id="alarm-enabled">Enabled</button>
                     <input id="alarm-h" type="text" size=3> :
                     <input id="alarm-m" type="text" size=3> (HH : MM, 0..23, 0..60)
                 </div>
@@ -1230,10 +1264,6 @@ function onLoad() {
                 <label>First:</label>
                 <div>
                     <button id="greeting-0-enabled">Enabled</button>
-                    <button id="greeting-0-disabled">Disabled</button>
-                </div>
-                <label></label>
-                <div>
                     <input id="greeting-0-d" type="text" size=3> /
                     <input id="greeting-0-m" type="text" size=3> (DD / MM, 1..31, 1..12)
                 </div>
@@ -1244,10 +1274,6 @@ function onLoad() {
                 <label>Second:</label>
                 <div>
                     <button id="greeting-1-enabled">Enabled</button>
-                    <button id="greeting-1-disabled">Disabled</button>
-                </div>
-                <label></label>
-                <div>
                     <input id="greeting-1-d" type="text" size=3> /
                     <input id="greeting-1-m" type="text" size=3> (DD / MM, 1..31, 1..12)
                 </div>
@@ -1258,10 +1284,6 @@ function onLoad() {
                 <label>Third:</label>
                 <div>
                     <button id="greeting-2-enabled">Enabled</button>
-                    <button id="greeting-2-disabled">Disabled</button>
-                </div>
-                <label></label>
-                <div>
                     <input id="greeting-2-d" type="text" size=3> /
                     <input id="greeting-2-m" type="text" size=3> (DD / MM, 1..31, 1..12)
                 </div>
@@ -1312,15 +1334,10 @@ function onLoad() {
                 </div>
             </div>
             <form id="radio-form" style="display:none">
-                <label>Force mono:</label>
+                <label>Features:</label>
                 <div>
-                    <button id="radio-mono-enabled">Enabled</button>
-                    <button id="radio-mono-disabled">Disabled</button>
-                </div>
-                <label>Manual Tuning:</label>
-                <div>
-                    <button id="radio-manual-enabled">Enabled</button>
-                    <button id="radio-manual-disabled">Disabled</button>
+                    <button id="radio-mono-enabled">Force Mono</button>
+                    <button id="radio-manual-enabled">Manual Tuning</button>
                 </div>
                 <label>Stations:</label>
                 <div>
@@ -1401,31 +1418,26 @@ function onLoad() {
             <div class ="header">
                 <h3 id="expert-ls-title">SD Card Contents</h3>
                 <div class="buttons">
-                    <button onclick="openDir('expert-ls', '/', 'SD - /', true)">Open</button>
+                    <button id = "expert-ls-back" onclick="openDirBack('expert-ls', false, true)" style="display:none">Back</button>
+                    <button id = "expert-ls-open" onclick="openDir('expert-ls', ['/'],false, true)">Open</button>
+                    <button id = "expert-ls-close" onclick="collapseDir('expert-ls','SD Card Contents')" style="display:none">Close</button>
                 </div>
             </div>
             <div id="expert-ls-table">
             </div>            
         </div>
 
-        <div class="panel twelve">
+        <div class="panel twelve" id="expert-edit" style="display:none">
             <div class="header">
-                <h3>Debug - FileEdit</h3>
+                <h3 id="expert-edit-filename">Debug - FileEdit</h3>
                 <div class="buttons">
-                    <button onclick="debugLoad()">Load</button>
-                    <button onclick="debugStore()" class="orange">Store</button>
+                    <button onclick="saveFile()" class="red">Store</button>
+                    <button onclick="closeFile()" >Close</button>
                 </div>
             </div>
-            <form>
-                <label>File:</label>
-                <div>
-                    <input type="text" id="debug-file-path"> (path of file to edit in server)
-                </div>
-                <label>Contents:</label>
-                <div>
-                    <textarea style="width:95%" rows="20" id="debug-file-contents"></textarea>
-                </div>
-            </form>
+            <div style="text-align:center; padding-top:10px;">
+                <textarea style="width:95%" rows="20" id="expert-edit-contents"></textarea>
+            </div>
         </div>
 
     </div>

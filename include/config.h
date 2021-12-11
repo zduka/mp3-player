@@ -3,6 +3,8 @@
 #define DEFAULT_AP_SSID "mp3-player"
 #define DEFAULT_AP_PASSWORD "mp3-player"
 
+#define HTTP_STATUS_BUSY_TIMEOUT (5 * 60)
+
 #define DEFAULT_TIMEZONE 1
 
 /** Timeout of the player depending on whether the player is playing, or idle. In minutes, values from 1 to 255 are supported. 

@@ -2,7 +2,7 @@
 #include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-//#include <ESP8266mDNS.h>
+#include <ESP8266mDNS.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <LittleFS.h>
@@ -154,9 +154,10 @@ public:
         setBusy(false); // just make sure we have no leftovers from resets & stuff
         setIdle(false);
         // now initialize the mode
+        LOG("State mode: %u", static_cast<uint8_t>(state_.mode()));
         currentMode_ = getModeFor(state_.mode(), state_.musicMode());
         // start with the greering mode, if not resetting the esp, or synchronizing
-        if (! state_.espReset() && currentMode_ != & syncMode_ && currentMode_ != & alarmMode_)
+        if (! state_.espReset() && (currentMode_ != & syncMode_) && (currentMode_ != & alarmMode_))
             currentMode_ = & greetingMode_;
         // enter the desired mode
         setMode(currentMode_);
@@ -312,18 +313,22 @@ public:
             maxLoopTime_ = 0;
             lastSecondMillis_ += 1000;
             ex_.time.secondTick();
+            // decrement server activity counter
+            if (serverActive_ > 0)
+                --serverActive_;
         }
         if (status_.irq)
             status_.recording ? updateRecording() : updateState();
         // playback loop
         if (! state_.idle())
             playbackLoop();
-        // let the current mode do what it needs to 
-        currentMode_->loop(secondTick);
+        // let the current mode do what it needs to, as long the webserver is not active...
+        if (serverActive_ == 0)
+            currentMode_->loop(secondTick);
         // if connected to the internet, handle the server & mcast dns (http://mp3-player.local)
         if (state_.wifiStatus() == WiFiStatus::Connected || state_.wifiStatus() == WiFiStatus::AP) {
             server_.handleClient();
-            //MDNS.update();
+            MDNS.update();
         }
     }
 
@@ -930,21 +935,12 @@ private:
 
     static void initializeServer() {
         LOG("Initializing WebServer...");
-        //if (!MDNS.begin("mp3-player"))
-        //    LOG("  mDNS failed to initialize");
+        if (!MDNS.begin("mp3-player"))
+            LOG("  mDNS failed to initialize");
         server_.onNotFound(http404);
         server_.serveStatic("/", LittleFS, "/index.html");
-        /*
-        server_.serveStatic("/app.js", LittleFS, "/app.js");
-        server_.serveStatic("/glyphicons.woff2", LittleFS, "/glyphicons.woff2");
-        server_.serveStatic("/favicon.ico", LittleFS, "/favicon.ico");
-        server_.serveStatic("/bootstrap.min.css", LittleFS, "/bootstrap.min.css");
-        server_.serveStatic("/jquery-1.12.4.min.js", LittleFS, "/jquery-1.12.4.min.js");
-        server_.serveStatic("/bootstrap.min.js", LittleFS, "/bootstrap.min.js");
-        */
         server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
-        server_.on("/alarm", httpAlarm);
         server_.on("/sdls", httpSDls);
         server_.on("/sd", httpSD);
         server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
@@ -988,7 +984,6 @@ private:
             LOG("http reload alarm");
             alarmMode_.initialize();
             sendExtendedState(ex_.alarm);
-            return httpAlarm();
         } else if (cmd == "sync") {
             LOG("running sync");
             updateNTPTime();
@@ -1031,13 +1026,7 @@ private:
         state_.wifiStatus() == WiFiStatus::AP ? 1 : 0
         );
         server_.send(200, JSON_MIME, buf, len);
-    }
-
-    static void httpAlarm() {
-        LOG("http alarm");
-        char buffer[256];
-        int len = alarmMode_.alarmToJson(buffer, sizeof(buffer));
-        server_.send(200, JSON_MIME, buffer, len);
+        serverActive_ = HTTP_STATUS_BUSY_TIMEOUT; 
     }
 
     /** Lists a directory on the SD card and returns its contents in a JSON format. 
@@ -1128,6 +1117,7 @@ private:
 
     static inline ESP8266WebServer server_{80};
     static inline File uploadFile_;
+    static inline uint16_t serverActive_ = 0;
 
     static inline char const * GENERIC_MIME = "text/plain";
     static inline char const * MP3_MIME = "audio/mp3";
@@ -1819,7 +1809,7 @@ bool WalkieTalkieMode::processBotMessage(JsonObject const & msg, JsonDocument & 
                 LOG("filename: %s", filename);
                 if (bot_.getFile(audio["file_id"], json, f, [](uint32_t transferred, uint32_t size){
                     // enough for ~60MB
-                    Player::send(msg::LightsBar{static_cast<uint16_t>(transferred / 1024), static_cast<uint16_t>(size / 1024), Player::adjustBrightness(MODE_COLOR_WALKIE_TALKIE), 255});    
+                    Player::send(msg::LightsBar{static_cast<uint16_t>(transferred / 1024), static_cast<uint16_t>(size / 1024), Player::adjustBrightness(MODE_COLOR_WALKIE_TALKIE), 255});
                 })) {
                     LOG("Done, %u bytes.", f.size());
                     state().nextWrite();
@@ -1851,7 +1841,7 @@ bool WalkieTalkieMode::processBotMessage(JsonObject const & msg, JsonDocument & 
 // AlarmMode -------------------------------------------------------------------------------------------------------
 
 ESPMode * AlarmMode::enter(ESPMode * prev) {
-    returnMode_ = Player::currentMode_;
+    returnMode_ = prev;
     char filename[32];
     getAlarmMP3(filename, sizeof(filename));
     LOG("Alarm!!!");
@@ -1880,9 +1870,8 @@ void AlarmMode::initialize() {
             bool sat = json["sat"].as<bool>();
             bool sun = json["sun"].as<bool>();
             Player::ex_.alarm.setHour(h).setMinute(m).enable(enabled, mon, tue, wed, thu, fri, sat, sun);
-            char buf[256];
-            alarmToJson(buf, sizeof(buf));
-            LOG("Alarm set to: %s", buf);
+            LOG("Alarm set to: %u:%u (enabled %u)", h, m, enabled);
+            LOG("    Days: mon %u, tue %u, wed %u, thu %u, fri %u, sat %u, sun %u", mon, tue, wed, thu, fri, sat, sun);
         } else {
             LOG("Invalid alarm settings");
         }
@@ -1890,36 +1879,6 @@ void AlarmMode::initialize() {
     } else {
         LOG("No alarm found");
     }
-}
-
-int AlarmMode::alarmToJson(char * buffer, int bufLen) {
-    char filename[32];
-    getAlarmMP3(filename, sizeof(filename));
-    return snprintf_P(buffer, bufLen, PSTR("{"
-        "\"enabled\":%u,"
-        "\"h\":%u,"
-        "\"m\":%u,"
-        "\"mon\":%u,"
-        "\"tue\":%u,"
-        "\"wed\":%u,"
-        "\"thu\":%u,"
-        "\"fri\":%u,"
-        "\"sat\":%u,"
-        "\"sun\":%u,"
-        "\"file\":\"%s\""
-        "}"),
-        alarm().enabled(),
-        alarm().hour(),
-        alarm().minute(),
-        alarm().activeDay(0), 
-        alarm().activeDay(1), 
-        alarm().activeDay(2), 
-        alarm().activeDay(3), 
-        alarm().activeDay(4), 
-        alarm().activeDay(5), 
-        alarm().activeDay(6),
-        filename
-    );
 }
 
 Alarm & AlarmMode::alarm() {

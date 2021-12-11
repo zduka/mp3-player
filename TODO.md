@@ -4,14 +4,19 @@
 - buy flux
 - enlarge bypass capacitor pads
 
+# SD Card 
+
+- adjust volume for all mp3s
+- figure out mp3s for all three
+
 # Webserver
 
-- finish the SD card listing in expert mode
 - add UI stuff to sending a command
-- very alarm setting
+- add delete action to http server (don't delete dirs)
 
 - add authentication, at least rudimentary
 - add doctext? 
+- switch to the minified version
 
 # SW
 
@@ -24,9 +29,6 @@
 
 # ESP
 
-- timer should be simpler no need to the json nonsense
-- check alarm, wrong filename uploaded by the webapp?
-- don't check the walkie talkie status when webserver is in use
 - getting to wt causes problems sometimes
 
 # Disco Mode

@@ -296,8 +296,6 @@ public:
 
     void initialize();
 
-    int alarmToJson(char * buffer, int bufLen);
-
     AlarmMode(): ESPMode{Mode::Alarm} {}
 
 private:
