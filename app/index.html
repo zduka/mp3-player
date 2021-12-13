@@ -586,8 +586,14 @@ async function openDir(panel, path, title, allowEdit) {
         }
         {
             let d = DIV({ class : "three" });
-            let btnDelete = BUTTON({ class : "red", innerText : "Delete" });
-            d.appendChild(btnDelete);
+            if (entry["size"] != "dir") {
+                let btnDelete = BUTTON({ class : "red", innerText : "Delete" });
+                d.appendChild(btnDelete);
+                btnDelete.onclick = async function() {
+                    if (await getJSON(`sdrm?path=${joinPath(pathStr,entry["name"])}`)) 
+                        openDir(panel, path, title, allowEdit);
+                }
+            }
             if (allowEdit && entry["size"] != "dir" && ! entry["name"].endsWith(".mp3") && ! entry["name"].endsWith(".wav")) {
                 let btnEdit = BUTTON({ class : "orange", innerText : "Edit"});
                 btnEdit.onclick = function() {
@@ -1023,14 +1029,21 @@ async function save_radio() {
 
 async function sendCommand(cmd) {
     return new Promise(resolve => {
+        showModal("Requesting...", "Sending command to the player...", "blue");
         let req = new XMLHttpRequest();
         req.open("GET", `cmd?cmd=${cmd}`);
-        req.onload = function () {
-            resolve(req.responseText);
-        };
-        // TODO error
-        req.onerror = function() {
-            resolve(undefined);
+        req.onreadystatechange = function () {
+            if (this.readyState == 4) {
+                if (this.status == 200) {
+                    resolve(this.responseText);
+                    // no need to notify really
+                    //notification("Request successful", "green", 1000);
+                } else {
+                    resolve(undefined);
+                    notification(`Command ${cmd} failed.`, "red");
+                }
+                clearModal();
+            }
         }
         req.send();
     });

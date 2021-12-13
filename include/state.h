@@ -460,7 +460,6 @@ enum class LightsEffect : uint8_t {
     Breathe, 
     BreatheBar,
     KnightRider, 
-    StarryNight,
     BinaryClock,
     SolidColor,
 }; // NightLightEffect

@@ -226,8 +226,8 @@ private:
     static void initializeSettings() {
         LOG("Initializing settings...");
         // this should not be needed, but to make sure that at least something is displayed, fill in reasonable defaults here (the bitstruct does not do easy constructor)
-        status_.maxBrightness = DEFAULT_BRIGHTNESS;
-        status_.timezone = DEFAULT_TIMEZONE;
+        status_.maxBrightness = 255;
+        status_.timezone = 0;
         status_.maxSpeakerVolume = 15;
         status_.maxHeadphonesVolume = 15;
         status_.syncHour = 3;
@@ -942,6 +942,7 @@ private:
         server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
         server_.on("/sdls", httpSDls);
+        server_.on("/sdrm", httpSDrm);
         server_.on("/sd", httpSD);
         server_.on("/sdUpload", HTTP_POST, httpSDUpload, httpSDUploadHandler);
         server_.begin();
@@ -1005,28 +1006,28 @@ private:
         LOG("http status");
         char buf[300];
         int len = snprintf_P(buf, sizeof(buf), PSTR("{"
-        "\"vcc\":%u,"
-        "\"temp\":%i,"
-        "\"mem\":%u,"
-        "\"charging\":%u,"
-        "\"batt\":%u,"
-        "\"headphones\":%u,"
-        "\"maxLoopTime\":%u,"
-        "\"rssi\":%i,"
-        "\"ap\":%u"
-        "}"),
-        ex_.measurements.vcc,
-        ex_.measurements.temp,
-        ESP.getFreeHeap(),
-        state_.charging() ? 1 : 0,
-        state_.batteryMode() ? 1 : 0,
-        state_.headphonesConnected() ? 1 : 0,
-        maxLoopTime_,
-        WiFi.RSSI(),
-        state_.wifiStatus() == WiFiStatus::AP ? 1 : 0
+            "\"vcc\":%u,"
+            "\"temp\":%i,"
+            "\"mem\":%u,"
+            "\"charging\":%u,"
+            "\"batt\":%u,"
+            "\"headphones\":%u,"
+            "\"maxLoopTime\":%u,"
+            "\"rssi\":%i,"
+            "\"ap\":%u"
+            "}"),
+            ex_.measurements.vcc,
+            ex_.measurements.temp,
+            ESP.getFreeHeap(),
+            state_.charging() ? 1 : 0,
+            state_.batteryMode() ? 1 : 0,
+            state_.headphonesConnected() ? 1 : 0,
+            maxLoopTime_,
+            WiFi.RSSI(),
+            state_.wifiStatus() == WiFiStatus::AP ? 1 : 0
         );
         server_.send(200, JSON_MIME, buf, len);
-        serverActive_ = HTTP_STATUS_BUSY_TIMEOUT; 
+        serverActive_ = HTTP_STATUS_BUSY_TIMEOUT * 60; 
     }
 
     /** Lists a directory on the SD card and returns its contents in a JSON format. 
@@ -1054,6 +1055,18 @@ private:
                 server_.sendContent(buf, snprintf_P(buf, sizeof(buf), PSTR("{\"name\":\"%s\", \"size\":\"%u\"}"), f.name(), f.size()));
         } 
         server_.sendContent("]");
+    }
+
+    static void httpSDrm() {
+        String const & path = server_.arg("path");
+        LOG("WebServer: Removing file %s", path.c_str());
+        if (SD.remove(path.c_str())) {
+            LOG("Success.");
+            server_.send(200, GENERIC_MIME, "{\"response\": 200}");
+        } else {
+            LOG("Failed.");
+            server_.send(404, GENERIC_MIME, "{\"response\": 404}");
+        }
     }
 
     /** Returns any given file on the SD card. 
@@ -1536,11 +1549,11 @@ ESPMode * LightsMode::enter(ESPMode * prev) {
 }
 
 void LightsMode::controlPress() {
-    uint8_t i = (static_cast<uint8_t>(state().effect) + 1) % 8;
+    uint8_t i = (static_cast<uint8_t>(state().effect) + 1) % 7;
     LOG("Lights effect: %u", i);
     state().effect = static_cast<LightsEffect>(i);
     Player::sendExtendedState(state());
-    Player::send(msg::LightsPoint{i, 7, adjustBrightness(MODE_COLOR_LIGHTS)});
+    Player::send(msg::LightsPoint{i, 6, adjustBrightness(MODE_COLOR_LIGHTS)});
 }
 
 void LightsMode::controlTurn() {

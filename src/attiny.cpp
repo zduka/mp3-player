@@ -796,10 +796,6 @@ private:
                 strip_.showPoint((effectCounter_ & 0xff) / 4, 64, effectColor_);
                 break;
             }
-            case LightsEffect::StarryNight: {
-                strip_.fill(Color::Black());
-                return;
-            }
             // solid color that simply fills the whole strip with the effect color
             case LightsEffect::SolidColor: {
                 strip_.fill(effectColor_);
