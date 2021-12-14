@@ -108,4 +108,4 @@
     RECORDING_GAIN: Amplification of recorded values. Setting this too low will mean inaudible recording, setting it too high means clipping. Depends to the mic board used. 
  */
 #define MAX_RECORDING_LENGTH 1000 * 30
-#define RECORDING_GAIN 8
+#define RECORDING_GAIN 5

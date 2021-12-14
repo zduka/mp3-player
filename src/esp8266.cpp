@@ -938,7 +938,7 @@ private:
         if (!MDNS.begin("mp3-player"))
             LOG("  mDNS failed to initialize");
         server_.onNotFound(http404);
-        server_.serveStatic("/", LittleFS, "/index.html");
+        server_.serveStatic("/", LittleFS, "/index.min.html");
         server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
         server_.on("/sdls", httpSDls);
@@ -1014,7 +1014,8 @@ private:
             "\"headphones\":%u,"
             "\"maxLoopTime\":%u,"
             "\"rssi\":%i,"
-            "\"ap\":%u"
+            "\"ap\":%u,"
+            "\"time\":\"%u:%u:%u %u/%u/%u\""
             "}"),
             ex_.measurements.vcc,
             ex_.measurements.temp,
@@ -1024,7 +1025,8 @@ private:
             state_.headphonesConnected() ? 1 : 0,
             maxLoopTime_,
             WiFi.RSSI(),
-            state_.wifiStatus() == WiFiStatus::AP ? 1 : 0
+            state_.wifiStatus() == WiFiStatus::AP ? 1 : 0,
+            ex_.time.hour(), ex_.time.minute(), ex_.time.second(), ex_.time.day(), ex_.time.month(), ex_.time.year()
         );
         server_.send(200, JSON_MIME, buf, len);
         serverActive_ = HTTP_STATUS_BUSY_TIMEOUT * 60; 

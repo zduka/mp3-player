@@ -14,16 +14,11 @@
 - check the default amplification on real settings
 - getting ESP to wt mode causes problems sometimes (observed only on yellow so far)
 
-## Webserver (JavaScript)
+## Webserver
 
-- check commands do not reset page
-- check files can be deleted
+- check alarm can be saved, files can be downloaded, check status shows time too
 - add authentication, at least rudimentary?
 - add doctext? 
-
-## Webserver (ESP)
-
-- switch to the minified version
 
 ## Disco Mode
 

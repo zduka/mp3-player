@@ -576,7 +576,7 @@ async function openDir(panel, path, title, allowEdit) {
             }
             a.href="#";
         } else {
-            a.href = `sd?path=${joinPath(path,entry["name"])}`;
+            a.href = `sd?path=${joinPath(pathStr,entry["name"])}`;
         }
         row.appendChild(l);
         {
@@ -730,13 +730,10 @@ async function getStatus() {
         e("status-wifi").innerHTML = `rssi ${json["rssi"]}, ${json["ap"] ? "AP" : ""}`;
         e("status-temp").innerHTML = `${json["temp"] / 10} C`;
         e("status-system").innerHTML = `${json["mem"]} mem free, ${json["maxLoopTime"]} ms max loop time`;
+        e("status-time").innerHTML = `${json["time"]} (HH:MM:SS DD/MM/YYYY)`
         e("status-form").style.display = "flex";
     } else {
         e("status-form").style.display = "none";
-        e("status-battery").innerHTML = "???";
-        e("status-wifi").innerHTML = "???";
-        e("status-temp").innerHTML = "???";
-        e("status-system").innerHTML = "???";
     }
     refresh.innerText = "Refresh"
     refresh.disabled = false;
@@ -864,7 +861,7 @@ async function save_alarm() {
         fri : getOnOffValue("alarm-fri"),
         sat : getOnOffValue("alarm-sat"),
         sun : getOnOffValue("alarm-sun"),
-        file : await getAndCheckExistingFile("alarm-file", getToggleValue("alarm"))
+        file : await getAndCheckExistingFile("alarm-file", getOnOffValue("alarm"))
     };
     await checkFormValidAndSend(stuff, ALARM_FILE);
     sendCommand("reload_alarm");
@@ -895,7 +892,7 @@ async function save_greeting() {
             enabled : getOnOffValue(`greeting-${i}-enabled`),
             d : getAndCheckInputNumber(`greeting-${i}-d`, 1, 31),
             m : getAndCheckInputNumber(`greeting-${i}-m`, 1, 12),
-            file : await getAndCheckExistingFile(`greeting-${i}-file`, getToggleValue(`greeting-${i}`))
+            file : await getAndCheckExistingFile(`greeting-${i}-file`, getOnOffValue(`greeting-${i}`))
         };
         stuff.push(alarm);
     }
