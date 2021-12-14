@@ -1361,7 +1361,7 @@ private:
 
     /** Max brightness of the LED strip. 
      */
-    static inline uint8_t maxBrightness_ = DEFAULT_BRIGHTNESS;
+    static inline uint8_t maxBrightness_ = 255;
 
 
     static inline uint8_t undervoltageCountdown_ = UNDERVOLTAGE_TIMEOUT;

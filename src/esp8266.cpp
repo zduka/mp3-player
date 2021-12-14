@@ -62,7 +62,7 @@ public:
      */
     int32_t timezone = 0;
 
-    uint8_t maxBrightness = DEFAULT_BRIGHTNESS;
+    uint8_t maxBrightness = 255;
 
     bool radioEnabled = true;
     bool discoEnabled = true;

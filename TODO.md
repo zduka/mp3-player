@@ -12,10 +12,11 @@
 # SW
 
 - check the default amplification on real settings
-- getting ESP to wt mode causes problems sometimes
+- getting ESP to wt mode causes problems sometimes (observed only on yellow so far)
 
 ## Webserver (JavaScript)
 
+- check commands do not reset page
 - check files can be deleted
 - add authentication, at least rudimentary?
 - add doctext? 
