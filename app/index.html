@@ -861,7 +861,7 @@ async function save_alarm() {
         fri : getOnOffValue("alarm-fri"),
         sat : getOnOffValue("alarm-sat"),
         sun : getOnOffValue("alarm-sun"),
-        file : await getAndCheckExistingFile("alarm-file", getOnOffValue("alarm"))
+        file : await getAndCheckExistingFile("alarm-file", getOnOffValue("alarm-enabled"))
     };
     await checkFormValidAndSend(stuff, ALARM_FILE);
     sendCommand("reload_alarm");
@@ -892,7 +892,7 @@ async function save_greeting() {
             enabled : getOnOffValue(`greeting-${i}-enabled`),
             d : getAndCheckInputNumber(`greeting-${i}-d`, 1, 31),
             m : getAndCheckInputNumber(`greeting-${i}-m`, 1, 12),
-            file : await getAndCheckExistingFile(`greeting-${i}-file`, getOnOffValue(`greeting-${i}`))
+            file : await getAndCheckExistingFile(`greeting-${i}-file`, getOnOffValue(`greeting-${i}-enabled`))
         };
         stuff.push(alarm);
     }

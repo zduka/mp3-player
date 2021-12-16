@@ -16,9 +16,7 @@
 
 ## Webserver
 
-- check alarm can be saved, files can be downloaded, check status shows time too
-- add authentication, at least rudimentary?
-- add doctext? 
+- add ESP reset command
 
 ## Disco Mode
 
