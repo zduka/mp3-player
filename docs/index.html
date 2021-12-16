@@ -5,18 +5,20 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="style.css">
+
   </head>
   <body onload="onLoad()">
     <div class="navbar spacer"></div>
     <nav>
         <div class="navbar">
             <div class="brand">mp3-player</div>
-            <a id="nav-settings" onclick="navSelect('settings')" class="selected">Welcome</a>
-            <a id="nav-settings" onclick="navSelect('settings')">Settings</a>
-            <a id="nav-playlists" onclick="navSelect('playlists')">Playlists</a>
-            <a id="nav-radio" onclick="navSelect('radio')">Radio</a>
-            <a id="nav-wt" onclick="navSelect('wt')">Walkie-Talkie</a>
-            <a id="nav-expert" onclick="navSelect('expert')">Expert</a>
+            <a href="index.html" class="selected">Welcome</a>
+            <a href="webui.html">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="mp3.html">Playlists</a>
+            <a href="expert.html">Radio</a>
+            <a href="wt.html">Walkie-Talkie</a>
+            <a href="expert/html">Expert</a> )
         </div>
     </nav>
 
@@ -59,32 +61,83 @@
             </div>
         </form>
         <div class="twelve">
-            To power the player on, press either of the knobs (1 or 2) for a long time (approximately 2 seconds) until the LED strip flashes white. Afterwards the battery status will be displayed in red 
+            Press either control (1) or volume (2) knob for approximately 2 seconds, until the LED strip flashes white to power the player on. Afterwards battery level will be displayed in red and the last music mode (mp3, radio, disco) will start playback. The player turns itself off automatically after 5 minutes when idle, or 30 minutes when playing music.
+        </div>
+        <div class="twelve">
+            The player operates in 5 distinct modes, summarized below:
         </div>
         <form>
-            <label>PowerOn</label>
-            <div>
-                Long press of either knob.
-            </div>
+            <label>MP3 Player</label>
+            <div>Playback of MP3 files stored in memory. Up to 8 playlists with 1000 songs each are supported.</div>
+            <label>FM Radio</label>
+            <div>Plays FM radio. Stations can be selected form a predefined list, or manually tuned.</div>
+            <label>Disco</label>
+            <div>Sound can be recorded and then played back on a disco music background for a karaoke effect.</div>
+            <label>Light Settings</label>
+            <div>MP3 or radio playback continues, but the control determines the effect to be shown in the LED strip and its color.</div>
+            <label>Walkie Talkie & Web UI</label>
+            <div>Connects to a predefined WiFi network, or starts its own so that the Web UI for advanced settings can be used and turns on the walkie talkie mode. The walkie talkie mode allows recording short audio messages and sending them to other players/phones via Telegram.</div>
         </form>
-
-        <div class="panel twelve">
-            <div class="header">
-                <h3>Panel Header</h3>
-                <div class="buttons">
-                    <button id="network-edit"">Edit</button>
-                </div>
-            </div>
-            <div class="docs">
-                Contents of the panel, 
-
-            </div>
+        <div class="twelve">
+            Details for each mode are described in the appropriate Web UI settings. The table below then summarizes the effect of various controls in the modes:
         </div>
-    
+        <div class="twelve">
+            <table>
+                <tr>
+                    <th>Action</th>
+                    <th>MP3 Mode</th>
+                    <th>Radio Mode</th>
+                    <th>Disco Mode</th>
+                    <th>Lights Mode</th>
+                    <th>Walkie-Talkie Mode</th>
+                </tr>
+                <tr>
+                    <td>Control Turn</td>
+                    <td>Selects track within playlist</td>
+                    <td>Manual radio tuning</td>
+                    <td></td>
+                    <td>Selects lights color</td>
+                    <td>Selects received message to play</td>
+                </tr>
+                <tr class="even-row">
+                    <td>Control Press</td>
+                    <td>Cycles through playlists</td>
+                    <td>Cycles through preset stations</td>
+                    <td>Plays/Stops the recorded disco.</td>
+                    <td>Cycles through lights effect</td>
+                    <td>Plays/stops received messages</td>
+                </tr>
+                <tr>
+                    <td>Control Long Press</td>
+                    <td colspan=3>Moves to next music mode (MP3,Radio,Disco)</td>
+                    <td colspan=2>Returns to last music mode.</td>
+                </tr>
+                <tr class="even-row">
+                    <td>Volume Turn</td>
+                    <td colspan="5">Sets volume</td>
+                </tr>
+                <tr>
+                    <td>Volume Press</td>
+                    <td colspan="3">Play/Pause</td>
+                    <td colspan="2">Starts recording when pressed, stops recording and sends/replays when released</td>
+                </tr>
+                <tr class="even-row">
+                    <td>Volume Long Press</td>
+                    <td colspan="2">Enters the lights settings mode.</td>
+                    <td></td>
+                    <td>Returns to the previous music mode</td>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td>Double Long Press</td>
+                    <td colspan="3">Turns on the WiFi and starts the web UI. Enters walkie-talkie mode.</td>
+                    <td></td>
+                    <td>Turns off the WiFi and returns to the previous music mode.</td>
+                </tr>
+            </table>
+        </div>
+
     </div>
-
-
-
 
   </body>
 </html>

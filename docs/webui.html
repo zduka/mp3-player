@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>MP3 Player</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+  <body onload="onLoad()">
+    <div class="navbar spacer"></div>
+    <nav>
+        <div class="navbar">
+            <div class="brand">mp3-player</div>
+            <a href="index.html">Welcome</a>
+            <a href="webui.html" class="selected">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="playlists.html">Playlists</a>
+            <a href="expert.html">Radio</a>
+            <a href="wt.html">Walkie-Talkie</a>
+            <a href="expert/html">Expert</a> )
+        </div>
+    </nav>
+
+    <div class="container">
+        <p>
+            To enter the Web UI mode, long press both the control and volume buttons. The player will enable WiFi and search for available known networks to connect to. If none is found, it will start a new network, which unless specified otherwise is set to
+            <pre>
+    SSID: mp3-player
+    PASS: mp3-player
+            </pre>
+        </p>
+        <p>
+            To display the Web UI, enter <a href="http://mp3-player.local">mp3-player.local</a> in your browser (or click this link if already connected). The Web UI will appear at the <em>Settings</em> page.
+        </p>
+        <p>
+            The UI consists of different sections (selectable from the header at the top of the page), each section comprises of various panels. A panel has a header and may start in a collapsed mode, in which case there is a button in the right corner of the header, clicking it opens the pabel:
+        </p>
+        <div class="panel twelve">
+            <div class="header">
+                <h3>Panel header</h3>
+                <div class="buttons">
+                    <button">Edit</button>
+                </div>
+            </div>
+            <p> This is the panel contents and may not be initially visible.</p>
+        </div>
+        <p>
+            Use the header above to see details about the Web UI sections for <a href="settings.html">settings</a>, <a href="mp3.html">MP3 Player</a>, <a href="radio.html">Radio</a>, <a href="wt.html">Walkie-Talkie</a> and <a href="expert.html">expert mode</a>.
+        </p>
+    </div>
+
+  </body>
+</html>
