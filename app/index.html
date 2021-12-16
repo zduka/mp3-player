@@ -1112,7 +1112,7 @@ function onLoad() {
         <div class="navbar">
             <div class="brand">mp3-player</div>
             <a id="nav-settings" onclick="navSelect('settings')" class="selected">Settings</a>
-            <a id="nav-playlists" onclick="navSelect('playlists')">Playlists</a>
+            <a id="nav-playlists" onclick="navSelect('playlists')">MP3</a>
             <a id="nav-radio" onclick="navSelect('radio')">Radio</a>
             <a id="nav-wt" onclick="navSelect('wt')">Walkie-Talkie</a>
             <a id="nav-expert" onclick="navSelect('expert')">Expert</a>
@@ -1139,7 +1139,9 @@ function onLoad() {
                 <label>Temperature:</label>
                 <div id="status-temp">27 C</div>
                 <label>System:</label>
-                <div id="status-system">3KB mem free, 67ms max loop time</div>        
+                <div id="status-system">3KB mem free, 67ms max loop time</div>   
+                <label>Time</label>     
+                <div id="status-time"></div>   
             </form>
         </div>
 
@@ -1242,7 +1244,7 @@ function onLoad() {
                 <div>
                     <button id="alarm-enabled">Enabled</button>
                     <input id="alarm-h" type="text" size=3> :
-                    <input id="alarm-m" type="text" size=3> (HH : MM, 0..23, 0..60)
+                    <input id="alarm-m" type="text" size=3> (HH : MM, 0..23, 0..59)
                 </div>
                 <label>Days:</label>
                 <div>

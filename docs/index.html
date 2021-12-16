@@ -4,330 +4,7 @@
     <title>MP3 Player</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
-    <style>
-
-HTML {
-    font-size: 62.5%; /* 1 rem == 10px */
-}
-
-BODY {
-    font-family: "Raleway", "HelveticaNeue", "Helvetica Neue", Helvetica, Arial, sans-serif;
-    font-size: 1.5em;
-    line-height: 1.6;
-    color:#222;        
-    margin:0;
-}
-
-UL, OL {
-    margin-top: 0;
-    padding-top:1rem;
-    padding-left: 3rem;
-}
-
-BUTTON, .upload-button {
-    display: inline-block;
-    padding: 0rem 1rem;
-    color: #555;
-    text-align: center;
-    font-size: 1.1rem;
-    font-weight: 600;
-    letter-spacing: .1rem;
-    line-height:3rem;
-    text-transform: uppercase;
-    text-decoration: none;
-    white-space: nowrap;
-    border-radius: 4px;
-    border: 1px solid #bbb;
-    cursor: pointer;
-    box-sizing: border-box;
-    margin-right: 0.5rem;
-}
-
-.red {
-    background-color:#dc3545;
-    color:#fff;
-    border-color: #800;
-}
-
-.orange {
-    background-color:#fd7e14;
-    color:#000;    
-    border-color:#840;
-}
-
-.green {
-    background-color:#198754;
-    color:#fff;
-    border-color: #080;
-}
-
-.blue {
-    background-color:#0d6efd;
-    color:#fff;
-    border-color:#008;
-}
-
-.yellow {
-    background-color:#ffc107;
-    border-color: #860;
-}
-
-.cyan {
-    background-color:#0dcaf0;
-    border-color:#068;
-}
-
-.pink {
-    background-color:#d63384;
-}
-
-.purple {
-    background-color:#6f42c1;
-}
-
-INPUT {
-    height: 3rem;
-    padding: 6px 10px; /* The 6px vertically centers text on FF, ignored by Webkit */
-    background-color: #fff;
-    border: 1px solid #D1D1D1;
-    border-radius: 4px;
-    box-shadow: none;
-    box-sizing: border-box; 
-}
-
-INPUT.red { border: 1px solid #dc3545; }
-
-FORM > LABEL {
-    font-weight: bold;
-}
-
-.container, .panel, .container > FORM, .panel > FORM {
-    clear:both;
-    position: relative;
-    width: 100%;
-    max-width:960px;
-    margin: 0 auto;
-    padding: 0 5px;
-    box-sizing: border-box;
-    display:flex;
-    flex-wrap:wrap;
-    justify-content:space-between;
-    align-items:center;
-}
-
-.container > DIV {
-    margin: 0.3rem 0;
-}
-
-.one    { width: 100%; }
-.two    { width: 100%; }
-.three  { width: 100%; }
-.four   { width: 100%; }
-.five   { width: 100%; }
-.six    { width: 100%; }
-.seven  { width: 100%; }
-.eight  { width: 100%; }
-.nine   { width: 100%; }
-.ten    { width: 100%; }
-.eleven { width: 100%; }
-.twelve { width: 100%; }
-
-FORM > LABEL {
-    display: block;
-    width: 100%;
-    margin: 0.3rem 0;
-}        
-FORM > DIV {
-    width: 100%;
-    margin: 0.3rem 0;
-    clear:both;
-}
-
-@media(min-width:550px) {
-    .one    { width: 4.66666666667%; }
-    .two    { width: 13.3333333333%; }
-    .three  { width: 22%; }
-    .four   { width: 30.6666666667%; }
-    .five   { width: 39.3333333333%; }
-    .six    { width: 48%; }
-    .seven  { width: 56.6666666667%; }
-    .eight  { width: 65.3333333333%; }
-    .nine   { width: 74.0%; }
-    .ten    { width: 82.6666666667%; }
-    .eleven { width: 91.3333333333%; }
-    .twelve { width: 100%; }
-    .container > .right {
-        text-align : right;
-    }
-
-    FORM > LABEL {
-        display: block;
-        width: 22%;
-        text-align:right;
-        margin: 0.3rem 0;
-
-    }        
-    FORM > DIV {
-        width: 74%;
-        margin: 0.3rem 0;
-        clear:both;
-    }
-}
-
-NAV {
-    display:block;
-    width:100%;
-    background-color:#222;
-}
-
-.navbar {
-    display:block;
-    width:100%;
-    max-width:960px;
-    align-items:center;
-    display:flex;
-    margin: 0 auto;
-    flex-wrap:wrap;
-}
-
-.navbar > .brand {
-    color:#ccc;
-    flex-shrink: 0;
-    width:100%;
-    padding:1rem;
-}
-
-.navbar > A {
-    display:inline-block;
-    color:#fff;
-    text-transform:uppercase;
-    border-top:0.5rem solid transparent;
-    border-bottom:0.5rem solid transparent;
-    padding:1rem;
-    flex-shrink: 0;
-}
-
-.navbar > A.selected {
-    border-bottom:0.5rem solid #fff;
-
-}
-
-.navbar > A:hover {
-    border-bottom:0.5rem solid #c0c0ff;
-
-}
-
-.notifications {
-    background-color:#fff;
-    padding:0.5rem;
-}
-
-.notification {
-    width:100%;
-    max-width:960px;
-    margin: 0 auto;
-    border-width: 1px;
-    border-style: solid;
-    padding:0.5rem;
-    border-radius:5px;    
-    margin-top:5px;
-}
-
-.notification > BUTTON {
-    font-size: 0.7rem;
-    padding: 0.1rem 0.5rem;
-    line-height: 2rem;
-    position:relative;
-    float:right;
-}
-
-#modal {
-    position: absolute;
-    width : 100%;
-    height: 100%;
-    z-index: 999;
-    display: none;
-    justify-content:space-between;
-    align-items:center;  
-}
-
-.blurred {
-    filter: blur(5px);
-}
-
-#modal > .notification {
-    width : 100%;
-    margin: auto;
-    text-align: center;
-    padding-bottom: 3rem;
-}
-
-.spacer {
-    visibility: hidden;
-}
-
-.hidden {
-    display : none;
-}
-
-@media (min-width: 750px) {
-    NAV {
-        position: fixed;
-        top: 0px;
-        width: 100%;
-        z-index: 100;
-    }
-    .navbar.spacer {
-        height: 6rem;
-    }
-    .navbar > .brand {
-        width:unset;
-    }
-
-    .modal > .notification {
-        width : 50%;
-    }
-}
-
-.panel {
-    border:1px solid #aaa;
-    border-radius: 4px;
-    margin-top: 10px;
-}
-
-.header {
-    background-color:#ccc;
-    padding:0.5rem 1rem; 
-}
-
-.panel > .header {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    flex-basis: 100%;
-}
-
-.panel > .header > H3 {
-    font-size: 2rem;
-    margin: auto 0;
-}
-
-.panel > .header > .buttons {
-    margin: auto 0;
-    display:inline-block;
-}
-
-.buttons > BUTTON {
-    margin: auto 0;
-    padding: 0 1rem;
-}
-
-.even-row {
-    background-color: #eee;
-}
-
-    </style>
+    <link rel="stylesheet" href="style.css">
   </head>
   <body onload="onLoad()">
     <div class="navbar spacer"></div>
@@ -343,7 +20,6 @@ NAV {
         </div>
     </nav>
 
-<div id="contents">
     <div class="container">
         <div class="twelve">
             This is a simple MP3 player and FM radio for kids. Playback functions can be controlled via the knobs while more complex features can be controlled from the player's web interface. These are the features in a nutshell:
@@ -391,9 +67,24 @@ NAV {
                 Long press of either knob.
             </div>
         </form>
+
+        <div class="panel twelve">
+            <div class="header">
+                <h3>Panel Header</h3>
+                <div class="buttons">
+                    <button id="network-edit"">Edit</button>
+                </div>
+            </div>
+            <div class="docs">
+                Contents of the panel, 
+
+            </div>
+        </div>
+    
     </div>
 
-</div>
+
+
 
   </body>
 </html>

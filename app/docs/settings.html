@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>MP3 Player</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+  <body onload="onLoad()">
+    <div class="navbar spacer"></div>
+    <nav>
+        <div class="navbar">
+            <div class="brand">mp3-player</div>
+            <a href="index.html">Welcome</a>
+            <a href="webui.html" class="selected">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="playlists.html">Playlists</a>
+            <a href="expert.html">Radio</a>
+            <a href="wt.html">Walkie-Talkie</a>
+            <a href="expert/html">Expert</a> )
+        </div>
+    </nav>
+
+<div class="container">
+    <p>
+        Status represents the summary information about the player. Automatically refreshed every minute, can be refreshed at any time by pressing the <em>Refresh</em> button. Displays the battery level, WiFi state and strength, measured temperature and system info and time.
+    </p>
+    <div class="panel twelve">
+        <div class="header">
+            <h3>Status</h3>
+            <div class="buttons">
+                <button id="status-refresh">Refresh</button>
+            </div>
+        </div>
+        <form id="status-form">
+            <label>Battery:</label>
+            <div id="status-battery">56% (3.56V) Charging</div>
+            <label>WiFi:</label>
+            <div id="status-wifi">rssi stuff, AP</div>
+            <label>Temperature:</label>
+            <div id="status-temp">27 C</div>
+            <label>System:</label>
+            <div id="status-system">3KB mem free, 67ms max loop time</div>        
+            <label>Time</label>     
+            <div id="status-time">16:34:59 24/12/2021</div>   
+        </form>
+    </div>
+
+    <p>
+        The networks section allows up to three known networks the player will attempt to connect when in WebUI/Walkie-Talkie mode and the fallback access point the player creates if no known network are in range. <em>It is highly recommended to change these settings as soon as possible for at least basic security.</em> Clicking the <em>Save</em> button stores the information on the player. 
+    </p>
+    <div class="panel twelve">
+        <div class="header">
+            <h3>Network</h3>
+            <div class="buttons">
+                <button id="network-save" class="red">Save</button>
+                <button id="network-close">Close</button>
+            </div>
+        </div>
+        <form id="network-form">
+            <label>AP:</label>
+            <div>
+                <input id="network-ap-ssid" type="text" value="Fallback accesspoint name"> (name)
+            </div>
+            <label></label>
+            <div>
+                <input id="network-ap-password" type="text" value="Fallback accesspoint password"> (password)
+            </div>
+            <label>Network 1:</label>
+            <div>
+                <input id="network-1-ssid" type="text" value="First known network"> (name)
+            </div>
+            <label></label>
+            <div>
+                <input id="network-1-password" type="password" value="First known network"> (password)
+            </div>
+            <label>Network 2:</label>
+            <div>
+                <input id="network-2-ssid" type="text" value="Second known network"> (name)
+            </div>
+            <label></label>
+            <div>
+                <input id="network-2-password" type="password" value="Second known network"> (password)
+            </div>
+            <label>Network 3:</label>
+            <div>
+                <input id="network-3-ssid" type="text" value="Third known network"> (name)
+            </div>
+            <label></label>
+            <div>
+                <input id="network-3-password" type="password" value="Third known network"> (password)
+            </div>
+        </form>
+    </div>
+    <p>
+        The next panel shows the player settings. It allows setting the maximum value for either the internal speakers. If these are lower than 15, the player's volume knob won't allow setting higher volume levels. Maximum brightness determines the brightness of the LED strip. The lower the level, the less battery is drained. All features but the MP3 player can be turned on/off. Note that turning the walkie-talkie mode off does not disable the WebUI, it only means that the walkie talkie player controls won't work and the player will not check for new messages. The timezone offset (in hours) can be specified for proper timekeeping. The player attempts to synchronize the time and walkie-talkie messages each day. The our at which this happens can be specified in the last input of the panel. 
+    </p>
+    <div class="panel twelve">
+        <div class="header">
+            <h3>Settings</h3>
+            <div class="buttons">
+                <button id="settings-save" class="red">Save</button>
+                <button id="settings-close">Close</button>
+            </div>
+        </div>
+        <form id = "settings-form">
+            <label>Max volume (speaker):</label>
+            <div>
+                <input type="text" id="settings-speaker-max"> (0..15)
+            </div>
+            <label>Max volume (headphones):</label>
+            <div>
+                <input type="text" id="settings-headphones-max"> (0..15)
+            </div>
+            <label>Max brightness:</label>
+            <div>
+                <input type="text" id="settings-brightness-max"> (0..255)
+            </div>
+            <label>Features:</label>
+            <div>
+                <button id="settings-radio-enabled" type="button" class="green">FM Radio</button>
+                <button id="settings-disco-enabled" type="button">Disco</button>
+                <button id="settings-lights-enabled" type="button">Lights Control</button>
+                <button id="settings-wt-enabled" type="button">Walkie-Talkie</button>
+            </div>
+            <label>Timezone:</label>
+            <div>
+                <input type="text" id="settings-timezone"> (UTC offset in hours, -12, + 12)
+            </div>
+            <label>Sync Hour:</label>
+            <div>
+                <input type="text" id="settings-sync-hour"> (0..23)
+            </div>
+        </form>
+    </div>
+    <p>
+        The player can also work as an alarm clock. The alarm can be enabled specifically for selected days and an MP3 file to be played can be selected. When the alarm sounds, short press of any button will snooze the alarm for 5 minutes, while long press will stop the alarm and either turn player off immediately, or return to the previous mode if the player was on. Stopping the alarm does not disable it so it will ring again when the conditions are met. 
+    </p>
+    <div class="panel twelve">
+        <div class="header">
+            <h3>Alarm Clock</h3>
+            <div class="buttons">
+                <button id="alarm-save" class="red">Save</button>
+                <button id="alarm-close">Close</button>
+            </div>
+        </div>
+        <form id="alarm-form">
+            <label>Alarm:</label>
+            <div>
+                <button id="alarm-enabled">Enabled</button>
+                <input id="alarm-h" type="text" size=3> :
+                <input id="alarm-m" type="text" size=3> (HH : MM, 0..23, 0..59)
+            </div>
+            <label>Days:</label>
+            <div>
+                <button id="alarm-mon">Mon</button>
+                <button id="alarm-tue">Tue</button>
+                <button id="alarm-wed">Wed</button>
+                <button id="alarm-thu">Thu</button>
+                <button id="alarm-fri">Fri</button>
+                <button id="alarm-sat">Sat</button>
+                <button id="alarm-sun">Sun</button>
+            </div>
+            <label>File:</label>
+            <div>
+                <input type="text" id="alarm-file"> (mp3 file on SD card)
+            </div>
+        </form>
+    </div>
+    <p>
+        The player supports up to three different greetings. A greeting is specified by providing a day and month as well as an mp3 file. Any time a player is turned on that day, the selected file will be played first, then the music mode will be entered. Short press while playing the greeting message will dismiss it. This is useful for birthdays, etc.
+    </p>
+    <div class="panel twelve">
+        <div class="header">
+            <h3>Greetings</h3>
+            <div class="buttons">
+                <button id="greeting-save" class="red">Save</button>
+                <button id="greeting-close">Close</button>
+            </div>
+        </div>
+        <form id="greeting-form">
+            <label>First:</label>
+            <div>
+                <button id="greeting-0-enabled">Enabled</button>
+                <input id="greeting-0-d" type="text" size=3> /
+                <input id="greeting-0-m" type="text" size=3> (DD / MM, 1..31, 1..12)
+            </div>
+            <label></label>
+            <div>
+                <input type="text" id="greeting-0-file"> (mp3 file on SD card)
+            </div>
+            <label>Second:</label>
+            <div>
+                <button id="greeting-1-enabled">Enabled</button>
+                <input id="greeting-1-d" type="text" size=3> /
+                <input id="greeting-1-m" type="text" size=3> (DD / MM, 1..31, 1..12)
+            </div>
+            <label></label>
+            <div>
+                <input type="text" id="greeting-1-file"> (mp3 file on SD card)
+            </div>
+            <label>Third:</label>
+            <div>
+                <button id="greeting-2-enabled">Enabled</button>
+                <input id="greeting-2-d" type="text" size=3> /
+                <input id="greeting-2-m" type="text" size=3> (DD / MM, 1..31, 1..12)
+            </div>
+            <label></label>
+            <div>
+                <input type="text" id="greeting-2-file"> (mp3 file on SD card)
+            </div>
+        </form>
+    </div>
+</div>
+
+  </body>
+</html>
