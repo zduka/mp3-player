@@ -205,6 +205,7 @@ NAV {
     border-bottom:0.5rem solid transparent;
     padding:1rem;
     flex-shrink: 0;
+    text-decoration: none;
 }
 
 .navbar > A.selected {
@@ -626,7 +627,7 @@ async function openDir(panel, path, title, allowEdit) {
         table.appendChild(row);
         upload.onclick = async (event) => {
             event.preventDefault();
-            await uploadFile(`${path}/${fname.value}`, file);
+            await uploadFile(joinPath(pathStr, fname.value), file);
             openDir(panel, path, title);
         }
     }
