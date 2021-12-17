@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>MP3 Player</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+  <body>
+    <div class="navbar spacer"></div>
+    <nav>
+        <div class="navbar">
+            <div class="brand">mp3-player</div>
+            <a href="index.html">Welcome</a>
+            <a href="webui.html">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="mp3.html">MP3</a>
+            <a href="radio.html">Radio</a>
+            <a href="wt.html" class="selected">Walkie-Talkie</a>
+            <a href="expert.html">Expert</a> )
+        </div>
+    </nav>
+
+    <div class="container">
+        <p>
+            The walkie-talkie feature of the player uses the Telegram messager to deliver the messages as audio files. This means that the player can send sound to not just other players, but a phone. Similarly, a phone can send messages to the player, but this is a bit more complicated as Telegram will encode any recorded audio in the OGG format, which ESP is not capable of decoding. But a WAV file can always be sent manually. 
+        </p>
+        <p>
+            When in a walkie-talkie mode, the player records sound while the volume button is pressed. When released, the recorded audio is sent to a specified telegram chat. Periodically, the player monitors new incomming messages and if any, downloads them so that they can be replayed. This also happens once a day automatically when the player synchronizes its time.
+        </p>
+        <p>
+            For the walkie-talkie to work, a Telegram Bot has to be created for the player and its ID and access token must be provided. A chat room must then exist where the player bot is present (a phone must do this as bots are not allowed to create rooms) and room id must be set (<em>Chat Id</em>). Finally, to enable the secure connection, a fingerprint, or certificate for the telegram bot website should be provided (unless the default one does not work).
+        </p>
+        <div class="panel twelve" id="wt-settings">
+            <div class="header">
+                <h3>Walkie Talkie Settings</h3>
+                <div class="buttons">
+                    <button id="wt-save" class="red">Save</button>
+                    <button id="wt-close">Close</button>
+                </div>
+            </div>
+            <form id="wt-form">
+                <label>Bot ID:</label>
+                <div>
+                    <input id="wt-bot-id" type="text">
+                </div>
+                <label>Bot token:</label>
+                <div>
+                    <input id="wt-bot-token" type="text">
+                </div>
+                <label>Admin ID:</label>
+                <div>
+                    <input id="wt-admin-id" type="text">
+                </div>
+                <label>Chat ID:</label>
+                <div>
+                    <input id="wt-chat-id" type="text">
+                </div>
+                <label>Fingerprint:</label>
+                <div>
+                    <input id="wt-fingerprint" type="text">
+                </div>
+                <label>Certificate:</label>
+                <div>
+                    <button type="button">Download</button>
+                    <input style="display:none" type="file" id="wt-cert" name="wt-cert">
+                    <label for="wt-cert" class="upload-button green">Select file</label>
+                    <button type="button" class="red">Upload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+  </body>
+</html>

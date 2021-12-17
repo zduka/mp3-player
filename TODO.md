@@ -11,6 +11,7 @@
 
 # SW
 
+- radio stations enabled/disabled?
 - check the default amplification on real settings
 - getting ESP to wt mode causes problems sometimes (observed only on yellow so far)
 
