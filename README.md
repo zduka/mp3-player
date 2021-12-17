@@ -6,6 +6,8 @@ The player can be controlled via two push-button knobs and more advanced setting
 
 For a "user manual" see the documentation, this readme is for technical information only. 
 
+![Finished player](image docs/images/finished.jpg "Finished Players")
+
 # Software
 
 The player uses 2 MCUs - ATTiny and ESP8266. ESP acts as the main controller, while ATTiny takes care of power management and peripherals. Communication between the chips is done via I2C bus. ATTiny and the LED strip runs directly off the battery voltage, while a SMPS to 3v3 provides power for the audio output and the ESP8266. 
@@ -52,6 +54,8 @@ Put the knobs in (don't solder yet), and put the whole PCB in the enclosure, att
 Solder the microphone board. First the IC, then all SMT parts and finally the microphone. Solder long headers, put these through the holes in pain pcb  board and when the distance is proper, solder them to the main PCB Board as well. 
 
 Solder the antenna wire. 
+
+![Internals](image docs/images/internals.jpg "Internals")
 
 ### Final Assembly
 
