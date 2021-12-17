@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>MP3 Player</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+  <body>
+    <div class="navbar spacer"></div>
+    <nav>
+        <div class="navbar">
+            <div class="brand">mp3-player</div>
+            <a href="index.html">Welcome</a>
+            <a href="webui.html">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="mp3.html">MP3</a>
+            <a href="radio.html" class="selected">Radio</a>
+            <a href="wt.html">Walkie-Talkie</a>
+            <a href="expert.html">Expert</a> )
+        </div>
+    </nav>
+
+    <div class="container">
+        <p>
+            The radio settings allows to define up to 8 preset stations with their frequency and name (the name is only useful in the Web UI mode). Manual tuning via turning the control button can be disabled if desired and for better reception with headphones, the radio can be forced to use mono, which improves the signal. By default manual tuning is enabled and stereo is used when headphones are plugged in. 
+        </p>
+        <div class="panel twelve" id="radio-settings">
+            <div class="header">
+                <h3>FM Radio</h3>
+                <div class="buttons">
+                    <button id="radio-save" class="red"">Save</button>
+                    <button id="radio-close">Close</button>
+                </div>
+            </div>
+            <form id="radio-form">
+                <label>Features:</label>
+                <div>
+                    <button type="button" id="radio-mono-enabled">Force Mono</button>
+                    <button type="button" id="radio-manual-enabled" class="green">Manual Tuning</button>
+                </div>
+                <label>Stations:</label>
+                <div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+                <label></label><div>
+                    <input id="radio-freq-0" type="text" size="5"> (76.0 - 108.0 MHz), name: <input type="text" id="radio-name-0">
+                </div>
+            </form>
+        </div>
+
+    </div>
+
+  </body>
+</html>

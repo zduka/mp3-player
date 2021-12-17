@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>MP3 Player</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+  <body>
+    <div class="navbar spacer"></div>
+    <nav>
+        <div class="navbar">
+            <div class="brand">mp3-player</div>
+            <a href="index.html">Welcome</a>
+            <a href="webui.html">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="mp3.html" class="selected">MP3</a>
+            <a href="radio.html">Radio</a>
+            <a href="wt.html">Walkie-Talkie</a>
+            <a href="expert.html">Expert</a> )
+        </div>
+    </nav>
+
+    <div class="container">
+        <p>
+            The MP3 settings section either displays all available playlists (panel below), or when editing a single playlist the second panel below. The available playlists panel lists all 8 possible playlists. Each playlist can have (only matters in the WebUi) and can be enabled or disabled. To edit the songs in the playlist, click the <em>Edit</em> button, which will open the second panel.
+        </p>
+        <div class="panel twelve" id="playlists-settings">
+            <div class="header">
+                <h3>Playlists</h3>
+                <div class="buttons">
+                    <button id="playlists-save" class="red">Save</button>
+                    <button id="playlists-close">Close</button>
+                </div>
+            </div>
+            <form id="playlists-form">
+                <label>1:</label>
+                <div>
+                    <input type="text" value="Playlist">
+                    <button type="button" class="green">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>2:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>3:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>4:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>5:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>6:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>7:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+                <label>8:</label>
+                <div>
+                    <input type="text">
+                    <button type="button">Enabled</button>
+                    <button type="button">Edit</button>
+                </div>
+            </form>
+        </div>        
+        <p>
+            Internally, each playlist is represented by a folder on the SD card. The playlist editor shows the contents of the folder for given playlist. It lists all files present and allows them to be deleted, or new files to be updated. For each file, a clickable filename is shown (clicking it downloads the file), file size in bytes and a button to delete it. To upload a file, select the file on your local disk first, then specify the desired filename in the playlist and click the <em>Upload button</em>. 
+        </p>
+        <p>
+            Please note that all filenames must be in the 8:3 format, i.e. max 8 characters for the filename and 3 characters for the extensions, which must be mp3. ESP8266 has barely enough power to decode mp3 so it is advisable to upload mp3 files with limited quality (96kbps stereo/mono recommended) to avoid any stutter. See below for conversion details.
+        </p>
+        <div class="panel twelve" id="playlist-edit">
+            <div class="header">
+                <h3 id="playlist-edit-title">Playlist - Playlist Name</h3>
+                <div class="buttons">
+                    <button type="button">Back</button>
+                </div>
+            </div>
+            <div id="playlist-edit-table">
+                <div class="container">
+                    <label class="three">
+                        <a href="#">song1.mp3</a>
+                    </label>
+                    <div class="three">
+                        67876
+                    </div>
+                    <div class="three">
+                        <button type="button" class="red">Delete</button>
+                    </div>
+                </div>
+
+                <div class="container">
+                    <label class="three">
+                        <a href="#">song2.mp3</a>
+                    </label>
+                    <div class="three">
+                        543635
+                    </div>
+                    <div class="three">
+                        <button type="button" class="red">Delete</button>
+                    </div>
+                </div>
+
+                <div class="container header">
+                    <label class="three">Upload File:</label>
+                    <input class="three" type="text" value="song3.mp3">
+                    <div class="three">
+                        <button type="button" class="green">Select File</button>
+                        <button type="button" class="blue">Upload</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p>
+            Usually, MP3 files have much higher bitrates (quality) than those supported by the player. While their playback might be possible, you might experience really long delays before a file is played, or a considerable stutter while playing. To avoid this all uploaded files should be converted to 96kbps stereo maximum bitrate. Many programs can be used to do so, such as <a href="">Audacity</a>.
+        </p>
+    </div>
+  </body>
+</html>

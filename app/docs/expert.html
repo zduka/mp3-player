@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>MP3 Player</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+
+  </head>
+  <body>
+    <div class="navbar spacer"></div>
+    <nav>
+        <div class="navbar">
+            <div class="brand">mp3-player</div>
+            <a href="index.html">Welcome</a>
+            <a href="webui.html">Web UI</a> (
+            <a href="settings.html">Settings</a>
+            <a href="mp3.html">MP3</a>
+            <a href="radio.html">Radio</a>
+            <a href="wt.html">Walkie-Talkie</a>
+            <a href="expert.html" class="selected">Expert</a> )
+        </div>
+    </nav>
+
+    <div class="container">
+        <p>
+            These are the expert settings for the player. It is not recommended to use them unless you really know what you are doing as you can brick the player when used wrong. But don'ty worry, inserting a clean SD card will always reset everything to factory defaults. 
+        </p>
+        <p>
+            The first panel offers shortcuts for various commands: The player can be put to sleep immediately, time and walkie talkie synchronization can be enforced, or the player can be reset (keeps data, but looses time). The <em>Format</em> command replaces all non-music files on the SD card with their default values, so is pretty destructive. All network connections, radio stations, playlist names and walkie-talkie settings will be most, but no music files should be deleted. 
+        </p>
+        <div class="panel twelve" id="expert-commands">
+            <div class="header">
+                <h3>Commands</h3>
+            </div>
+            <form>
+                <label>Power:</label>
+                <div>
+                    <button type="button">Sleep</button>
+                </div>
+                <label>Maintenance:</label>
+                <div>
+                    <button type="button">Sync</button>
+                </div>
+                <label>Troubleshooting:</label>
+                <div>
+                    <button type="button">Reset</button>
+                    <button class="red" type="button">Format</button>
+                </div>
+            </form>
+        </div>
+        <p>
+            This panel allows listing and manual changes to the entire SD card. Configuration files can be manually edited and playlists managed manually. Do not use unless you really know what you are doing!
+        </p>
+        <div class="panel twelve" id="expert-ls">
+            <div class ="header">
+                <h3 id="expert-ls-title">SD Card Contents</h3>
+                <div class="buttons">
+                    <button id = "expert-ls-open">Open</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+  </body>
+</html>

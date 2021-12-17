@@ -861,7 +861,7 @@ async function save_alarm() {
         fri : getOnOffValue("alarm-fri"),
         sat : getOnOffValue("alarm-sat"),
         sun : getOnOffValue("alarm-sun"),
-        file : await getAndCheckExistingFile("alarm-file", getOnOffValue("alarm"))
+        file : await getAndCheckExistingFile("alarm-file", getOnOffValue("alarm-enabled"))
     };
     await checkFormValidAndSend(stuff, ALARM_FILE);
     sendCommand("reload_alarm");
@@ -892,7 +892,7 @@ async function save_greeting() {
             enabled : getOnOffValue(`greeting-${i}-enabled`),
             d : getAndCheckInputNumber(`greeting-${i}-d`, 1, 31),
             m : getAndCheckInputNumber(`greeting-${i}-m`, 1, 12),
-            file : await getAndCheckExistingFile(`greeting-${i}-file`, getOnOffValue(`greeting-${i}`))
+            file : await getAndCheckExistingFile(`greeting-${i}-file`, getOnOffValue(`greeting-${i}-enabled`))
         };
         stuff.push(alarm);
     }
@@ -911,7 +911,7 @@ async function save_greeting() {
      if (json) {
         for (let i = 0; i < 8; i++) {
             {
-                let l = LABEL({ innerText : `${i + 1}`});
+                let l = LABEL({ innerText : `${i + 1}:`});
                 form.appendChild(l);
                 let d = DIV();
                 let input = INPUT({ id :  `playlist-${i}`, type : "text",  value : json[i].name});
@@ -919,7 +919,6 @@ async function save_greeting() {
                 d.append(" (name) ");
                 let btnEnabled = BUTTON({ id : `playlist-${i}-enabled`, innerText : "Enabled"});
                 let btnEdit = BUTTON({ innerText : "Edit" });
-                btnEdit.innerText = "Edit";
                 btnEdit.onclick = async (event) => {
                     event.preventDefault();
                     await openDir("playlist-edit", ["/", `${i + 1}`], `Playlist ${json[i].name}`);
@@ -1116,6 +1115,7 @@ function onLoad() {
             <a id="nav-radio" onclick="navSelect('radio')">Radio</a>
             <a id="nav-wt" onclick="navSelect('wt')">Walkie-Talkie</a>
             <a id="nav-expert" onclick="navSelect('expert')">Expert</a>
+            <a href="docs/index.html">Help</a>
         </div>
         <div class="notifications" id="notifications">
         </div>       

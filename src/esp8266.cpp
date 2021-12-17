@@ -138,6 +138,10 @@ public:
         walkieTalkieMode_.initialize();
         send(msg::LightsBar{7, 8, adjustBrightness(DEFAULT_COLOR)});
         initializeSettings();
+        LOG("Radio enabled: %u", status_.radioEnabled);
+        LOG("Disco enabled: %u", status_.discoEnabled);
+        LOG("Lights enabled: %u", status_.lightsEnabled);
+        LOG("Walkie-Talkie enabled: %u", status_.walkieTalkieEnabled);
         alarmMode_.initialize();
         // store the extended state as it was updated by the SD card
         sendExtendedState(ex_);
@@ -243,6 +247,7 @@ private:
             status_.timezone = json["timezone"];
             status_.maxBrightness = json["maxBrightness"];
             status_.radioEnabled = json["radioEnabled"];
+            status_.discoEnabled = json["discoEnabled"];
             status_.lightsEnabled = json["lightsEnabled"];
             status_.walkieTalkieEnabled = json["walkieTalkieEnabled"];
             status_.syncHour = json["syncHour"];
@@ -316,6 +321,8 @@ public:
             // decrement server activity counter
             if (serverActive_ > 0)
                 --serverActive_;
+            // reset AVR's watchdog so that ESP won't die
+            send(msg::AVRWatchdogReset{});
         }
         if (status_.irq)
             status_.recording ? updateRecording() : updateState();
@@ -937,8 +944,7 @@ private:
         LOG("Initializing WebServer...");
         if (!MDNS.begin("mp3-player"))
             LOG("  mDNS failed to initialize");
-        server_.onNotFound(http404);
-        server_.serveStatic("/", LittleFS, "/index.min.html");
+        server_.onNotFound(httpStaticHandler);
         server_.on("/cmd", httpCommand);
         server_.on("/status", httpStatus);
         server_.on("/sdls", httpSDls);
@@ -971,6 +977,50 @@ private:
 
     static void http404() {
         server_.send(404, "text/json","{ \"response\": 404, \"uri\": \"" + server_.uri() + "\" }");
+    }
+
+    static void httpStaticHandler() {
+        LOG("Static handler for %s", server_.uri().c_str());
+        if (server_.uri() == "/")
+            httpServeFile("index.min.html", HTML_MIME);
+        else 
+            httpServeFile(server_.uri().c_str(), httpDetermineMimetype(server_.uri()));
+    }
+
+    static char const * httpDetermineMimetype(String const & path) {
+        if (path.endsWith("mp3"))
+            return MP3_MIME;
+        else if (path.endsWith("json"))
+            return JSON_MIME;
+        else if (path.endsWith("css"))
+            return CSS_MIME;
+        else if (path.endsWith("html"))
+            return HTML_MIME;
+        else
+            return GENERIC_MIME;
+
+    }
+
+    static void httpServeFile(char const * path, char const * mimetype) {
+        LOG("Serving file %s (mime: %s)", path, mimetype);
+        File f = LittleFS.open(path, "r");
+        if (!f || !f.isFile()) {
+            return http404();
+        } else {
+            server_.streamFile(f, mimetype);
+            f.close();
+        }
+    }
+
+    static void httpServeFileSD(char const * path, char const * mimetype) {
+        LOG("Serving file (SD) %s (mime: %s)", path, mimetype);
+        File f = SD.open(path, FILE_READ);
+        if (!f || !f.isFile()) {
+            return http404();
+        } else {
+            server_.streamFile(f, mimetype);
+            f.close();
+        }
     }
 
     static void httpCommand() {
@@ -1076,16 +1126,8 @@ private:
     static void httpSD() {
         String const & path = server_.arg("path");
         LOG("http sd: %s", path.c_str());
-        File f = SD.open(path.c_str(), FILE_READ);
-        if (!f || !f.isFile())
-            return http404();
-        char const * mime = GENERIC_MIME;
-        if (path.endsWith("mp3"))
-            mime = MP3_MIME;
-        else if (path.endsWith("json"))
-            mime = JSON_MIME;
-        server_.streamFile(f, mime);
-        f.close();
+
+        httpServeFileSD(path.c_str(), httpDetermineMimetype(path));
     }
 
     static void httpSDUpload() {
@@ -1137,6 +1179,8 @@ private:
     static inline char const * GENERIC_MIME = "text/plain";
     static inline char const * MP3_MIME = "audio/mp3";
     static inline char const * JSON_MIME = "text/json";
+    static inline char const * CSS_MIME = "text/css";
+    static inline char const * HTML_MIME = "text/html";
     static inline char const * WAV_MIME = "audio/wav";
         
     //@}
@@ -1622,6 +1666,8 @@ ESPMode * WalkieTalkieMode::enter(ESPMode * prev) {
 void WalkieTalkieMode::leave(ESPMode * next) {
     Player::stopPlayback();
     Player::disconnectWiFi();
+    // this might be necessary if the player still acts up weird after going back from the server mode
+    //ESP.restart();
 }
 
 void WalkieTalkieMode::loop(bool secondTick) {

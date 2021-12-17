@@ -11,14 +11,13 @@
 
 # SW
 
+- radio stations enabled/disabled?
 - check the default amplification on real settings
 - getting ESP to wt mode causes problems sometimes (observed only on yellow so far)
 
 ## Webserver
 
-- check alarm can be saved, files can be downloaded, check status shows time too
-- add authentication, at least rudimentary?
-- add doctext? 
+- add ESP reset command
 
 ## Disco Mode
 

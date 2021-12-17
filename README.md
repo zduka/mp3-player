@@ -6,7 +6,7 @@ The player can be controlled via two push-button knobs and more advanced setting
 
 For a "user manual" see the documentation, this readme is for technical information only. 
 
-![Finished player](image docs/images/finished.jpg "Finished Players")
+![Finished player](https://github.com/zduka/mp3-player/blob/master/docs/images/finished.jpg)
 
 # Software
 
@@ -55,7 +55,7 @@ Solder the microphone board. First the IC, then all SMT parts and finally the mi
 
 Solder the antenna wire. 
 
-![Internals](image docs/images/internals.jpg "Internals")
+![Internals](https://github.com/zduka/mp3-player/blob/master/docs/images/internals.jpg)
 
 ### Final Assembly
 
