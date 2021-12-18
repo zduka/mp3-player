@@ -625,6 +625,11 @@ async function openDir(panel, path, title, allowEdit) {
         d.appendChild(upload);
         row.appendChild(d);
         table.appendChild(row);
+        file.onchange = () => {
+            if (fname.value == "") {
+                fname.value = file.files[0].name;
+            }
+        }
         upload.onclick = async (event) => {
             event.preventDefault();
             await uploadFile(joinPath(pathStr, fname.value), file);
