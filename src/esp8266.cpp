@@ -323,6 +323,9 @@ public:
                 --serverActive_;
             // reset AVR's watchdog so that ESP won't die
             send(msg::AVRWatchdogReset{});
+            // update NTP time a few seconds after successful WiFi connection
+            if (status_.checkTime > 0 && --status_.checkTime == 0 && state_.wifiStatus() == WiFiStatus::Connected)
+                updateNTPTime();
         }
         if (status_.irq)
             status_.recording ? updateRecording() : updateState();
@@ -882,6 +885,8 @@ private:
         LOG("WiFi: IP assigned: %s, gateway: %s", e.ip.toString().c_str(), e.gw.toString().c_str());
         state_.setWiFiStatus(WiFiStatus::Connected);
         send(msg::SetWiFiStatus{WiFiStatus::Connected});
+        // wait 7 seconds and then check time (checking time here usually led to errors)
+        status_.checkTime = 7;
     }
 
     /** TODO what to do when the wifi disconnects, but we did not initiate it? 
@@ -1080,6 +1085,8 @@ private:
         );
         server_.send(200, JSON_MIME, buf, len);
         serverActive_ = HTTP_STATUS_BUSY_TIMEOUT * 60; 
+        // when status is served, reset power off counter so that as long as a web ui is active the player won't turn off
+        send(msg::SetIdle(true, DEFAULT_PLAY_TIMEOUT));
     }
 
     /** Lists a directory on the SD card and returns its contents in a JSON format. 
@@ -1209,6 +1216,8 @@ private:
         bool dualPlayback : 1;
         bool recording : 1;
         bool updateMessages : 1;
+
+        uint8_t checkTime : 3;
 
     } status_;
 
