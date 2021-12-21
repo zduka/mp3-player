@@ -1295,6 +1295,8 @@ void MP3Mode::leave(ESPMode * next) {
 void MP3Mode::playbackFinished() {
     if (state().trackId + 1 < playlists_[state().playlistId].numTracks) {
         setTrack(state().trackId + 1);
+        // make sure the control value moves to the next track as well
+        Player::setControlRange(state().trackId, playlists_[state().playlistId].numTracks);
     } else {
         Player::stopMP3();
         Player::setIdle(true);
@@ -1418,8 +1420,8 @@ void MP3Mode::setTrack(uint16_t index) {
                     snprintf_P(filename, sizeof(filename), PSTR("%u/%s"), playlists_[state().playlistId].id, f.name());
                     f.close();
                     LOG("Track %u, file: %s", index, filename);
-                    Player::playMP3(filename);
                     state().trackId = index;
+                    Player::playMP3(filename);
                     Player::sendExtendedState(state());
                     return;
                 } else {
@@ -1456,7 +1458,6 @@ void RadioMode::controlPress() {
 void RadioMode::controlTurn() {
     if (Player::idle())
         play();
-
     Player::send(msg::LightsPoint{Player::state_.controlValue(), RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN, adjustBrightness(MODE_COLOR_RADIO)});
     setRadioFrequency(Player::state_.controlValue() + RADIO_FREQUENCY_MIN);
 }
@@ -1527,16 +1528,19 @@ void RadioMode::pause() {
 void RadioMode::setRadioFrequency(uint16_t mhzx10) {
     LOG("Radio frequency: %u", mhzx10);
     state().frequency = mhzx10;
-    radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
     Player::sendExtendedState(state());
+    radio_.setBandFrequency(RADIO_BAND_FM, mhzx10 * 10);            
+    // update control range accordingly
+    Player::setControlRange(state().frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
+
 }
 
 void RadioMode::setRadioStation(uint8_t index) {
     LOG("Radio station: %u", index);
     state().stationId = index;
     state().frequency = radioStations_[index];
-    radio_.setBandFrequency(RADIO_BAND_FM, state().frequency * 10);
     Player::sendExtendedState(state());
+    radio_.setBandFrequency(RADIO_BAND_FM, state().frequency * 10);
     Player::setControlRange(state().frequency - RADIO_FREQUENCY_MIN, RADIO_FREQUENCY_MAX - RADIO_FREQUENCY_MIN);
 }
 
